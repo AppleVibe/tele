@@ -41,6 +41,7 @@ settings → tele → interface.
 | [259](../patches/tdesktop/0259-feat-lowercase-the-default-title-bar-label.patch) | the title bar label is `tele #N` by default instead of `TELE #N` | with 10 |
 | [266](../patches/tdesktop/0266-feat-smaller-minimum-window-size.patch) | the window can be made as small as 256x256 instead of 380x480 | tele → interface, off |
 | [277](../patches/tdesktop/0277-feat-smooth-wheel-scrolling.patch) | each mouse wheel step glides instead of jumping in chats, the chat list, sections, boxes and settings, like profiles already do. touchpads are unchanged | tele → interface, off |
+| [310](../patches/tdesktop/0310-feat-compact-icon-only-folders.patch) | folders shown as icons only get smaller icons and buttons, in the side bar and in the tabs above the chat list | tele → interface, off |
 | [1005](../patches/Telegram/lib_ui/0005-feat-ease-mouse-wheel-steps-in-scroll-areas.patch) | the part of smooth wheel scrolling that lives in the ui library's scroll areas | with 277 |
 
 ## chats
@@ -76,6 +77,7 @@ settings → tele → chats.
 | [271](../patches/tdesktop/0271-feat-select-more-than-100-messages.patch) | select up to 10000 messages instead of 100; deleting and forwarding them goes out in parts of 100 | tele → chats, off |
 | [283](../patches/tdesktop/0283-feat-hide-birthday-banners-and-effects.patch) | no birthday banners above the chat list, no confetti in profiles, no cake in the birthday row and no extra gift button in the message field on birthdays | tele → chats, off |
 | [285](../patches/tdesktop/0285-feat-filter-chat-search-by-message-type.patch) | search a chat by message type: photos, videos, files, music, voice messages, round videos, gifs or links. without text it lists every message of that type | tele → chats, off |
+| [292](../patches/tdesktop/0292-feat-turn-off-money.patch) | turn off money, telegram's wallet: it's gone from the app, ton connect requests can't be opened, money transfers in chats show as plain service messages, and money links only say it's off | tele → chats, off, needs a restart |
 
 ## messages
 
@@ -114,6 +116,7 @@ settings → tele → messages.
 | [274](../patches/tdesktop/0274-feat-classic-text-padding-in-bubbles.patch) | bubbles without tails can use the text padding of older telegram desktop: 13 px on the sides and 7 on top | with 269 |
 | [280](../patches/tdesktop/0280-fix-rewrite-tiktok-links-to-tnktok-now-that-vxtiktok.patch) | tiktok links are rewritten to tnktok.com: vxtiktok.com shut down, so the preset and rules you already saved no longer use it | with 77 |
 | [287](../patches/tdesktop/0287-feat-keep-deleted-chats-and-topics.patch) | chats and topics that get deleted, or that you leave or get removed from, stay in the list with their loaded messages until you delete them again | with 19 |
+| [296](../patches/tdesktop/0296-feat-add-samekosabax-to-the-x-link-rewrites.patch) | the x preset of link rewrites can also rewrite to samekosabax.com, and its links lose x's tracking parameters too | with 77 |
 
 ## sending
 
@@ -170,6 +173,7 @@ settings → tele → notifications.
 | [239](../patches/tdesktop/0239-fix-notification-centre-shows-whole-entries.patch) | the notification centre shows whole entries, long ones with show more, and plays the press ripple | with 205 |
 | [240](../patches/tdesktop/0240-feat-copied-values-in-the-notification-centre.patch) | copy toasts are logged in the notification centre with the copied value: click it to copy it again | tele → notifications, on |
 | [246](../patches/tdesktop/0246-feat-reply-and-mention-badges-in-the-notification-ce.patch) | replies and mentions in the notification centre have a reply or @ badge on the sender's userpic | with 232 |
+| [306](../patches/tdesktop/0306-fix-space-out-the-buttons-in-the-notification-centre.patch) | the buttons of a notification centre entry have space between them | with 205 |
 
 ## menus
 
@@ -192,6 +196,8 @@ settings → tele → menus.
 | [255](../patches/tdesktop/0255-feat-copy-file-paths-from-the-message-menu.patch) | copy the full path of a downloaded file from its message menu | tele → menus, off |
 | [256](../patches/tdesktop/0256-feat-turn-on-a-menu-item-from-the-menu-editor.patch) | in the menu editor, clicking the eye on a greyed item turns on the setting it needs, and the hint saying which one is readable | with 171 |
 | [276](../patches/tdesktop/0276-fix-sharp-boost-icons-and-button-emoji-in-scaled-sho.patch) | shots scaled up keep boost icons and custom emoji in bot buttons sharp | with 105 |
+| [304](../patches/tdesktop/0304-feat-take-menus-out-of-beta.patch) | the menus page is no longer marked beta | with 171 |
+| [311](../patches/tdesktop/0311-feat-remove-all-your-messages-from-a-chat.patch) | remove my messages in the chat menu deletes all your messages in a chat, group or topic for everyone, newest first, after saying how many. the same item stops it | tele → menus, off |
 | [1004](../patches/Telegram/lib_ui/0004-fix-icon-emoji-stay-sharp-in-renders-at-a-higher-rat.patch) | icons drawn inside text, like the boost mark next to names, stay sharp in shots scaled up | with 105 |
 
 ## privacy
@@ -216,6 +222,7 @@ settings → tele → privacy.
 | [227](../patches/tdesktop/0227-feat-show-pending-ghost-scheduled-messages.patch) | messages ghost mode holds back to send later show in the chat: right-click one to send it now or cancel it | tele → privacy, on |
 | [228](../patches/tdesktop/0228-feat-ignored-users-and-hidden-words-can-stay-silent.patch) | messages from ignored users and with hidden words don't notify or count as unread, and the chat list doesn't preview them | tele → privacy, on |
 | [229](../patches/tdesktop/0229-fix-invisible-stories-follow-ghost-settings-and-surv.patch) | watching stories invisibly follows per-chat ghost settings, keeps who you watched across restarts, and asks before a live story, which shows you to its author | with 4 |
+| [301](../patches/tdesktop/0301-fix-closing-the-rich-editor-keeps-drafts-on-this-dev.patch) | closing the rich message editor saves its draft on this device and closes, when drafts stay on this device and in secret chats, instead of trying the cloud | with 94 |
 
 ## profiles and ids
 
@@ -254,6 +261,7 @@ settings → tele → profiles and ids.
 | [267](../patches/tdesktop/0267-feat-show-when-media-was-uploaded-in-the-media-viewe.patch) | the media viewer shows when a photo or file was uploaded, when that differs from the message date, like in forwards | tele → profiles and ids, off |
 | [268](../patches/tdesktop/0268-feat-copy-the-owner-id-of-sticker-sets.patch) | copy the id of the account that made a sticker or emoji set from the set's menu | tele → profiles and ids, off |
 | [286](../patches/tdesktop/0286-feat-peek-at-a-hidden-last-seen.patch) | peek at a last seen your own privacy hides: tele briefly shares yours with that person, reads theirs and puts your settings back, even after a crash | tele → profiles and ids, off |
+| [309](../patches/tdesktop/0309-feat-use-the-blurred-profile-photo-as-the-profile-ba.patch) | profiles use a blurred, darkened copy of the profile photo as the background of their header, instead of the profile colour or gift backdrop | tele → profiles and ids, off |
 
 ### gift studio
 
@@ -286,6 +294,12 @@ settings → tele → debug.
 | [275](../patches/tdesktop/0275-feat-fix-fonts-picked-in-chat-settings.patch) | a font picked in chat settings that comes out shifted or cut off, like google sans, can be measured by its real letters and drawn through directwrite, which reads the line heights such fonts mean (windows) | tele → debug, off, needs a restart |
 | [281](../patches/tdesktop/0281-feat-turn-on-the-wallet-before-telegram-does.patch) | the wallet from telegram desktop 7.3 can be turned on before telegram enables it for your account. the server may still refuse it | tele → debug, off, needs a restart |
 | [288](../patches/tdesktop/0288-feat-secret-chats-prototype.patch) | a secret chats prototype, ported from [freshGram](https://github.com/Snowy-Fluffy/freshGram): start and accept secret chats with text, replies, typing and read marks, and compare encryption keys. needs a local passcode, no media or timers yet | tele → debug, off, needs a restart |
+| [289](../patches/tdesktop/0289-feat-update-the-secret-phrase-of-wallets-without-a-b.patch) | a wallet without a backup gets an update secret phrase button in keys & backup: you write down new words, the old ones stop working and the network takes a small fee | tele → debug, off |
+| [291](../patches/tdesktop/0291-feat-send-while-an-old-wallet-stays-on-this-device.patch) | keep using your wallet while the keys of a wallet you used before stay on this device, instead of having to remove them first. only when this device also holds your current wallet's key | tele → debug, off |
+| [297](../patches/tdesktop/0297-fix-secret-chats-keep-their-partner-s-name-after-a-r.patch) | secret chats keep their partner's name after a restart and pick up the new one when it changes | with 288 |
+| [298](../patches/tdesktop/0298-feat-media-in-secret-chats.patch) | secret chats send and receive photos, videos, files, music, voice and round messages, gifs and stickers up to 100 mb, and show locations and contacts they receive | with 288 |
+| [299](../patches/tdesktop/0299-feat-self-destruct-timers-in-secret-chats.patch) | set a self-destruct timer in a secret chat from the button in the message field or the chat menu: messages disappear for both of you after they're read. timed photos and videos open while you hold them, and screenshots are announced | with 288 |
+| [308](../patches/tdesktop/0308-feat-open-the-mtproto-inspector-and-console-as-panel.patch) | the mtproto inspector and console open as tele panels, like the money window, that can be resized and keep the keyboard focus in their page | with 88 |
 | [1003](../patches/Telegram/lib_ui/0003-feat-let-picked-fonts-use-their-real-metrics-on-wind.patch) | the part of the picked font fix that lives in the ui library | with 275 |
 
 ## server
@@ -404,5 +418,45 @@ always on, or without a switch of their own.
 | [278](../patches/tdesktop/0278-feat-badges-on-forwarded-and-reply-headers.patch) | with badges next to sender names on, forwarded from headers and the names above replies show the custom verification icon and the checkmark too | with 12 |
 | [279](../patches/tdesktop/0279-feat-select-table-cells-as-a-range.patch) | drag from one table cell to another to select whole cells as a rectangle, like in a spreadsheet. copying them pastes into excel or sheets as a grid | always on |
 | [282](../patches/tdesktop/0282-feat-turn-username-into-a-t.me-link-in-rich-message-.patch) | in the rich message editor, a button link written as @username becomes a t.me link | with 86 |
+| [290](../patches/tdesktop/0290-feat-copy-links-to-wallet-transactions.patch) | right-click a transaction in the money window to copy its link or open it in the explorer. transaction and address links open on tonscan.org | always on |
+| [293](../patches/tdesktop/0293-feat-say-that-the-money-passcode-is-tele-s-passcode.patch) | the money passcode option says it's tele's local passcode, which only locks tele at startup when lock app is on | always on |
+| [294](../patches/tdesktop/0294-feat-dim-every-other-address-group-like-ios.patch) | wallet addresses show as lines of four groups with every other group dimmed, like on ios, so they're easier to check | always on |
+| [295](../patches/tdesktop/0295-fix-clicking-another-collage-item-switches-the-open-.patch) | clicking another photo or video of an album while the media viewer shows one of them switches the viewer to it | always on |
+| [300](../patches/tdesktop/0300-fix-double-click-selects-words-in-service-messages-a.patch) | double-click selects a word in service messages, and the comment of a money transfer can be selected in its details | always on |
+| [302](../patches/tdesktop/0302-fix-dismissing-the-draft-save-box-no-longer-blocks-c.patch) | dismissing the box that saves the draft when you close the rich message editor no longer stops the editor from closing afterwards | always on |
+| [303](../patches/tdesktop/0303-feat-copy-the-text-of-service-messages.patch) | right-click a service message, like a join, a pin or a gift, to copy its text | always on |
+| [305](../patches/tdesktop/0305-feat-copy-and-open-transaction-links-from-money-tran.patch) | right-click a money transfer message in a chat to copy its transaction link or open it in the explorer | always on |
+| [307](../patches/tdesktop/0307-feat-resize-the-money-window.patch) | the money window can be resized, its content stays in a column in the middle | always on |
 | [1001](../patches/Telegram/lib_ui/0001-fix-fullscreen-mini-apps-cover-the-screen-with-their.patch) | a mini app that opens in fullscreen covers the screen from its corner, with its ⋮ and ✕ buttons, instead of hanging off the screen (windows) | always on |
 | [1002](../patches/Telegram/lib_ui/0002-fix-unbreakable-characters-no-longer-scroll-text-fie.patch) | a text field with a long run of characters that can't wrap no longer scrolls sideways and hides everything else | always on |
+| [1006](../patches/Telegram/lib_ui/0006-fix-the-maximize-button-follows-the-real-window-stat.patch) | the maximize button of a window shows and does the right thing after resizing or moving the window drops its maximized or full screen state | always on |
+
+## other
+
+everything else.
+
+| # | what it does | toggle |
+|---|---|---|
+| [312](../patches/tdesktop/0312-feat-scripting-prototype.patch) | tele runs scripts: typescript or javascript files in a scripts folder that can call any telegram method, watch every update and change requests on their way. each script is off until you turn it on, and tele asks you, in plain words, before it gets any grant. everything a script can do is in the [scripting reference](scripting.md) | tele → scripts β, off |
+| [313](../patches/tdesktop/0313-feat-scripting-typings-and-permissions.patch) | tele writes typings for every telegram method and type next to your scripts, so editors complete and check them, and a script only gets the grants it declares | with 312 |
+| [314](../patches/tdesktop/0314-feat-scripting-storage-peers-and-helpers.patch) | scripts can keep their own data on this device and look up the chats and users tele already knows | with 312 |
+| [315](../patches/tdesktop/0315-feat-scripts-tab-and-repl-in-the-mtproto-console.patch) | the mtproto console gets a scripts tab with your scripts and their logs, and an editor that runs code against your account right away | with 312 |
+| [316](../patches/tdesktop/0316-feat-inspectable-values-and-a-playground-layout-in-t.patch) | results in the console's script editor unfold like in a browser's devtools, and the editor and its output sit side by side | with 312 |
+| [317](../patches/tdesktop/0317-feat-inu-style-grants-async-interception-and-account.patch) | scripts declare grants like inugram plugins and can hold a request or an update while they decide what to do with it. no script can log in or out, touch your sessions or password, or read login codes | with 312 |
+| [318](../patches/tdesktop/0318-feat-high-level-account-api-messages-and-events-for-.patch) | scripts get simple ways to read chats and history, send, edit, delete, forward and react to messages, and to hear about new, edited and deleted ones | with 312 |
+| [319](../patches/tdesktop/0319-feat-files-send-interception-and-dialogs-for-scripts.patch) | scripts can download and upload files, check or rewrite your messages before they go out, and ask you things in tele's own boxes | with 312 |
+| [320](../patches/tdesktop/0320-feat-menu-actions-and-settings-pages-for-scripts.patch) | scripts can add items to the message, chat and profile menus and get a settings page of their own | with 312 |
+| [321](../patches/tdesktop/0321-feat-compose-commands-for-scripts.patch) | scripts can add /commands, which show up among the suggestions when you type a slash | with 312 |
+| [322](../patches/tdesktop/0322-feat-local-ghost-messages-for-scripts.patch) | scripts can show messages that exist only on this device and never reach telegram | with 312 |
+| [323](../patches/tdesktop/0323-feat-local-peer-overrides-for-scripts.patch) | scripts can change how users and chats look on this device: name, color, emoji status, premium star and verification marks | with 312 |
+| [324](../patches/tdesktop/0324-feat-lift-script-caps-on-menus-commands-dialogs-toas.patch) | scripts have no limit on menu items, commands, boxes and toasts, and can watch every request with one grant. power is gated by the grants you approve, not by caps | with 312 |
+| [325](../patches/tdesktop/0325-feat-message-decorations-a-message-cache-and-events-.patch) | scripts can put badges and highlights on messages, read messages tele has already loaded, and see the messages you send yourself | with 312 |
+| [326](../patches/tdesktop/0326-feat-navigation-compose-field-shortcuts-and-link-and.patch) | scripts can open chats and profiles, read and change the text you're typing, add keyboard shortcuts, and check links and notifications before tele opens or shows them | with 312 |
+| [327](../patches/tdesktop/0327-fix-scripts-never-activate-an-account-to-find-its-wi.patch) | a script on another account no longer switches your window to that account when it shows something | with 312 |
+| [328](../patches/tdesktop/0328-feat-buttons-profile-rows-file-dialogs-input-rows-an.patch) | scripts can add buttons to the chat header and next to the message field, rows to profiles, text fields to their settings pages and buttons to their toasts, and open or save files when you pick them | with 312 |
+| [329](../patches/tdesktop/0329-feat-script-notices-in-the-notification-centre.patch) | scripts can post to the notification centre, which gets a scripts tab and a switch for them in its settings | with 312 |
+| [330](../patches/tdesktop/0330-feat-name-badges-message-footers-and-chat-list-overr.patch) | scripts can put badges next to names, add a line under messages, and change a chat's label, preview and badge in the chat list or hide it there | with 312 |
+| [331](../patches/tdesktop/0331-feat-scripts-manager-panel-local-data-settings-scrip.patch) | tele → scripts β opens a scripts manager: search, filters, and a page per script with its switch, settings, grants, storage and log. scripts can also read tele's local data and settings, talk to each other, react to the connection and to sleep, and send big files | with 312 |
+| [332](../patches/tdesktop/0332-feat-app-and-system-APIs-menu-items-settings-section.patch) | scripts can recolor the theme, set the window title and badge, control the music player and calls, switch accounts, add items to the main and tray menus, settings sections and quick buttons next to messages, and, if you allow it, run programs | with 312 |
+| [333](../patches/tdesktop/0333-feat-a-widget-layer-inline-result-interception-and-a.patch) | scripts can read and change anything in tele's windows, like adding rows to the gift box, and check inline bot results before they're sent. a script's page and its log open over the scripts list, so the list stays where you left it | with 312 |
+| [1007](../patches/Telegram/lib_ui/0007-feat-let-scripts-swap-label-texts-and-find-full-widt.patch) | text a script changed in tele's windows comes back exactly as it was, formatting and custom emoji included, when the script stops, and rows a script adds to info tables stay above their last full-width line | with 312 |
