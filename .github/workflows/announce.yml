@@ -1,0 +1,52 @@
+name: Announce
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: published release to announce, e.g. v7.3.1-tele.20
+        required: true
+      previous:
+        description: the release it's compared with, e.g. v7.3.0-tele.19
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    name: Announce
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+      PREVIOUS_TAG: ${{ inputs.previous }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          path: tele
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Announce
+        env:
+          BOT_TOKEN: ${{ secrets.TELE_BOT_TOKEN }}
+          CHANNEL: ${{ secrets.TELE_CHANNEL }}
+        run: |
+          if [ -z "$BOT_TOKEN" ] || [ -z "$CHANNEL" ]; then
+            echo "::error::no TELE_BOT_TOKEN / TELE_CHANNEL secrets"
+            exit 1
+          fi
+          python3 tele/ci/announce.py --repo tele --tag "$TAG" --previous "$PREVIOUS_TAG" --upstream "${TAG%-tele.*}" \
+            --url "$GITHUB_SERVER_URL/$GH_REPO"
+
+      - name: Notify
+        if: always()
+        continue-on-error: true
+        env:
+          NOTIFY_TOKEN: ${{ secrets.TELE_BOT_TOKEN }}
+          NOTIFY_CHAT: ${{ secrets.TELE_NOTIFY_CHAT }}
+          STATUS: ${{ job.status }}
+        run: |
+          bash tele/ci/notify.sh "tele ${TAG##*.} announced: $GITHUB_SERVER_URL/$GH_REPO/releases/tag/$TAG" "tele ${TAG##*.}: announcing failed"
