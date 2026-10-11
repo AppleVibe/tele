@@ -7,10 +7,10 @@ description: Write, fix and explain scripts for tele (a Telegram Desktop fork) i
 
 tele runs scripts: small TypeScript or JavaScript files that live in a folder, start when you switch them on, and can do anything tele itself can do. a script talks to telegram through the raw api (any method, any update, middleware around tele's own requests), reads and changes tele's local data and settings, adds its own commands, buttons, menu items, settings pages and notices, and reaches into any window through the widget layer. power is never cut down; it's gated by grants, which tele asks you to confirm in plain words before a script starts.
 
-this page is the complete reference. every function, getter, property, type, event, grant and global has its own entry with its signature (copied from the `tele.d.ts` tele writes into your scripts folder), what it does, the grant it needs, its parameters, what it returns, what it throws, and an example. the same file is the `SKILL.md` you can give an ai agent so it writes scripts for you.
+this is the complete reference. every function, getter, property, type, event, grant and global has its own entry with its signature (copied from the `tele.d.ts` tele writes into your scripts folder), what it does, the grant it needs, its parameters, what it returns, what it throws, and an example. on [gettele.app/scripting](https://gettele.app/scripting) it's one page with a filter. for ai agents, [SKILL.md](https://gettele.app/scripting/SKILL.md) is a short index that points to one file per section, so an agent reads only what it needs.
 
 - new here? start with "your first script", then "defineScript" and "grants".
-- looking for a method? use the filter, or search for its name; every `tg.*` member has its own entry.
+- looking for a method? every `tg.*` member has its own entry, named after it.
 - writing something real? the cookbook at the end has complete scripts you can copy.
 
 ## what scripts are
