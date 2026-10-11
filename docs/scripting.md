@@ -988,7 +988,8 @@ a script declares in `grants` everything powerful it may do. you approve the lis
 - **grant:** n/a.
 - **notes:**
   - an entry is a bare name (`'call'`) meaning everything that name allows, or a name with scopes (`'call(messages.getHistory, users.getUsers)'`). `name(*)` is the same as the bare name. names may repeat; scopes add up.
-  - what needs no grant at all: `tg.toast`, `tg.ui` boxes and pages, commands, buttons, menu items, quick actions, shortcuts, `tg.storage`, ghost messages, peer overrides, `tg.decorateMessage`, navigation, reading `tg.options`, the app theme and player state, connection state, `tg.schedule`, `tg.scripts.list`. they change nothing outside this tele or are triggered by you.
+  - what needs no grant at all: `tg.toast`, `tg.ui` boxes and pages, commands, buttons, menu items, quick actions, shortcuts, `tg.storage`, navigation, reading `tg.options`, the app theme and player state, connection state, `tg.schedule`, `tg.scripts.list`. they change nothing outside this tele or are triggered by you.
+  - changing what tele shows you about messages and people (decorations, peer overrides, local messages) changes nothing on the server either, but it needs [`display`](#grant-display): a script could make a message say something it doesn't ("send money to this card") or make a stranger look verified, so tele asks first.
   - the error message names the missing grant, for example `tg.call(users.getUsers) needs the grant 'account.read(peers)'` or `fetch(https://example.com/) needs the grant 'fetch(example.com)'`.
   - whatever the grants say, the [account protection](#account-protection) and the [dangerous methods](#dangerous-methods) rule apply.
 
@@ -1060,6 +1061,8 @@ export type Grant =
   | 'unsafe.exec'
   | 'ui.read'
   | 'ui.write'
+  | 'display'
+  | `display(${Some<'messages' | 'peers' | 'local'>})`
   | 'unsafe.automate'
   | 'unsafe.disableApiFiltering'
 ```
@@ -1094,7 +1097,7 @@ scopes narrow a grant. what a scope may be depends on the grant.
 - **parameters:**
   - methods (`call`, `interceptRpc`): an exact api method name, checked against tele's schema, or a prefix ending in `*` (`messages.*`, `messages.send*`), not checked.
   - updates (`onUpdate`, `interceptUpdate`): an `Update` constructor name or one of the short ones (`updateShortMessage`, `updateShortChatMessage`, `updateShortSentMessage`); `onUpdate` also takes `new_message`, `edit_message` and `delete_message`.
-  - lists (`account.read`, `account.write`): one of the fixed words.
+  - lists (`account.read`, `account.write`, `display`): one of the fixed words.
   - hosts (`fetch`): a host name; lowercased; covers the host and its subdomains.
   - no scope at all: every other grant. `grant '<entry>' takes no scopes` otherwise.
 - **notes:**
@@ -1148,7 +1151,7 @@ every grant has a tier that says how much trust it asks for. the tier is listed 
 - **grant:** n/a.
 - **notes:**
   - neutral: reads and reactions that stay within what a script is for (`onUpdate`, `account.read`, `fetch`, `notify`...).
-  - caution: acting as you or reaching outside tele (`account.write`, `interceptSendMessage`, `clipboard.read`, `options`, `app`, `calls`, `accounts`, `files.write`, `ui.read`, `ui.write`, bare `call`...).
+  - caution: acting as you, reaching outside tele or changing what it shows you (`account.write`, `interceptSendMessage`, `clipboard.read`, `options`, `app`, `calls`, `accounts`, `files.write`, `ui.read`, `ui.write`, `display`, bare `call`...).
   - dangerous: `unsafe.exec`, `unsafe.automate`, `unsafe.disableApiFiltering`, and exact entries for dangerous methods (`call(messages.deleteMessages)`, `interceptRpc(channels.leaveChannel)`).
   - the consent box shows every grant in plain words and puts the dangerous ones in a bold "Dangerous: ..." line at the end.
 
@@ -1172,7 +1175,7 @@ grants: [
 // Dangerous: <dangerous entries>.
 ```
 
-the consent box shows one bullet per grant name, in a fixed order (account.read, account.write, onUpdate, call, interceptRpc, interceptUpdate, interceptSendMessage, fetch, clipboard.read, clipboard.write, openUrl, notify, interceptLink, interceptNotification, scripts, app, interceptDrop, calls, accounts, ui.read, ui.write, files.write, options), then the dangerous line.
+the consent box shows one bullet per grant name, in a fixed order (account.read, account.write, onUpdate, call, interceptRpc, interceptUpdate, interceptSendMessage, fetch, clipboard.read, clipboard.write, openUrl, notify, interceptLink, interceptNotification, scripts, app, interceptDrop, calls, accounts, ui.read, ui.write, display, files.write, options), then the dangerous line.
 
 - **grant:** n/a.
 - **notes:**
@@ -1513,7 +1516,7 @@ lets the script read messages by id, download media and look into tele's message
 - **grant:** `account.read(messages)`.
 - **tier:** neutral.
 - **consent text:** "Read your messages.".
-- **unlocks:** `tg.getMessages`, `tg.downloadMedia` (both forms), `tg.decorateMessages`, `tg.getCachedMessage` (always `null` without it), the `message` field of `tg.interceptNotification`, the cached `previous` of `tg.onMessageEdited` and `messages` of `tg.onMessageDeleted`, and the raw methods `messages.getMessages` and `channels.getMessages`.
+- **unlocks:** `tg.getMessages`, `tg.downloadMedia` (both forms), `tg.decorateMessages` (together with `display(messages)`), `tg.getCachedMessage` (always `null` without it), the `message` field of `tg.interceptNotification`, the cached `previous` of `tg.onMessageEdited` and `messages` of `tg.onMessageDeleted`, and the raw methods `messages.getMessages` and `channels.getMessages`.
 - **throws:** `TeleError` `not-granted` (`tg.downloadMedia needs the grant 'account.read(messages)'`).
 
 Example:
@@ -2230,6 +2233,114 @@ export default defineScript({
     return tg.ui.widgets.observe({ name: /stories/i }, (widget) => {
       widget.setVisible(false)
     })
+  },
+})
+```
+
+### grant: display
+
+```ts
+| 'display'
+```
+
+every `display` scope at once: rewrite or hide messages, change how people and chats look, and show messages that were never sent.
+
+- **grant:** `display`, `display(*)`.
+- **tier:** caution.
+- **consent text:** "Change what you see on this device: rewrite or hide messages, rename people and chats and change their marks, and show messages that were never sent.".
+- **unlocks:** everything in the three scope items below.
+- **notes:**
+  - nothing here reaches the server or other people: it only changes what this tele shows you. that is exactly why it asks: a script could make a message say something it doesn't ("send money to this card"), hide a warning, or make a stranger look verified.
+  - prefer the scopes you need.
+
+Example:
+
+```ts
+grants: ['display']
+```
+
+### grant: display(messages)
+
+```ts
+`display(${Some<'messages' | 'peers' | 'local'>})`
+```
+
+lets the script change how real messages look: shown text, a footer, opacity, hiding them, a badge.
+
+- **grant:** `display(messages)`.
+- **tier:** caution.
+- **consent text:** "Change what you see on this device: messages." (scopes are joined: "Change what you see on this device: messages, chats and contacts.").
+- **unlocks:** `tg.decorateMessages(decorator)` (which also needs `account.read(messages)`, checked after this one) and `tg.decorateMessage(peer, id, decoration)`.
+- **throws:** `TeleError` `not-granted` with `grant` set to `'display(messages)'`: `tg.decorateMessages needs the grant 'display(messages)'` (thrown right away), `tg.decorateMessage needs the grant 'display(messages)'` (a rejection).
+- **notes:**
+  - `tg.getCachedMessage` doesn't need it; reading the cache is `account.read(messages)`.
+
+Example:
+
+```ts
+export default defineScript({
+  name: 'spoiler secrets',
+  grants: ['display(messages)', 'account.read(messages)'],
+  setup(tg) {
+    tg.decorateMessages((message) =>
+      /password/i.test(message.text) ? { text: md`||${message.text}||` } : null)
+  },
+})
+```
+
+### grant: display(peers)
+
+```ts
+`display(${Some<'messages' | 'peers' | 'local'>})`
+```
+
+lets the script change how users, bots, groups and channels look in this tele.
+
+- **grant:** `display(peers)`.
+- **tier:** caution.
+- **consent text:** "Change what you see on this device: chats and contacts.".
+- **unlocks:** `tg.overridePeer(peer, override)`, with every `PeerOverride` field: `name`, `verified`, `scam`, `fake`, `premium`, `botVerification`, `emojiStatus`, `color`, `badge`, `hidden`, `label`, `preview`.
+- **throws:** `TeleError` `not-granted` (a rejection): `tg.overridePeer needs the grant 'display(peers)'`, `grant` is `'display(peers)'`.
+- **notes:**
+  - resolving a marked id or username for `overridePeer` still needs `account.read(peers)`; input peers and `PeerInfo`s you already hold don't.
+
+Example:
+
+```ts
+export default defineScript({
+  name: 'boss badge',
+  grants: ['display(peers)', 'account.read(peers)'],
+  async setup(tg) {
+    await tg.overridePeer('@my_boss', { badge: '👔' })
+  },
+})
+```
+
+### grant: display(local)
+
+```ts
+`display(${Some<'messages' | 'peers' | 'local'>})`
+```
+
+lets the script show local ("ghost") messages: messages and service lines that were never sent and exist only in this tele.
+
+- **grant:** `display(local)`.
+- **tier:** caution.
+- **consent text:** "Change what you see on this device: messages that were never sent.".
+- **unlocks:** `tg.addLocalMessage(chat, options?)`, `localMessage.edit(changes)`, and the `'local'` verdict of `tg.interceptSendMessage`.
+- **throws:** `TeleError` `not-granted` (a rejection), `grant` is `'display(local)'`: `tg.addLocalMessage needs the grant 'display(local)'`, `localMessage.edit needs the grant 'display(local)'`.
+- **notes:**
+  - `tg.localMessages()` and `localMessage.remove()` need nothing: a script can always list and remove its own local messages, persisted ones included.
+  - a `'local'` verdict without it is a fault in the send interceptor, and the send doesn't go out.
+
+Example:
+
+```ts
+export default defineScript({
+  name: 'notes to self',
+  grants: ['display(local)', 'interceptSendMessage'],
+  setup(tg) {
+    tg.interceptSendMessage({ text: /^\/note / }, () => 'local')
   },
 })
 ```
@@ -6465,18 +6576,19 @@ overridePeer(peer: InputPeerLike, override: PeerOverride | null): Promise<Dispos
 
 changes how a user, bot, group or channel looks in this tele only: name, badge, verification marks, premium star, emoji status, name color, and its place in the chat list. the server never hears about it.
 
-- **grant:** none (it changes nothing outside this tele); resolving a marked id or username needs `account.read(peers)`.
+- **grant:** `display(peers)`; resolving a marked id or username needs `account.read(peers)` too.
 - **parameters:**
   - `peer` (`InputPeerLike`): a peer tele has in its cache.
   - `override` (`PeerOverride | null`): the fields to force; absent fields keep the real value. `null` removes this script's override of that peer.
 - **returns:** a promise of a `Disposer` that removes the override.
-- **throws:** `TypeError`: `tg.overridePeer: this peer isn't in tele's cache` (input objects of unknown peers), `tg.overridePeer: an override is an object or null`, `tg.overridePeer: <field> has the wrong type`; `TeleError` `not-found` for unknown marked ids and usernames.
+- **throws:** `TypeError`: `tg.overridePeer: this peer isn't in tele's cache` (input objects of unknown peers), `tg.overridePeer: an override is an object or null`, `tg.overridePeer: <field> has the wrong type`; `TeleError` `not-found` for unknown marked ids and usernames; `TeleError` `not-granted`: `tg.overridePeer needs the grant 'display(peers)'`. all of these reject the promise.
 - **notes:**
   - one override per script per peer: calling again replaces this script's whole previous override (fields aren't merged).
   - several scripts may override one peer; they stack in registration order and later ones win per field.
   - overrides are re-applied after every server update of the peer (users, chats, full info, emoji status updates), and the real values come back exactly when removed.
   - the disposer, `overridePeer(peer, null)` and stopping the script all remove it.
   - `PeerInfo` reads show overrides, so other scripts see them too.
+  - the server and other people never see an override, but it changes what you see, which is why it needs `display(peers)`: a stranger can be made to look verified.
 
 Example:
 
@@ -6510,6 +6622,7 @@ export interface PeerOverride {
 
 the fields `tg.overridePeer` can force. every field is optional; a missing one keeps the real value.
 
+- **grant:** `display(peers)`, for `tg.overridePeer`; every field needs the same grant.
 - **fields:**
   - `name` (`string`, optional): the shown name everywhere. your own local names (set from tele's menu or `tg.tele.localNames`) still win over it.
   - `verified` (`boolean`, optional): the verified check.
@@ -6904,7 +7017,7 @@ registers a middleware for outgoing sends of the given kinds (text by default).
   - order: scripts in folder order, each script's middlewares in registration order. changes carry over to the next middleware; the first `'drop'` wins and nothing after it runs.
   - per-chat queue: while a send is held, later sends to the same chat wait behind it, so they keep their order. other chats aren't delayed.
   - budgets: 200 ms for each synchronous turn, 60 s in total. a throw, a rejection, another return value or running over 60 s is a fault (`took longer than 60 s, the message was not sent`) and the message is not sent.
-  - `'drop'`: the message is gone (for text, the field was already cleared). `'local'`: text only; the send is dropped and the (possibly edited) text becomes a local message in that chat, replying to the same message. `'local'` for any other kind is a fault and nothing is sent. creating the local message reads the chat with `tg.peers.get`, so `'local'` also needs `account.read(peers)`.
+  - `'drop'`: the message is gone (for text, the field was already cleared). `'local'`: text only; the send is dropped and the (possibly edited) text becomes a local message in that chat, replying to the same message. it calls `tg.addLocalMessage`, so `'local'` needs `display(local)`. `'local'` for any other kind, or without `display(local)` (the `not-granted` rejection), is a fault (counted toward the switch-off) and nothing is sent; the typed text is gone like with `'drop'`.
   - after the chain, tele continues as usual with the changed message (its own processing, the local copy, the request); `interceptRpc` middlewares then see the actual request.
   - secret chats are never intercepted. `tg.sendMessage` and other script sends never come here.
   - when the script stops while holding a send, the send goes on as it was.
@@ -7164,7 +7277,7 @@ the answer of a send middleware.
 - **fields:**
   - `'send'`: go on, with your changes.
   - `'drop'`: don't send; nothing after this middleware runs.
-  - `'local'`: text only: don't send, show it as a local message instead (needs `account.read(peers)`).
+  - `'local'`: text only: don't send, show it as a local message instead (needs `display(local)`; without it the verdict is a fault and nothing is sent).
 
 Example:
 
@@ -7224,7 +7337,7 @@ tg.interceptSendMessage(({ message }) => {
 
 ## local messages and decorations
 
-scripts can put messages into chats that exist only in this tele, and change how real messages look, without touching the server. both disappear when the script stops (persisted local messages come back when it starts again).
+scripts can put messages into chats that exist only in this tele, and change how real messages look, without touching the server. both disappear when the script stops (persisted local messages come back when it starts again). both need the [`display`](#grant-display) grant: `display(local)` for local messages, `display(messages)` for decorations.
 
 ### tg.addLocalMessage(chat, options?)
 
@@ -7234,12 +7347,12 @@ addLocalMessage(chat: InputPeerLike, options?: LocalMessageOptions): Promise<Loc
 
 adds a local ("ghost") message to a chat: a real-looking message or service line, from anyone, with any media, that only this tele shows.
 
-- **grant:** none for the message itself (it changes nothing outside this tele), but the chat is looked up with `tg.peers.get`, so the call needs `account.read(peers)`.
+- **grant:** `display(local)`. resolving a marked id, a `Peer` or a username (for `chat` or `from`) needs `account.read(peers)` too; input peers, `PeerInfo`s, `Message`s and `'me'` don't.
 - **parameters:**
   - `chat` (`InputPeerLike`): the chat to put it in.
   - `options` (`LocalMessageOptions`, optional): text, author, date, reply, media, action, opacity, persistence and raw tl fields.
 - **returns:** the `LocalMessage`.
-- **throws:** `TypeError`: `local message: <path>: <problem>` for fields that don't encode (`raw: { date: 'soon' }`), `a local message can't be messageEmpty`, `the message has no chat`, `opacity is a number from 0 to 1` (a non-number opacity), `persisted local messages are over the 16 MB quota`; the peer errors of `InputPeerLike`; `TeleError` `not-granted` without `account.read(peers)`.
+- **throws:** `TypeError`: `local message: <path>: <problem>` for fields that don't encode (`raw: { date: 'soon' }`), `a local message can't be messageEmpty`, `the message has no chat`, `opacity is a number from 0 to 1` (a non-number opacity), `persisted local messages are over the 16 MB quota`; the peer errors of `InputPeerLike`; `TeleError` `not-granted`: `tg.addLocalMessage needs the grant 'display(local)'`. all of these reject the promise; the grant is checked after the chat and `from` are resolved.
 - **notes:**
   - defaults: a message from you (`out: true`, `fromId` you), dated now. in a broadcast channel it's a post (`post: true`, no `fromId`). `out: false` without `from` means from the chat itself.
   - it's placed by `date` among the loaded messages and re-placed whenever tele loads history, like tele's own sending messages. no unread count, no notification; the chat list preview shows it when it's the newest.
@@ -7348,11 +7461,11 @@ edit(changes: Omit<LocalMessageOptions, 'persist'>): Promise<LocalMessage>
 
 changes a local message; the given fields are merged over its current ones and tele redraws it.
 
-- **grant:** as `addLocalMessage` for `from` (resolving peers).
+- **grant:** `display(local)`; resolving a new `from` needs `account.read(peers)` as in `addLocalMessage`.
 - **parameters:**
   - `changes`: any `LocalMessageOptions` except `persist`; `replyTo: null` removes the reply, `opacity` changes the opacity.
 - **returns:** the same `LocalMessage`, updated.
-- **throws:** `TypeError` as `addLocalMessage`; `TypeError: this local message was removed`.
+- **throws:** `TypeError` as `addLocalMessage`; `TypeError: this local message was removed`; `TeleError` `not-granted`: `localMessage.edit needs the grant 'display(local)'`. all of these reject.
 - **notes:** if a persisted message grows over the 16 MB store, the edit is shown but not saved, and a warning is logged.
 
 Example:
@@ -7412,11 +7525,11 @@ decorateMessages(
 
 changes how real messages look in this tele: shown text, a footer, opacity, hiding, a badge. the decorator decides per message.
 
-- **grant:** `account.read(messages)`.
+- **grant:** `display(messages)` and `account.read(messages)`.
 - **parameters:**
   - `decorator` (`(message) => MessageDecoration | null | void`, may be async): gets each message as a `Message`; returns its decoration, or `null` / nothing for none.
 - **returns:** a `Disposer` that removes this decorator's decorations everywhere.
-- **throws:** `TypeError: tg.decorateMessages(function)`; `TeleError` `not-granted`: `tg.decorateMessages needs the grant 'account.read(messages)'`.
+- **throws:** `TeleError` `not-granted`: `tg.decorateMessages needs the grant 'display(messages)'` (checked first), then `TypeError: tg.decorateMessages(function)`, then `TeleError` `not-granted`: `tg.decorateMessages needs the grant 'account.read(messages)'`. all thrown synchronously.
 - **notes:**
   - runs once for every message version tele receives (new messages, loaded history, edits) and, right after registering, over every message tele currently has loaded.
   - async decorators are fine (e.g. translating through `fetch`); the decoration shows when the promise resolves.
@@ -7450,13 +7563,13 @@ decorateMessage(
 
 decorates one message by id, without a decorator function.
 
-- **grant:** none (resolving marked ids and usernames needs `account.read(peers)`).
+- **grant:** `display(messages)` (resolving marked ids and usernames needs `account.read(peers)` too).
 - **parameters:**
   - `peer` (`InputPeerLike`): the chat.
   - `id` (`number`): the message id.
   - `decoration` (`MessageDecoration | null`): the decoration; `null` removes this script's explicit decoration of that message.
 - **returns:** a promise of a `Disposer` that removes it.
-- **throws:** `TypeError: needs a chat and a message id`; `TypeError: tg.decorateMessage: <problem>` for a bad decoration (`a decoration is an object`, `text is a string or { text, entities }`, `footer.entities are wrong: …`, `opacity is a number from 0 to 1`, `hidden is a boolean`, `badge is a string`); the peer errors of `InputPeerLike`.
+- **throws:** `TypeError: needs a chat and a message id`; `TypeError: tg.decorateMessage: <problem>` for a bad decoration (`a decoration is an object`, `text is a string or { text, entities }`, `footer.entities are wrong: …`, `opacity is a number from 0 to 1`, `hidden is a boolean`, `badge is a string`); the peer errors of `InputPeerLike`; `TeleError` `not-granted`: `tg.decorateMessage needs the grant 'display(messages)'`. all of these reject the promise.
 - **notes:** one explicit decoration per script per message: calling again replaces it. it works for messages tele hasn't loaded yet and applies when they appear.
 
 Example:
@@ -7481,6 +7594,7 @@ export interface MessageDecoration {
 
 how a message should look. every field is optional; missing ones keep the real look.
 
+- **grant:** `display(messages)`, for `tg.decorateMessages` and `tg.decorateMessage`.
 - **fields:**
   - `text` (`InputText`, optional): shown instead of the real text in the bubble; entities, `md` and `html` work.
   - `footer` (`InputText`, optional): added under the text as a quote block. it's part of the bubble's text, so selecting all text selects it too.
@@ -12868,8 +12982,8 @@ export default defineScript({
 
 adds "translate" to the message menu. the translation appears under the message as a quote (only in your tele); choosing it again removes it. the target language is set on the settings page.
 
-- **grant:** `fetch(translate.googleapis.com)` for the translation service.
-- **notes:** `tg.decorateMessage` needs no grant and changes nothing on the server: other people never see the translation. the endpoint used is google's public one; swap in any translation api (and its `fetch(...)` grant).
+- **grant:** `fetch(translate.googleapis.com)` for the translation service, `display(messages)` to show the translation under the message.
+- **notes:** `tg.decorateMessage` changes nothing on the server: other people never see the translation. the endpoint used is google's public one; swap in any translation api (and its `fetch(...)` grant).
 
 Example:
 
@@ -12881,7 +12995,7 @@ export default defineScript({
   name: 'quick translate',
   description: 'translate any message in place',
   icon: '🌐',
-  grants: ['fetch(translate.googleapis.com)'],
+  grants: ['fetch(translate.googleapis.com)', 'display(messages)'],
   setup(tg) {
     const languages = ['en', 'de', 'es', 'fr', 'ru', 'uk', 'tr', 'ja']
     let target = tg.storage.get<number>('target') ?? 0

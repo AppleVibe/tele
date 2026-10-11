@@ -2,7 +2,13 @@
 
 every tele patch, grouped by the release that brought it, newest first. [features](features.md) has the same rows grouped by settings page. release notes and the in-app what's new are made from these rows, so their format is strict: see [the patch row](development.md#the-patch-row).
 
-all 340 patches, newest release first.
+all 341 patches, newest release first.
+
+### [tele 21](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.21)
+
+| # | what it does | where to toggle |
+|---|---|---|
+| [334](../patches/tdesktop/0334-feat-ask-before-scripts-change-how-messages-and-peop.patch) | scripts need the new display grant, which tele asks you about, before they change how messages, people and chats look or show messages that were never sent, so a script can't quietly make a message say something it doesn't | with 312 |
 
 ### [tele 20](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.20)
 

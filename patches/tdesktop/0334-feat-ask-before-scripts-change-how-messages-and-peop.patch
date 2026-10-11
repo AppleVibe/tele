@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Sun, 11 Oct 2026 12:22:00 +0300
+Subject: [PATCH] feat: ask before scripts change how messages and people look
+
+---
+ .../tele/scripting/tele_script_box.cpp        |  9 ++++++++
+ .../tele/scripting/tele_script_instance.cpp   | 23 +++++++++++++++++--
+ .../scripting/tele_script_permissions.cpp     |  7 ++++++
+ .../tele/scripting/tele_script_permissions.h  |  1 +
+ .../tele/scripting/tele_script_typings.cpp    |  2 ++
+ 5 files changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_box.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_box.cpp
+index bd12e5ad15d7a8bf9c6075c0aa11da20ceccfad9..a826aefc680d54e7c2bf08eeae7d80a8eebe569b 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_box.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_box.cpp
+@@ -27,6 +27,7 @@ namespace {
+ 		{ "react", u"react"_q },
+ 		{ "read", u"mark chats as read"_q },
+ 		{ "typing", u"show typing"_q },
++		{ "local", u"messages that were never sent"_q },
+ 	};
+ 	const auto i = ranges::find(titles, scope, [](const auto &pair) {
+ 		return pair.first;
+@@ -181,6 +182,14 @@ struct Group {
+ 			QString(),
+ 			QString(),
+ 		},
++		{
++			Capability::Display,
++			Lower(u"Change what you see on this device: rewrite or hide "
++				"messages, rename people and chats and change their marks, "
++				"and show messages that were never sent."_q),
++			Lower(u"Change what you see on this device: %1."_q),
++			QString(),
++		},
+ 		{
+ 			Capability::FilesWrite,
+ 			Lower(u"Save files anywhere on your computer."_q),
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_instance.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_instance.cpp
+index d1fca1aed8e9bbdcce30b7e244143976eeb12a22..d182374ee7491fafd4778bdcbe5e3e03db932da9 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_instance.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_instance.cpp
+@@ -7252,6 +7252,15 @@ JSValue Instance::NativeDecorate(
+ 	const auto readable = instance->_permissions.allows(
+ 		Capability::AccountRead,
+ 		"messages");
++	if (magic != 2
++		&& !instance->_permissions.allows(Capability::Display, "messages")) {
++		return ThrowNotGranted(
++			ctx,
++			(magic == 0)
++				? u"tg.decorateMessages"_q
++				: u"tg.decorateMessage"_q,
++			GrantText(Capability::Display, "messages"));
++	}
+ 	if (magic == 0) {
+ 		if (argc < 1 || !JS_IsFunction(ctx, argv[0])) {
+ 			return JS_ThrowTypeError(ctx, "tg.decorateMessages(function)");
+@@ -7372,9 +7381,13 @@ JSValue Instance::NativePeerOverride(
+ 		JSValueConst self,
+ 		int argc,
+ 		JSValueConst *argv) {
+-	const auto instance = From(ctx);
++	const auto instance = Permitted(
++		ctx,
++		Capability::Display,
++		"peers",
++		"tg.overridePeer");
+ 	if (!instance) {
+-		return JS_ThrowInternalError(ctx, "the script was stopped");
++		return JS_EXCEPTION;
+ 	}
+ 	const auto session = instance->_session;
+ 	const auto id = (argc > 0)
+@@ -7511,6 +7524,12 @@ JSValue Instance::NativeLocal(
+ 	const auto instance = From(ctx);
+ 	if (!instance || !instance->_local) {
+ 		return JS_ThrowInternalError(ctx, "the script was stopped");
++	} else if (magic < 2
++		&& !instance->_permissions.allows(Capability::Display, "local")) {
++		return ThrowNotGranted(
++			ctx,
++			(magic == 0) ? u"tg.addLocalMessage"_q : u"localMessage.edit"_q,
++			GrantText(Capability::Display, "local"));
+ 	}
+ 	const auto local = instance->_local.get();
+ 	if (magic == 3) {
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_permissions.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_permissions.cpp
+index 483a3e763df04dae88cb4aabf9f3c94e67347c8c..8c1ac188e2430d69d7fafaf44aa6a3c364c7162f 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_permissions.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_permissions.cpp
+@@ -116,6 +116,13 @@ const auto kDefinitions = std::vector<Definition>{
+ 	{ Capability::Exec, "unsafe.exec", ScopeKind::None, Tier::Dangerous },
+ 	{ Capability::UiRead, "ui.read", ScopeKind::None, Tier::Caution },
+ 	{ Capability::UiWrite, "ui.write", ScopeKind::None, Tier::Caution },
++	{
++		Capability::Display,
++		"display",
++		ScopeKind::List,
++		Tier::Caution,
++		{ "messages", "peers", "local" },
++	},
+ 	{
+ 		Capability::Automate,
+ 		"unsafe.automate",
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_permissions.h b/Telegram/SourceFiles/tele/scripting/tele_script_permissions.h
+index 9f24e1e87cedb33ca05ee29a2f0b4aa6539b374e..18848bfafc845a95d2e4c5fd814a1a83a2cf8453 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_permissions.h
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_permissions.h
+@@ -31,6 +31,7 @@ enum class Capability : uchar {
+ 	Exec,
+ 	UiRead,
+ 	UiWrite,
++	Display,
+ 	Automate,
+ 	DisableApiFiltering,
+ };
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_typings.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_typings.cpp
+index 8cd23fcd02a406e1159a1437d35ad2c2c128014e..c5afc979b1c89a52689e3d79b0093e8a941fc5f5 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_typings.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_typings.cpp
+@@ -106,6 +106,8 @@ declare module 'tele' {
+     | 'unsafe.exec'
+     | 'ui.read'
+     | 'ui.write'
++    | 'display'
++    | `display(${Some<'messages' | 'peers' | 'local'>})`
+     | 'unsafe.automate'
+     | 'unsafe.disableApiFiltering'
+ 
