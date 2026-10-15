@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Tue, 13 Oct 2026 21:26:29 +0300
+Subject: [PATCH] build: fetch litehtml for html bubbles
+
+---
+ Telegram/CMakeLists.txt                  |  2 +
+ Telegram/cmake/tele_html.cmake           |  1 +
+ Telegram/cmake/tele_html/CMakeLists.txt  | 47 ++++++++++++++++++++++++
+ Telegram/cmake/tele_litehtml_patch.cmake | 40 ++++++++++++++++++++
+ 4 files changed, 90 insertions(+)
+ create mode 100644 Telegram/cmake/tele_html.cmake
+ create mode 100644 Telegram/cmake/tele_html/CMakeLists.txt
+ create mode 100644 Telegram/cmake/tele_litehtml_patch.cmake
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 3aa1e35a39cfc24d55574799264cd855f8d0b84f..ecae7e469c39a83cc87dce256377470f48120631 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -30,6 +30,7 @@ include(cmake/lib_stripe.cmake)
+ include(cmake/lib_tgcalls.cmake)
+ include(cmake/lib_prisma.cmake)
+ include(cmake/lib_quickjs.cmake)
++include(cmake/tele_html.cmake)
+ include(cmake/lib_fido2.cmake)
+ include(cmake/lib_zxcvbn.cmake)
+ include(cmake/td_export.cmake)
+@@ -94,6 +95,7 @@ PRIVATE
+     desktop-app::lib_lottie
+     desktop-app::lib_qr
+     desktop-app::lib_quickjs
++    tele::litehtml
+     desktop-app::lib_translate
+     desktop-app::lib_webview
+     desktop-app::lib_ffmpeg
+diff --git a/Telegram/cmake/tele_html.cmake b/Telegram/cmake/tele_html.cmake
+new file mode 100644
+index 0000000000000000000000000000000000000000..108e65d686dd318e9ffac0d1959155077e6a9391
+--- /dev/null
++++ b/Telegram/cmake/tele_html.cmake
+@@ -0,0 +1 @@
++add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/tele_html ${CMAKE_CURRENT_BINARY_DIR}/tele_html)
+diff --git a/Telegram/cmake/tele_html/CMakeLists.txt b/Telegram/cmake/tele_html/CMakeLists.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..6a1e8b4fbd0349f57a331e5467ea404153511d7e
+--- /dev/null
++++ b/Telegram/cmake/tele_html/CMakeLists.txt
+@@ -0,0 +1,47 @@
++include(FetchContent)
++
++if (MSVC)
++    set(CMAKE_C_FLAGS_DEBUG "/O2 /Ob2")
++    set(CMAKE_CXX_FLAGS_DEBUG "/O2 /Ob2")
++endif()
++
++FetchContent_Declare(tele_litehtml
++    URL https://github.com/litehtml/litehtml/archive/8848b99b1fae17026117c45c3ec9cd3e38b2e511.tar.gz
++    URL_HASH SHA256=42b8c62384f2e0383a1490c9b7688ebca4d296c9f36614583b89ef291ff75aa4
++    PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_LIST_DIR}/../tele_litehtml_patch.cmake
++    SOURCE_SUBDIR tele-no-cmake
++)
++FetchContent_MakeAvailable(tele_litehtml)
++set(tele_litehtml_loc ${tele_litehtml_SOURCE_DIR})
++
++file(GLOB tele_gumbo_sources ${tele_litehtml_loc}/src/gumbo/src/*.c)
++add_library(tele_gumbo STATIC ${tele_gumbo_sources})
++set_target_properties(tele_gumbo PROPERTIES C_STANDARD 99)
++target_include_directories(tele_gumbo
++PUBLIC
++    ${tele_litehtml_loc}/src/gumbo/src
++)
++
++file(GLOB tele_litehtml_sources ${tele_litehtml_loc}/src/*.cpp)
++add_library(tele_litehtml STATIC ${tele_litehtml_sources})
++add_library(tele::litehtml ALIAS tele_litehtml)
++set_target_properties(tele_litehtml PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
++target_include_directories(tele_litehtml
++PUBLIC
++    ${tele_litehtml_loc}/include
++PRIVATE
++    ${tele_litehtml_loc}/src
++    ${tele_litehtml_loc}/include/litehtml
++)
++target_link_libraries(tele_litehtml PUBLIC tele_gumbo)
++
++if (MSVC)
++    target_include_directories(tele_gumbo PRIVATE ${tele_litehtml_loc}/src/gumbo/visualc/include)
++    target_compile_options(tele_gumbo PRIVATE /W0 /utf-8)
++    target_compile_definitions(tele_gumbo PRIVATE _CRT_SECURE_NO_WARNINGS)
++    target_compile_options(tele_litehtml PRIVATE /W0 /utf-8 /permissive- /EHsc)
++    target_compile_definitions(tele_litehtml PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
++else()
++    target_compile_options(tele_gumbo PRIVATE -w)
++    target_compile_options(tele_litehtml PRIVATE -w -fexceptions)
++endif()
+diff --git a/Telegram/cmake/tele_litehtml_patch.cmake b/Telegram/cmake/tele_litehtml_patch.cmake
+new file mode 100644
+index 0000000000000000000000000000000000000000..1c85fbd01b37a5ad685266c4a623b16a3fb950cf
+--- /dev/null
++++ b/Telegram/cmake/tele_litehtml_patch.cmake
+@@ -0,0 +1,40 @@
++set(header ${CMAKE_CURRENT_SOURCE_DIR}/include/litehtml/document.h)
++set(source ${CMAKE_CURRENT_SOURCE_DIR}/src/document.cpp)
++
++file(READ ${header} header_text)
++if (header_text MATCHES "createFromStringParsed")
++    return()
++endif()
++file(READ ${source} source_text)
++
++function(tele_replace variable old new)
++    string(FIND "${${variable}}" "${old}" found)
++    if (found EQUAL -1)
++        message(FATAL_ERROR "tele litehtml patch: can't find '${old}'")
++    endif()
++    string(REPLACE "${old}" "${new}" result "${${variable}}")
++    set(${variable} "${result}" PARENT_SCOPE)
++endfunction()
++
++tele_replace(header_text
++"        litehtml::css                           m_user_css;\n"
++"        litehtml::css                           m_user_css;\n        std::shared_ptr<const litehtml::css>    m_shared_master;\n        std::shared_ptr<const litehtml::css>    m_shared_author;\n")
++tele_replace(header_text
++"        // The mode must be set before any element is created"
++"        static document::ptr createFromStringParsed(const estring& str, document_container* container,\n                                                    const std::shared_ptr<const css>& master_css,\n                                                    const std::shared_ptr<const css>& author_css);\n        static std::shared_ptr<const css> parse_stylesheet(const std::string& text, document_container* container,\n                                                           document_mode mode);\n\n        // The mode must be set before any element is created")
++tele_replace(header_text
++"        uint_ptr add_font(const font_description& descr, font_metrics* fm);\n"
++"        uint_ptr add_font(const font_description& descr, font_metrics* fm);\n        static document::ptr create_from_string(const estring& str, document_container* container,\n                                                const std::string& master_styles, const std::string& user_styles,\n                                                const std::shared_ptr<const css>& master_css,\n                                                const std::shared_ptr<const css>& author_css);\n")
++
++tele_replace(source_text
++"                                             const std::string& master_styles, const std::string& user_styles)\n    {\n        // Create litehtml::document\n        document::ptr doc = std::make_shared<document>(container);\n"
++"                                             const std::string& master_styles, const std::string& user_styles)\n    {\n        return create_from_string(str, container, master_styles, user_styles, nullptr, nullptr);\n    }\n\n    document::ptr document::createFromStringParsed(const estring& str, document_container* container,\n                                                   const std::shared_ptr<const css>& master_css,\n                                                   const std::shared_ptr<const css>& author_css)\n    {\n        return create_from_string(str, container, {}, {}, master_css, author_css);\n    }\n\n    std::shared_ptr<const css> document::parse_stylesheet(const std::string& text, document_container* container,\n                                                          document_mode mode)\n    {\n        auto doc    = std::make_shared<document>(container);\n        doc->m_mode = mode;\n        auto result = std::make_shared<css>();\n        result->parse_css_stylesheet(text, \"\", doc);\n        result->sort_selectors();\n        return result;\n    }\n\n    document::ptr document::create_from_string(const estring& str, document_container* container,\n                                               const std::string& master_styles, const std::string& user_styles,\n                                               const std::shared_ptr<const css>& master_css,\n                                               const std::shared_ptr<const css>& author_css)\n    {\n        // Create litehtml::document\n        document::ptr doc = std::make_shared<document>(container);\n        doc->m_shared_master = master_css;\n        doc->m_shared_author = author_css;\n")
++tele_replace(source_text
++"        if(master_styles != \"\")\n        {\n            m_master_css.parse_css_stylesheet(master_styles, \"\", shared_from_this());"
++"        if(m_shared_master)\n        {\n            m_master_css = *m_shared_master;\n        } else if(master_styles != \"\")\n        {\n            m_master_css.parse_css_stylesheet(master_styles, \"\", shared_from_this());")
++tele_replace(source_text
++"            // parse style sheets linked in document\n"
++"            if(m_shared_author)\n            {\n                m_styles = *m_shared_author;\n                for(const auto& sel : m_styles.selectors())\n                {\n                    sel->add_media_to_doc(this);\n                }\n            }\n\n            // parse style sheets linked in document\n")
++
++file(WRITE ${header} "${header_text}")
++file(WRITE ${source} "${source_text}")

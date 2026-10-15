@@ -1,0 +1,1886 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Tue, 13 Oct 2026 17:26:40 +0300
+Subject: [PATCH] feat: import wallets from private keys
+
+---
+ Telegram/CMakeLists.txt                       |   2 +
+ .../SourceFiles/settings/settings_tele.cpp    |   4 +
+ Telegram/SourceFiles/tele/tele_options.cpp    |  20 +
+ Telegram/SourceFiles/tele/tele_options.h      |   3 +
+ .../SourceFiles/tele/tele_settings_io.cpp     |   1 +
+ .../SourceFiles/tele/tele_wallet_keys.cpp     | 760 ++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_wallet_keys.h  |  92 +++
+ .../SourceFiles/wallet/wallet_content.cpp     | 296 +++++--
+ Telegram/SourceFiles/wallet/wallet_engine.cpp |  36 +-
+ Telegram/SourceFiles/wallet/wallet_engine.h   |   5 +
+ .../SourceFiles/wallet/wallet_session.cpp     | 136 +++-
+ Telegram/SourceFiles/wallet/wallet_session.h  |   7 +
+ 12 files changed, 1287 insertions(+), 75 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_wallet_keys.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_wallet_keys.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index af2a77bec6012eeba69f7b172c1d8d03d30d5e1b..3aa1e35a39cfc24d55574799264cd855f8d0b84f 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2851,6 +2851,8 @@ PRIVATE
+     tele/tele_voice_quality.h
+     tele/tele_wallet_address.cpp
+     tele/tele_wallet_address.h
++    tele/tele_wallet_keys.cpp
++    tele/tele_wallet_keys.h
+     tele/tele_wallet_links.cpp
+     tele/tele_wallet_links.h
+     tele/tele_who_reacted.cpp
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 57079c8300f637399ede7194588d8651090807a3..e50a92c27f4bc13e98081b64e80b75daf7e2bd92 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -4115,6 +4115,10 @@ void FillDebug(SectionBuilder &builder) {
+ 		builder,
+ 		::Tele::kOptionWalletRotate,
+ 		{ u"wallet"_q, u"recovery phrase"_q, u"key rotation"_q, u"words"_q });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionWalletPrivateKeys,
++		{ u"wallet"_q, u"private key"_q, u"hex"_q, u"vanity"_q });
+ 	AddOptionToggle(
+ 		builder,
+ 		::Tele::kOptionWalletKeepOld,
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 70dce73141d689b6ab99203a20ccb8bb3582695c..3efcdc9945dbc4d6873290525aaddb5eed547c52 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -40,6 +40,7 @@ const char kOptionFontFix[] = "tele-font-fix";
+ const char kOptionForceWallet[] = "tele-force-wallet";
+ const char kOptionWalletRotate[] = "tele-wallet-rotate";
+ const char kOptionWalletKeepOld[] = "tele-wallet-keep-old";
++const char kOptionWalletPrivateKeys[] = "tele-wallet-private-keys";
+ const char kOptionSecretChats[] = "tele-secret-chats";
+ const char kOptionHideSponsored[] = "tele-hide-sponsored";
+ const char kOptionHideProxySponsor[] = "tele-hide-proxy-sponsor";
+@@ -453,6 +454,11 @@ base::options::toggle WalletKeepOldOption({
+ 	.description = "Only when this device holds your current wallet's key.",
+ });
+ 
++base::options::toggle WalletPrivateKeysOption({
++	.id = kOptionWalletPrivateKeys,
++	.name = "Import wallets from private keys",
++});
++
+ base::options::toggle SecretChatsOption({
+ 	.id = kOptionSecretChats,
+ 	.name = "Secret chats β",
+@@ -2031,6 +2037,20 @@ bool WalletKeepOld() {
+ 	return WalletKeepOldOption.value();
+ }
+ 
++bool WalletPrivateKeys() {
++	return WalletPrivateKeysOption.value();
++}
++
++rpl::producer<bool> WalletPrivateKeysValue() {
++	return rpl::single(
++		rpl::empty
++	) | rpl::then(
++		WalletPrivateKeysOption.changes()
++	) | rpl::map([] {
++		return WalletPrivateKeysOption.value();
++	});
++}
++
+ bool SecretChats() {
+ 	return SecretChatsOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index 1727c50bf2be51b9646337e47931b411eaf0f94f..0eac40ec7efc360e14566c4d965e08dd6408d189 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -35,6 +35,7 @@ extern const char kOptionFontFix[];
+ extern const char kOptionForceWallet[];
+ extern const char kOptionWalletRotate[];
+ extern const char kOptionWalletKeepOld[];
++extern const char kOptionWalletPrivateKeys[];
+ extern const char kOptionSecretChats[];
+ extern const char kOptionHideSponsored[];
+ extern const char kOptionHideProxySponsor[];
+@@ -296,6 +297,8 @@ void SetKnownSettings(const QString &value);
+ [[nodiscard]] bool WalletRotate();
+ [[nodiscard]] rpl::producer<bool> WalletRotateValue();
+ [[nodiscard]] bool WalletKeepOld();
++[[nodiscard]] bool WalletPrivateKeys();
++[[nodiscard]] rpl::producer<bool> WalletPrivateKeysValue();
+ [[nodiscard]] bool SecretChats();
+ [[nodiscard]] QString CallButton();
+ void SetCallButton(const QString &value);
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index d18a9e61548a4bfc750697859f9411c1101f3e74..72800779cce2531ce704c8ad304074360544a5b0 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -128,6 +128,7 @@ struct Spec {
+ 		Toggle(kOptionForceWallet),
+ 		Toggle(kOptionWalletRotate),
+ 		Toggle(kOptionWalletKeepOld),
++		Toggle(kOptionWalletPrivateKeys),
+ 		Toggle(kOptionSecretChats),
+ 		Toggle(kOptionHideSponsored),
+ 		Toggle(kOptionHideProxySponsor),
+diff --git a/Telegram/SourceFiles/tele/tele_wallet_keys.cpp b/Telegram/SourceFiles/tele/tele_wallet_keys.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f692d0e338f908b06830e14c9d32ad00cd35c19
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_wallet_keys.cpp
+@@ -0,0 +1,760 @@
++#include "tele/tele_wallet_keys.h"
++
++#include "base/call_delayed.h"
++#include "lang/lang_keys.h"
++#include "main/main_session.h"
++#include "main/session/session_show.h"
++#include "storage/storage_account.h"
++#include "tele/tele_lowercase.h"
++#include "tele/tele_options.h"
++#include "tele/tele_wallet_address.h"
++#include "ui/layers/generic_box.h"
++#include "ui/text/text_utilities.h"
++#include "ui/widgets/buttons.h"
++#include "ui/widgets/discrete_sliders.h"
++#include "ui/widgets/fields/input_field.h"
++#include "ui/widgets/labels.h"
++#include "ui/wrap/slide_wrap.h"
++#include "ui/wrap/vertical_layout.h"
++#include "wallet/wallet_address.h"
++#include "wallet/wallet_content.h"
++#include "wallet/wallet_session.h"
++#include "styles/style_boxes.h"
++#include "styles/style_layers.h"
++#include "styles/style_wallet.h"
++#include "styles/style_widgets.h"
++
++#include "wallet_engine.hpp"
++
++#include <QtCore/QMimeData>
++#include <QtGui/QClipboard>
++#include <QtGui/QGuiApplication>
++
++namespace Tele {
++namespace {
++
++const auto kMarkerKey = u"tele/private-key-wallets"_q;
++constexpr auto kKeySize = 32;
++constexpr auto kHalfWords = 12;
++constexpr auto kQuizWords = 3;
++constexpr auto kClipboardClearDelay = crl::time(60000);
++
++struct MarkerEntry {
++	QByteArray anchor;
++	bool offered = false;
++};
++
++struct Marker {
++	base::flat_map<QString, MarkerEntry> wallets;
++	rpl::event_stream<> changes;
++};
++
++base::flat_map<not_null<Main::Session*>, std::unique_ptr<Marker>> Markers;
++
++[[nodiscard]] Marker &MarkerFor(not_null<Main::Session*> session) {
++	auto i = Markers.find(session);
++	if (i == end(Markers)) {
++		auto marker = std::make_unique<Marker>();
++		using State = Storage::WalletEngineValue::State;
++		const auto value = session->local().readWalletEngineValue(
++			kMarkerKey);
++		if (value.state == State::Read) {
++			const auto lines = QString::fromUtf8(value.bytes).split(
++				QChar('\n'),
++				Qt::SkipEmptyParts);
++			for (const auto &line : lines) {
++				const auto parts = line.split(QChar(' '));
++				if (parts.size() == 3) {
++					marker->wallets.emplace(parts[0], MarkerEntry{
++						.anchor = QByteArray::fromHex(parts[1].toLatin1()),
++						.offered = (parts[2] == u"1"_q),
++					});
++				}
++			}
++		}
++		i = Markers.emplace(session, std::move(marker)).first;
++		session->lifetime().add([=] {
++			Markers.remove(session);
++		});
++	}
++	return *i->second;
++}
++
++void WriteMarker(not_null<Main::Session*> session, Marker &marker) {
++	auto list = QStringList();
++	for (const auto &[address, entry] : marker.wallets) {
++		list.push_back(address
++			+ QChar(' ')
++			+ QString::fromLatin1(entry.anchor.toHex())
++			+ QChar(' ')
++			+ (entry.offered ? u"1"_q : u"0"_q));
++	}
++	if (!session->local().writeWalletEngineValue(
++			kMarkerKey,
++			list.join(QChar('\n')).toUtf8())) {
++		LOG(("Wallet Error: tele private key marker write failed."));
++	}
++	marker.changes.fire({});
++}
++
++[[nodiscard]] const MarkerEntry *CurrentEntry(
++		not_null<Main::Session*> session) {
++	const auto address = session->wallet().address();
++	if (!address) {
++		return nullptr;
++	}
++	const auto &wallets = MarkerFor(session).wallets;
++	const auto i = wallets.find(Wallet::CanonicalAddress(*address));
++	return (i != end(wallets)) ? &i->second : nullptr;
++}
++
++[[nodiscard]] std::string JoinWords(const std::vector<QString> &words) {
++	return QStringList(words.begin(), words.end()).join(
++		QChar(' ')).toStdString();
++}
++
++[[nodiscard]] std::vector<QString> Tokens(const std::vector<QString> &words) {
++	return WalletKeyWords(QStringList(words.begin(), words.end()).join(
++		QChar(' ')));
++}
++
++[[nodiscard]] QByteArray KeyBytes(const std::vector<uint8_t> &key) {
++	return QByteArray(
++		reinterpret_cast<const char*>(key.data()),
++		int(key.size()));
++}
++
++[[nodiscard]] QString KeyAddress(const std::vector<QString> &words) {
++	if (!IsWalletKeySecret(words)) {
++		return QString();
++	}
++	try {
++		return QString::fromStdString(wallet_engine::private_key_address(
++			JoinWords(words),
++			wallet_engine::Network::kMainnet));
++	} catch (...) {
++		return QString();
++	}
++}
++
++struct KeyInput {
++	std::vector<QString> words;
++	QString address;
++	QString recover;
++};
++
++[[nodiscard]] KeyInput ParseKeyInput(const QString &text) {
++	auto result = KeyInput{ .words = WalletKeyWords(text) };
++	if (IsWalletKeySecret(result.words)) {
++		result.address = KeyAddress(result.words);
++		return result;
++	}
++	const auto tokens = text.simplified().split(
++		QChar(' '),
++		Qt::SkipEmptyParts);
++	if (tokens.size() != kHalfWords + 1) {
++		return {};
++	}
++	auto address = QString();
++	auto words = std::vector<QString>();
++	for (const auto &token : tokens) {
++		if (Wallet::IsWordlistWord(token)) {
++			words.push_back(token.toLower());
++		} else if (address.isEmpty() && Wallet::ParseAddress(token)) {
++			address = token;
++		} else {
++			return {};
++		}
++	}
++	if (address.isEmpty() || words.size() != kHalfWords) {
++		return {};
++	}
++	return { .words = std::move(words), .address = address, .recover = address };
++}
++
++[[nodiscard]] style::font MonoFont(int size) {
++	return style::font(
++		size,
++		style::FontFlag::Monospace,
++		st::normalFont->family());
++}
++
++[[nodiscard]] const style::InputField &KeyFieldStyle() {
++	static const auto result = [] {
++		auto copy = st::walletCommentField;
++		copy.style.font = MonoFont(st::normalFont->size());
++		return copy;
++	}();
++	return result;
++}
++
++[[nodiscard]] const style::FlatLabel &KeyLabelStyle() {
++	static const auto result = [] {
++		auto copy = st::walletPhraseTextLabel;
++		copy.style.font = MonoFont(st::normalFont->size());
++		return copy;
++	}();
++	return result;
++}
++
++[[nodiscard]] const style::FlatLabel &OldKeyLabelStyle() {
++	static const auto result = [] {
++		auto copy = st::walletPhraseIntroTextLabel;
++		copy.style.font = MonoFont(st::normalFont->size() - 2);
++		return copy;
++	}();
++	return result;
++}
++
++[[nodiscard]] not_null<Ui::LinkButton*> AddLink(
++		not_null<Ui::VerticalLayout*> container,
++		const QString &text) {
++	return container->add(
++		object_ptr<Ui::LinkButton>(container, Lower(text)),
++		st::walletPhraseTextMargin,
++		style::al_top);
++}
++
++void AddGreyLine(
++		not_null<Ui::VerticalLayout*> container,
++		rpl::producer<QString> text) {
++	container->add(
++		object_ptr<Ui::FlatLabel>(
++			container,
++			std::move(text),
++			st::walletPhraseIntroTextLabel),
++		st::walletPhraseTextMargin,
++		style::al_top);
++}
++
++not_null<Ui::FlatLabel*> AddAddress(
++		not_null<Ui::VerticalLayout*> container,
++		std::shared_ptr<Ui::Show> show,
++		rpl::producer<QString> address) {
++	const auto current = std::make_shared<QString>();
++	const auto result = container->add(
++		object_ptr<Ui::FlatLabel>(
++			container,
++			std::move(address) | rpl::map([=](const QString &value) {
++				*current = value;
++				return WalletAddressText(value);
++			}),
++			st::walletDetailsAddressLabel),
++		st::boxRowPadding,
++		style::al_top);
++	SetupWalletAddressColors(result);
++	const auto copy = Ui::CreateChild<Ui::AbstractButton>(result);
++	result->sizeValue() | rpl::on_next([=](QSize size) {
++		copy->resize(size);
++	}, copy->lifetime());
++	copy->setClickedCallback([=] {
++		if (!current->isEmpty()) {
++			Wallet::CopyTextCallback(
++				show,
++				*current,
++				tr::lng_gift_unique_address_copied(tr::now))();
++		}
++	});
++	return result;
++}
++
++void CopySecret(const QString &text) {
++	const auto windows = [](const char *name) {
++		return u"application/x-qt-windows-mime;value=\"%1\""_q.arg(
++			QString::fromLatin1(name));
++	};
++	auto data = std::make_unique<QMimeData>();
++	data->setText(text);
++	data->setData(
++		windows("ExcludeClipboardContentFromMonitorProcessing"),
++		QByteArray(1, '\0'));
++	data->setData(
++		windows("CanIncludeInClipboardHistory"),
++		QByteArray(4, '\0'));
++	data->setData(
++		windows("CanUploadToCloudClipboard"),
++		QByteArray(4, '\0'));
++	data->setData(u"x-kde-passwordManagerHint"_q, "secret");
++	QGuiApplication::clipboard()->setMimeData(data.release());
++	base::call_delayed(kClipboardClearDelay, qApp, [=] {
++		const auto clipboard = QGuiApplication::clipboard();
++		if (clipboard->text() == text) {
++			clipboard->clear();
++		}
++	});
++}
++
++void AddCopy(
++		not_null<Ui::VerticalLayout*> container,
++		std::shared_ptr<Main::SessionShow> show,
++		const QString &key) {
++	AddLink(container, u"Copy Key"_q)->setClickedCallback([=] {
++		CopySecret(key);
++		show->showToast(tr::lng_text_copied(tr::now));
++	});
++}
++
++} // namespace
++
++bool IsWalletKeySecret(const std::vector<QString> &words) {
++	if (words.empty()) {
++		return false;
++	}
++	auto list = std::vector<std::string>();
++	list.reserve(words.size());
++	for (const auto &word : words) {
++		list.push_back(word.trimmed().toStdString());
++	}
++	try {
++		return wallet_engine::detect_private_key(list);
++	} catch (...) {
++		return false;
++	}
++}
++
++std::vector<QString> WalletKeyWords(const QString &text) {
++	const auto list = text.simplified().split(
++		QChar(' '),
++		Qt::SkipEmptyParts);
++	auto result = std::vector<QString>();
++	result.reserve(list.size());
++	for (const auto &word : list) {
++		result.push_back(result.empty() ? word : word.toLower());
++	}
++	return result;
++}
++
++std::optional<Wallet::PhraseIdentity> WalletKeyIdentity(
++		const std::vector<QString> &words) {
++	const auto tokens = Tokens(words);
++	if (tokens.empty()) {
++		return std::nullopt;
++	}
++	try {
++		const auto anchor = KeyBytes(wallet_engine::private_key_public_key(
++			JoinWords(tokens)));
++		if (anchor.size() != kKeySize) {
++			return std::nullopt;
++		}
++		auto result = Wallet::PhraseIdentity{
++			.anchor = anchor,
++			.signing = anchor,
++		};
++		if (tokens.size() > 1) {
++			const auto half = std::vector<QString>(
++				tokens.begin() + 1,
++				tokens.end());
++			result.signing = KeyBytes(
++				wallet_engine::rotation_mnemonic_public_key(
++					JoinWords(half)));
++			if (result.signing.size() != kKeySize) {
++				return std::nullopt;
++			}
++		}
++		return result;
++	} catch (...) {
++		return std::nullopt;
++	}
++}
++
++void NoteWalletSecret(
++		not_null<Main::Session*> session,
++		const QString &address,
++		const QByteArray &anchor,
++		const std::vector<QString> &words) {
++	const auto canonical = Wallet::CanonicalAddress(address);
++	if (canonical.isEmpty()) {
++		return;
++	}
++	auto &marker = MarkerFor(session);
++	if (!IsWalletKeySecret(words)) {
++		if (marker.wallets.remove(canonical)) {
++			WriteMarker(session, marker);
++		}
++		return;
++	} else if (anchor.size() != kKeySize) {
++		return;
++	}
++	auto &entry = marker.wallets[canonical];
++	if (entry.anchor == anchor) {
++		return;
++	}
++	entry.anchor = anchor;
++	WriteMarker(session, marker);
++}
++
++bool IsKeyWallet(not_null<Main::Session*> session) {
++	return CurrentEntry(session) != nullptr;
++}
++
++bool IsUnrotatedKeyWallet(not_null<Main::Session*> session) {
++	const auto entry = CurrentEntry(session);
++	return entry && (entry->anchor == session->wallet().publicKey());
++}
++
++rpl::producer<bool> IsKeyWalletValue(not_null<Main::Session*> session) {
++	return rpl::single(
++		rpl::empty
++	) | rpl::then(rpl::merge(
++		MarkerFor(session).changes.events(),
++		session->wallet().transferWalletIdentityChanges(),
++		session->wallet().presenceValue() | rpl::to_empty
++	)) | rpl::map([=] {
++		return IsKeyWallet(session);
++	}) | rpl::distinct_until_changed();
++}
++
++[[nodiscard]] rpl::producer<bool> IsUnrotatedKeyWalletValue(
++		not_null<Main::Session*> session) {
++	return rpl::single(
++		rpl::empty
++	) | rpl::then(rpl::merge(
++		MarkerFor(session).changes.events(),
++		session->wallet().transferWalletIdentityChanges(),
++		session->wallet().presenceValue() | rpl::to_empty,
++		session->wallet().capabilitiesValue() | rpl::to_empty
++	)) | rpl::map([=] {
++		return IsUnrotatedKeyWallet(session);
++	}) | rpl::distinct_until_changed();
++}
++
++rpl::producer<bool> WalletReplaceKeyShown(
++		not_null<Main::Session*> session) {
++	return rpl::combine(
++		WalletPrivateKeysValue(),
++		IsUnrotatedKeyWalletValue(session)
++	) | rpl::map(rpl::mappers::_1 && rpl::mappers::_2);
++}
++
++QString WalletReplaceKeyLabel() {
++	return Lower(u"Replace the Key with 12 Words"_q);
++}
++
++bool TakeWalletReplaceKeyOffer(not_null<Main::Session*> session) {
++	if (!WalletPrivateKeys() || !IsUnrotatedKeyWallet(session)) {
++		return false;
++	}
++	const auto address = session->wallet().address();
++	auto &marker = MarkerFor(session);
++	const auto i = marker.wallets.find(Wallet::CanonicalAddress(*address));
++	if (i == end(marker.wallets) || i->second.offered) {
++		return false;
++	}
++	i->second.offered = true;
++	WriteMarker(session, marker);
++	return true;
++}
++
++void FillWalletReplaceKeyOffer(
++		not_null<Ui::GenericBox*> box,
++		Fn<void()> replace) {
++	box->setTitle(rpl::single(Lower(u"Replace the key with 12 words?"_q)));
++	box->addRow(object_ptr<Ui::FlatLabel>(
++		box,
++		Lower(u"Keys from generators may have been seen by others. "
++			"After this the long key stops working, and your address "
++			"and 12 new words restore the wallet."_q),
++		st::boxLabel));
++	box->addButton(rpl::single(Lower(u"Replace"_q)), [=] {
++		replace();
++	});
++	box->addButton(rpl::single(Lower(u"Later"_q)), [=] {
++		box->closeBox();
++	});
++}
++
++WalletKeyImport AddWalletKeyImport(
++		not_null<Ui::GenericBox*> box,
++		not_null<Main::Session*> session,
++		not_null<Ui::SlideWrap<Ui::VerticalLayout>*> words,
++		not_null<Ui::SettingsSlider*> toggle,
++		std::vector<QString> sections,
++		Fn<void()> submit,
++		Fn<void()> changed) {
++	struct State {
++		rpl::variable<bool> active = false;
++		rpl::variable<QString> address;
++		rpl::variable<QString> status;
++		int wordSection = 0;
++	};
++	const auto state = box->lifetime().make_state<State>();
++	const auto keySection = int(sections.size());
++
++	const auto keyWrap = box->verticalLayout()->add(
++		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
++			box->verticalLayout(),
++			object_ptr<Ui::VerticalLayout>(box->verticalLayout())),
++		style::margins(),
++		style::al_justify);
++	const auto inner = keyWrap->entity();
++	const auto field = inner->add(
++		object_ptr<Ui::InputField>(
++			inner,
++			KeyFieldStyle(),
++			Ui::InputField::Mode::MultiLine,
++			rpl::single(Lower(u"Private key, or address and 12 words"_q))),
++		st::walletImportFieldMargin);
++	field->setSubmitSettings(Ui::InputField::SubmitSettings::Enter);
++	AddGreyLine(inner, rpl::single(Lower(u"Only this key can restore "
++		"this wallet; Telegram backup doesn't keep it."_q)));
++	const auto preview = inner->add(
++		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
++			inner,
++			object_ptr<Ui::VerticalLayout>(inner)),
++		style::margins(),
++		style::al_justify);
++	AddGreyLine(preview->entity(), rpl::single(Lower(u"Wallet address"_q)));
++	AddAddress(preview->entity(), box->uiShow(), state->address.value());
++	preview->toggleOn(state->address.value() | rpl::map([](
++			const QString &value) {
++		return !value.isEmpty();
++	}), anim::type::instant);
++	const auto status = inner->add(
++		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
++			inner,
++			object_ptr<Ui::VerticalLayout>(inner)),
++		style::margins(),
++		style::al_justify);
++	AddGreyLine(status->entity(), state->status.value());
++	status->toggleOn(state->status.value() | rpl::map([](
++			const QString &value) {
++		return !value.isEmpty();
++	}), anim::type::instant);
++	keyWrap->hide(anim::type::instant);
++
++	const auto focusField = [=] {
++		crl::on_main(field, [=] {
++			field->setFocus();
++			field->setCursorPosition(field->getLastText().size());
++		});
++	};
++	const auto switchTo = [=](bool key) {
++		if (state->active.current() == key) {
++			return;
++		}
++		state->active = key;
++		words->toggle(!key, anim::type::instant);
++		keyWrap->toggle(key, anim::type::instant);
++		if (changed) {
++			changed();
++		}
++		if (key) {
++			focusField();
++		}
++	};
++	WalletPrivateKeysValue(
++	) | rpl::on_next([=](bool on) {
++		auto list = sections;
++		if (on) {
++			list.push_back(Lower(u"Private Key"_q));
++		}
++		toggle->setSections(list);
++		if (!on && state->active.current()) {
++			switchTo(false);
++			toggle->setActiveSectionFast(state->wordSection);
++		}
++	}, keyWrap->lifetime());
++
++	field->changes() | rpl::on_next([=] {
++		state->address = ParseKeyInput(field->getLastText()).address;
++		if (changed) {
++			changed();
++		}
++	}, field->lifetime());
++	field->submits() | rpl::on_next([=] {
++		if (submit) {
++			submit();
++		}
++	}, field->lifetime());
++	field->lifetime().add([weak = base::make_weak(session)] {
++		if (const auto strong = weak.get()) {
++			strong->wallet().cancelRotatedSecretRecovery();
++		}
++	});
++
++	const auto prepare = [=](
++			Fn<void(std::vector<QString>)> ready,
++			Fn<void(QString)> fail) {
++		auto input = ParseKeyInput(field->getLastText());
++		if (input.address.isEmpty()) {
++			fail(Lower(u"This isn't a private key or an address "
++				"with 12 words."_q));
++			return;
++		} else if (input.recover.isEmpty()) {
++			ready(std::move(input.words));
++			return;
++		}
++		state->status = Lower(u"Searching the wallet's history…"_q);
++		session->wallet().recoverRotatedSecret(
++			input.recover,
++			std::move(input.words),
++			crl::guard(field, [=](const QString &phrase) {
++				state->status = QString();
++				auto list = WalletKeyWords(phrase);
++				if (IsWalletKeySecret(list)) {
++					ready(std::move(list));
++				} else {
++					fail(WalletRecoverErrorText(QString()));
++				}
++			}),
++			crl::guard(field, [=](const QString &error) {
++				state->status = QString();
++				fail(WalletRecoverErrorText(error));
++			}));
++	};
++
++	return {
++		.active = [=] {
++			return state->active.current() && WalletPrivateKeys();
++		},
++		.select = [=](int section) {
++			if (section == keySection && WalletPrivateKeys()) {
++				switchTo(true);
++				return true;
++			}
++			state->wordSection = section;
++			switchTo(false);
++			return false;
++		},
++		.prepare = prepare,
++		.paste = [=](const QString &text, bool check) {
++			if (!WalletPrivateKeys()
++				|| ParseKeyInput(text).address.isEmpty()) {
++				return false;
++			} else if (!check) {
++				field->setText(text.trimmed());
++				field->forceProcessContentsChanges();
++				switchTo(true);
++				toggle->setActiveSection(keySection);
++				focusField();
++			}
++			return true;
++		},
++		.focus = [=] {
++			if (!state->active.current()) {
++				return false;
++			}
++			field->setFocusFast();
++			return true;
++		},
++	};
++}
++
++QString WalletRecoverErrorText(const QString &error) {
++	return Lower((error == u"RECOVER_INVALID_WORDS"_q)
++		? u"These aren't 12 valid words."_q
++		: (error == u"RECOVER_BUSY"_q)
++		? u"The wallet's history is still being searched."_q
++		: (error == u"RECOVER_NOT_FOUND"_q)
++		? u"Couldn't find a key change to these words in this wallet's "
++			"history. Try again later."_q
++		: (error == u"RECOVER_MISMATCH"_q)
++		? u"These aren't the newest 12 words of this wallet."_q
++		: u"Couldn't search the wallet's history."_q);
++}
++
++rpl::producer<QString> WalletKeyTitle(const std::vector<QString> &words) {
++	return (Tokens(words).size() > 1)
++		? tr::lng_wallet_phrase_title()
++		: rpl::single(Lower(u"Your Private Key"_q));
++}
++
++rpl::producer<TextWithEntities> WalletKeyText(
++		const std::vector<QString> &words) {
++	return rpl::single(TextWithEntities{ Lower((Tokens(words).size() > 1)
++		? u"Your wallet address and these 12 words restore the wallet."_q
++		: u"Only this key restores the wallet. Keep it secret."_q) });
++}
++
++bool AddWalletKeyPhrase(
++		not_null<Ui::GenericBox*> box,
++		std::shared_ptr<Main::SessionShow> show,
++		const std::vector<QString> &words,
++		Fn<void(const std::vector<QString> &)> grid) {
++	if (!IsWalletKeySecret(words)) {
++		return false;
++	}
++	const auto tokens = Tokens(words);
++	const auto key = tokens.front();
++	const auto container = box->verticalLayout();
++	if (tokens.size() == 1) {
++		const auto label = box->addRow(
++			object_ptr<Ui::FlatLabel>(box, key, KeyLabelStyle()),
++			st::walletPhraseTextMargin,
++			style::al_top);
++		label->setTryMakeSimilarLines(true);
++		AddCopy(container, show, key);
++		return true;
++	}
++	if (grid) {
++		grid(std::vector<QString>(tokens.begin() + 1, tokens.end()));
++	}
++	AddGreyLine(container, rpl::single(Lower(u"Wallet address"_q)));
++	AddAddress(container, show, rpl::single(KeyAddress({ key })));
++	AddGreyLine(
++		container,
++		rpl::single(Lower(u"Original key, not needed to restore"_q)));
++	const auto label = box->addRow(
++		object_ptr<Ui::FlatLabel>(box, key, OldKeyLabelStyle()),
++		st::walletPhraseTextMargin,
++		style::al_top);
++	label->setTryMakeSimilarLines(true);
++	AddCopy(container, show, key);
++	return true;
++}
++
++std::vector<QString> WalletQuizWords(std::vector<QString> words) {
++	if (words.size() > kQuizWords && IsWalletKeySecret(words)) {
++		words.erase(words.begin());
++	}
++	return words;
++}
++
++rpl::producer<QString> WalletRevealLabel(
++		not_null<Main::Session*> session,
++		rpl::producer<QString> label) {
++	return rpl::combine(
++		IsUnrotatedKeyWalletValue(session),
++		std::move(label)
++	) | rpl::map([](bool key, const QString &label) {
++		return key ? Lower(u"Show Private Key"_q) : label;
++	});
++}
++
++TextWithEntities WalletKeyRotationText(
++		not_null<Main::Session*> session,
++		TextWithEntities text) {
++	return IsUnrotatedKeyWallet(session)
++		? TextWithEntities{ Lower(u"The long key stops working. Your "
++			"address and the 12 new words restore the wallet."_q) }
++		: std::move(text);
++}
++
++rpl::producer<QString> WalletRotationTitle(
++		not_null<Main::Session*> session,
++		rpl::producer<QString> title) {
++	return rpl::combine(
++		IsUnrotatedKeyWalletValue(session),
++		std::move(title)
++	) | rpl::map([](bool key, const QString &title) {
++		return key ? WalletReplaceKeyLabel() : title;
++	});
++}
++
++rpl::producer<QString> WalletBackupAbout(
++		not_null<Main::Session*> session,
++		rpl::producer<QString> text) {
++	return rpl::combine(
++		IsKeyWalletValue(session),
++		std::move(text)
++	) | rpl::map([](bool key, const QString &text) {
++		return key ? WalletKeyBackupText() : text;
++	});
++}
++
++QString WalletKeyBackupText() {
++	return Lower(u"Telegram backup keeps only secret words; "
++		"save your key yourself."_q);
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_wallet_keys.h b/Telegram/SourceFiles/tele/tele_wallet_keys.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..b3dfae54e0cd8dec3fe08620179a13ad48bb9e88
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_wallet_keys.h
+@@ -0,0 +1,92 @@
++#pragma once
++
++#include "ui/text/text_entity.h"
++
++namespace Main {
++class Session;
++class SessionShow;
++} // namespace Main
++
++namespace Ui {
++class GenericBox;
++class SettingsSlider;
++class VerticalLayout;
++template <typename Widget>
++class SlideWrap;
++} // namespace Ui
++
++namespace Wallet {
++struct PhraseIdentity;
++} // namespace Wallet
++
++namespace Tele {
++
++[[nodiscard]] bool IsWalletKeySecret(const std::vector<QString> &words);
++[[nodiscard]] std::vector<QString> WalletKeyWords(const QString &text);
++[[nodiscard]] std::optional<Wallet::PhraseIdentity> WalletKeyIdentity(
++	const std::vector<QString> &words);
++
++void NoteWalletSecret(
++	not_null<Main::Session*> session,
++	const QString &address,
++	const QByteArray &anchor,
++	const std::vector<QString> &words);
++[[nodiscard]] bool IsKeyWallet(not_null<Main::Session*> session);
++[[nodiscard]] bool IsUnrotatedKeyWallet(not_null<Main::Session*> session);
++[[nodiscard]] rpl::producer<bool> IsKeyWalletValue(
++	not_null<Main::Session*> session);
++[[nodiscard]] rpl::producer<bool> WalletReplaceKeyShown(
++	not_null<Main::Session*> session);
++[[nodiscard]] QString WalletReplaceKeyLabel();
++[[nodiscard]] bool TakeWalletReplaceKeyOffer(
++	not_null<Main::Session*> session);
++void FillWalletReplaceKeyOffer(
++	not_null<Ui::GenericBox*> box,
++	Fn<void()> replace);
++
++struct WalletKeyImport {
++	Fn<bool()> active;
++	Fn<bool(int section)> select;
++	Fn<void(
++		Fn<void(std::vector<QString>)> ready,
++		Fn<void(QString)> fail)> prepare;
++	Fn<bool(const QString &text, bool check)> paste;
++	Fn<bool()> focus;
++};
++[[nodiscard]] WalletKeyImport AddWalletKeyImport(
++	not_null<Ui::GenericBox*> box,
++	not_null<Main::Session*> session,
++	not_null<Ui::SlideWrap<Ui::VerticalLayout>*> words,
++	not_null<Ui::SettingsSlider*> toggle,
++	std::vector<QString> sections,
++	Fn<void()> submit,
++	Fn<void()> changed);
++[[nodiscard]] QString WalletRecoverErrorText(const QString &error);
++
++[[nodiscard]] rpl::producer<QString> WalletKeyTitle(
++	const std::vector<QString> &words);
++[[nodiscard]] rpl::producer<TextWithEntities> WalletKeyText(
++	const std::vector<QString> &words);
++bool AddWalletKeyPhrase(
++	not_null<Ui::GenericBox*> box,
++	std::shared_ptr<Main::SessionShow> show,
++	const std::vector<QString> &words,
++	Fn<void(const std::vector<QString> &)> grid);
++[[nodiscard]] std::vector<QString> WalletQuizWords(
++	std::vector<QString> words);
++
++[[nodiscard]] rpl::producer<QString> WalletRevealLabel(
++	not_null<Main::Session*> session,
++	rpl::producer<QString> label);
++[[nodiscard]] TextWithEntities WalletKeyRotationText(
++	not_null<Main::Session*> session,
++	TextWithEntities text);
++[[nodiscard]] rpl::producer<QString> WalletRotationTitle(
++	not_null<Main::Session*> session,
++	rpl::producer<QString> title);
++[[nodiscard]] rpl::producer<QString> WalletBackupAbout(
++	not_null<Main::Session*> session,
++	rpl::producer<QString> text);
++[[nodiscard]] QString WalletKeyBackupText();
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/wallet/wallet_content.cpp b/Telegram/SourceFiles/wallet/wallet_content.cpp
+index 3f023fa6bb7b631e8c5610bb0551e472335c8656..d8eba60bb6b46ed93feb1097c26e9a6580d23025 100644
+--- a/Telegram/SourceFiles/wallet/wallet_content.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_content.cpp
+@@ -62,6 +62,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_money_card_box.h"
+ #include "tele/tele_options.h"
+ #include "tele/tele_wallet_address.h"
++#include "tele/tele_wallet_keys.h"
+ #include "tele/tele_wallet_links.h"
+ #include "ui/boxes/confirm_box.h"
+ #include "ui/controls/feature_list.h"
+@@ -5909,7 +5910,8 @@ enum class RecipientError : uchar {
+ 		|| ParseAddress(text)
+ 		|| ParseTransferLink(text)
+ 		|| (text.size() > kRecipientSearchLimit)
+-		|| (SplitPhraseWords(text).size() >= kImportWordCountShort)) {
++		|| (SplitPhraseWords(text).size() >= kImportWordCountShort)
++		|| Tele::IsWalletKeySecret(Tele::WalletKeyWords(text))) {
+ 		// Rejected addresses and pasted secrets never reach contacts.search.
+ 		return { .kind = Kind::Invalid };
+ 	} else if (TextUtilities::PrepareSearchWords(text).isEmpty()) {
+@@ -10146,11 +10148,12 @@ void WalletPhraseBox(
+ 	box->setNoContentMargin(true);
+ 
+ 	const auto count = int(words.size());
++	const auto key = Tele::IsWalletKeySecret(words);
+ 	AddPhraseBoxHeader(
+ 		box,
+ 		PhraseBoxLottie(count),
+-		tr::lng_wallet_phrase_title(),
+-		tr::lng_wallet_phrase_text(
++		key ? Tele::WalletKeyTitle(words) : tr::lng_wallet_phrase_title(),
++		key ? Tele::WalletKeyText(words) : tr::lng_wallet_phrase_text(
+ 			lt_count,
+ 			rpl::single(count * 1.) | tr::to_count(),
+ 			tr::marked),
+@@ -10159,7 +10162,12 @@ void WalletPhraseBox(
+ 		st::walletPhraseLottieMargin,
+ 		st::walletPhraseTextMargin);
+ 
+-	AddPhraseGrid(box, words);
++	if (!Tele::AddWalletKeyPhrase(box, show, words, [=](
++			const std::vector<QString> &rest) {
++		AddPhraseGrid(box, rest);
++	})) {
++		AddPhraseGrid(box, words);
++	}
+ 
+ 	AddBoxCloseButton(box);
+ 	box->addButton(tr::lng_about_done(), [=] { box->closeBox(); });
+@@ -10577,7 +10585,11 @@ void WalletPhraseWarningBox(
+ 		state->words.reset();
+ 	};
+ 	const auto button = box->addButton(BusyFooterLabel(
+-		tr::lng_wallet_keys_show_phrase(),
++		parkedKey
++			? tr::lng_wallet_keys_show_phrase()
++			: Tele::WalletRevealLabel(
++				&show->session(),
++				tr::lng_wallet_keys_show_phrase()),
+ 		state->loading.value()));
+ 	button->setClickedCallback([=] {
+ 		if (state->phase == Phase::Authorizing
+@@ -10782,6 +10794,8 @@ void WalletImportBox(
+ 	std::shared_ptr<KeyContext> context,
+ 	rpl::producer<QString> about);
+ 
++void OfferKeyReplacement(std::shared_ptr<Main::SessionShow> show);
++
+ void ShowInvalidSecretWords(
+ 		std::shared_ptr<Main::SessionShow> show,
+ 		bool foreign,
+@@ -11390,6 +11404,9 @@ void RequestWalletReplace(
+ 				: tr::lng_wallet_created_text(tr::now) },
+ 			.icon = &st::toastCheckIcon,
+ 		});
++		if (imported) {
++			OfferKeyReplacement(show);
++		}
+ 	});
+ 	const auto fail = crl::guard(origin, [=](const QString &error) {
+ 		unblock();
+@@ -11528,6 +11545,8 @@ void ShowBackupChangeError(
+ 			&show->session(),
+ 			EnforcementCheckAbout(error))) {
+ 		show->showBox(std::move(box));
++	} else if (error == u"BACKUP_PRIVATE_KEY"_q) {
++		show->showToast(Tele::WalletKeyBackupText());
+ 	} else if (error == u"BACKUP_PHRASE_OUTDATED"_q) {
+ 		ShowKeyChangedBox(show, tr::lng_wallet_send_key_changed_text());
+ 	} else if (error == u"BACKUP_KEY_UNCONFIRMED"_q) {
+@@ -11786,7 +11805,12 @@ void WalletBackupPhraseBox(
+ 		st::walletPhraseLottieMargin,
+ 		st::walletPhraseTextMargin);
+ 
+-	AddPhraseGrid(box, words);
++	if (!Tele::AddWalletKeyPhrase(box, show, words, [=](
++			const std::vector<QString> &rest) {
++		AddPhraseGrid(box, rest);
++	})) {
++		AddPhraseGrid(box, words);
++	}
+ 
+ 	GuardBackupDisableDismiss(box, show, nullptr, dismissTitle);
+ 	const auto shownAt = crl::now();
+@@ -11885,6 +11909,7 @@ void WalletBackupQuizBox(
+ 		Fn<void(Fn<void()> lock)> publishLock,
+ 		Fn<bool()> abandons,
+ 		Fn<rpl::producer<QString>()> dismissTitle) {
++	words = Tele::WalletQuizWords(std::move(words));
+ 	Expects(int(words.size()) >= kBackupQuizWordCount);
+ 
+ 	box->setWidth(st::boxWideWidth);
+@@ -12004,7 +12029,19 @@ void CollectBackupPhrase(
+ 		.auth = auth,
+ 		.approved = approved.value_or(BackupDisableApproval()),
+ 	};
++	const auto weakOrigin = base::make_weak(origin);
+ 	const auto showQuiz = [=](std::vector<QString> words) {
++		if (int(Tele::WalletQuizWords(words).size()) < kBackupQuizWordCount) {
++			if (const auto strong = weakOrigin.get()) {
++				RequestBackupDisable(
++					show,
++					strong,
++					proof,
++					[] {},
++					[=] { ShowBackupDisabledToast(show); });
++			}
++			return;
++		}
+ 		const auto quiz = std::make_shared<base::weak_qptr<Ui::GenericBox>>();
+ 		const auto requesting = std::make_shared<bool>(false);
+ 		*quiz = show->show(Box(WalletBackupQuizBox, show, words, [=] {
+@@ -12288,10 +12325,12 @@ struct BackupDisableState {
+ 	return rpl::combine(
+ 		std::move(quote),
+ 		FiatRateValue(session)
+-	) | rpl::map([](
++	) | rpl::map([=](
+ 			const std::optional<RotationQuote> &quote,
+ 			const FiatRate &rate) {
+-		auto result = tr::lng_wallet_backup_update_text(tr::now, tr::marked);
++		auto result = Tele::WalletKeyRotationText(
++			session,
++			tr::lng_wallet_backup_update_text(tr::now, tr::marked));
+ 		if (RotationQuoteUsable(quote)) {
+ 			const auto phrase = (quote->error == SendError::None)
+ 				? tr::lng_wallet_backup_update_fee
+@@ -12562,9 +12601,15 @@ void StartBackupDisable(
+ }
+ 
+ [[nodiscard]] RotationFlow PhraseUpdateRotationFlow(
+-		std::shared_ptr<Main::SessionShow> show) {
++		std::shared_ptr<Main::SessionShow> show,
++		bool closeOrigin) {
+ 	return {
+-		.confirmed = [=](base::weak_qptr<Ui::GenericBox>, KeyAuthorization) {
++		.confirmed = [=](
++				base::weak_qptr<Ui::GenericBox> origin,
++				KeyAuthorization) {
++			if (const auto strong = closeOrigin ? origin.get() : nullptr) {
++				strong->closeBox();
++			}
+ 			LOG(("Wallet Info: secret phrase update confirmed."));
+ 			show->showToast({
+ 				.text = { Tele::Lower(u"Your secret phrase was updated."_q) },
+@@ -12583,7 +12628,8 @@ void ShowPhraseUpdateBox(
+ 		not_null<Ui::GenericBox*> origin,
+ 		not_null<bool*> busy,
+ 		int64 feeNano,
+-		KeyAuthorization auth) {
++		KeyAuthorization auth,
++		bool closeOrigin) {
+ 	const auto weak = base::make_weak(origin);
+ 	show->showBox(Ui::MakeConfirmBox({
+ 		.text = BackupUpdateNoteText(
+@@ -12600,18 +12646,21 @@ void ShowPhraseUpdateBox(
+ 					busy,
+ 					feeNano,
+ 					auth,
+-					PhraseUpdateRotationFlow(show));
++					PhraseUpdateRotationFlow(show, closeOrigin));
+ 			}
+ 		},
+ 		.confirmText = tr::lng_continue(),
+-		.title = tr::lng_wallet_backup_update_check(),
++		.title = Tele::WalletRotationTitle(
++			&show->session(),
++			tr::lng_wallet_backup_update_check()),
+ 	}));
+ }
+ 
+ void StartPhraseUpdate(
+ 		std::shared_ptr<Main::SessionShow> show,
+ 		not_null<Ui::GenericBox*> origin,
+-		not_null<bool*> busy) {
++		not_null<bool*> busy,
++		bool closeOrigin = false) {
+ 	const auto weak = base::make_weak(origin);
+ 	AcquireVaultUnlock({
+ 		.show = show,
+@@ -12641,7 +12690,13 @@ void StartPhraseUpdate(
+ 				LOG(("Wallet Info: secret phrase update quote, "
+ 					"error %1, fee %2.").arg(int(fee.error)).arg(fee.feeNano));
+ 				if (fee.error == SendError::None) {
+-					ShowPhraseUpdateBox(show, strong, busy, fee.feeNano, auth);
++					ShowPhraseUpdateBox(
++						show,
++						strong,
++						busy,
++						fee.feeNano,
++						auth,
++						closeOrigin);
+ 				} else if (fee.error == SendError::InsufficientFees) {
+ 					ShowBackupTopUpAlert(show, fee.feeNano, [] {});
+ 				} else {
+@@ -12656,6 +12711,23 @@ void StartPhraseUpdate(
+ 	});
+ }
+ 
++void OfferKeyReplacement(std::shared_ptr<Main::SessionShow> show) {
++	if (!Tele::TakeWalletReplaceKeyOffer(&show->session())) {
++		return;
++	}
++	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
++		const auto busy = box->lifetime().make_state<bool>(false);
++		Tele::FillWalletReplaceKeyOffer(box, [=] {
++			if (*busy) {
++				return;
++			}
++			RunKeyRequiringAction(show, crl::guard(box, [=] {
++				StartPhraseUpdate(show, box, busy, true);
++			}), KeyActionKind::ResumeAfterRestore);
++		});
++	}));
++}
++
+ struct ImportCover {
+ 	not_null<Ui::RpWidget*> widget;
+ 	Fn<int()> height;
+@@ -12868,7 +12940,7 @@ void WalletImportBox(
+ 	const auto toggle = box->addRow(
+ 		object_ptr<Ui::SettingsSlider>(box, st::settingsSlider),
+ 		st::walletImportToggleMargin);
+-	toggle->setSections({
++	const auto toggleSections = std::vector<QString>{
+ 		tr::lng_wallet_import_words(
+ 			tr::now,
+ 			lt_count,
+@@ -12877,9 +12949,18 @@ void WalletImportBox(
+ 			tr::now,
+ 			lt_count,
+ 			kImportWordCountLong),
+-	});
++	};
++	toggle->setSections(toggleSections);
+ 	toggle->setActiveSectionFast(0);
+ 
++	const auto wordsWrap = box->addRow(
++		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
++			box,
++			object_ptr<Ui::VerticalLayout>(box)),
++		style::margins(),
++		style::al_justify);
++	const auto wordsLayout = wordsWrap->entity();
++
+ 	const auto addWordField = [=](
+ 			not_null<Ui::VerticalLayout*> container,
+ 			int index) {
+@@ -12920,12 +13001,12 @@ void WalletImportBox(
+ 		state->clearButtons.push_back(clear);
+ 	};
+ 	for (auto i = 0; i != kImportWordCountShort; ++i) {
+-		addWordField(box->verticalLayout(), i);
++		addWordField(wordsLayout, i);
+ 	}
+-	const auto extraWrap = box->verticalLayout()->add(
++	const auto extraWrap = wordsLayout->add(
+ 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+-			box->verticalLayout(),
+-			object_ptr<Ui::VerticalLayout>(box->verticalLayout())));
++			wordsLayout,
++			object_ptr<Ui::VerticalLayout>(wordsLayout)));
+ 	const auto extra = extraWrap->entity();
+ 	for (auto i = kImportWordCountShort; i != kImportWordCountLong; ++i) {
+ 		addWordField(extra, i);
+@@ -12934,6 +13015,18 @@ void WalletImportBox(
+ 	) | rpl::map([](int count) { return count == kImportWordCountLong; }));
+ 	extraWrap->finishAnimating();
+ 
++	const auto submitKey = std::make_shared<Fn<void()>>();
++	const auto keyImport = Tele::AddWalletKeyImport(
++		box,
++		&show->session(),
++		wordsWrap,
++		toggle,
++		toggleSections,
++		[=] {
++			(*submitKey)();
++		},
++		[=] { state->error = QString(); });
++
+ 	const auto error = box->addRow(
+ 		object_ptr<Ui::FlatLabel>(
+ 			box,
+@@ -13019,42 +13112,7 @@ void WalletImportBox(
+ 			last->setCursorPosition(last->getLastText().size());
+ 		});
+ 	};
+-	const auto submit = [=] {
+-		if (context && !context->valid()) {
+-			context->cancel();
+-			return;
+-		}
+-		if (state->importing) {
+-			return;
+-		}
+-		const auto count = requiredCount();
+-		auto words = std::vector<QString>();
+-		words.reserve(count);
+-		for (auto i = 0; i != count; ++i) {
+-			words.push_back(wordAt(i));
+-		}
+-		const auto empty = ranges::find(words, QString());
+-		const auto wrong = (empty != end(words))
+-			? empty
+-			: ranges::find_if(words, [](const QString &word) {
+-				return !IsWordlistWord(word);
+-			});
+-		if (wrong != end(words)) {
+-			const auto field = state->fields[wrong - begin(words)];
+-			revealField(field);
+-			if (wrong->isEmpty()) {
+-				field->setFocus();
+-			} else {
+-				field->showError();
+-			}
+-			return;
+-		}
+-		const auto match = DetectPhraseMatch(words);
+-		if (match != PhraseMatch::Rotation) {
+-			state->error = QString();
+-			ShowInvalidSecretWords(show, match == PhraseMatch::Foreign, context);
+-			return;
+-		}
++	const auto importWords = [=](std::vector<QString> words) {
+ 		state->importing = true;
+ 		if (mode == WalletImportMode::Restore) {
+ 			const auto done = crl::guard(box, [=] {
+@@ -13068,6 +13126,7 @@ void WalletImportBox(
+ 						.text = { tr::lng_wallet_imported_text(tr::now) },
+ 						.icon = &st::toastCheckIcon,
+ 					});
++					OfferKeyReplacement(show);
+ 				}
+ 			});
+ 			const auto fail = crl::guard(box, [=](const QString &error) {
+@@ -13141,10 +13200,64 @@ void WalletImportBox(
+ 			});
+ 		}
+ 	};
++	const auto submit = [=] {
++		if (context && !context->valid()) {
++			context->cancel();
++			return;
++		}
++		if (state->importing) {
++			return;
++		}
++		if (keyImport.active()) {
++			state->importing = true;
++			keyImport.prepare(crl::guard(box, [=](std::vector<QString> words) {
++				importWords(std::move(words));
++			}), crl::guard(box, [=](QString error) {
++				state->importing = false;
++				state->error = error;
++			}));
++			return;
++		}
++		auto words = std::vector<QString>();
++		const auto count = requiredCount();
++		words.reserve(count);
++		for (auto i = 0; i != count; ++i) {
++			words.push_back(wordAt(i));
++		}
++		const auto empty = ranges::find(words, QString());
++		const auto wrong = (empty != end(words))
++			? empty
++			: ranges::find_if(words, [](const QString &word) {
++				return !IsWordlistWord(word);
++			});
++		if (wrong != end(words)) {
++			const auto field = state->fields[wrong - begin(words)];
++			revealField(field);
++			if (wrong->isEmpty()) {
++				field->setFocus();
++			} else {
++				field->showError();
++			}
++			return;
++		}
++		const auto match = DetectPhraseMatch(words);
++		if (match != PhraseMatch::Rotation) {
++			state->error = QString();
++			ShowInvalidSecretWords(
++				show,
++				match == PhraseMatch::Foreign,
++				context);
++			return;
++		}
++		importWords(std::move(words));
++	};
++	*submitKey = submit;
+ 	box->addButton(tr::lng_wallet_import_button(), submit);
+ 
+ 	box->setFocusCallback([=] {
+-		state->fields.front()->setFocusFast();
++		if (!keyImport.focus()) {
++			state->fields.front()->setFocusFast();
++		}
+ 	});
+ 
+ 	const auto suggestions = Ui::CreateChild<Ui::RpWidget>(box.get());
+@@ -13327,6 +13440,10 @@ void WalletImportBox(
+ 
+ 	toggle->sectionActivated(
+ 	) | rpl::on_next([=](int section) {
++		if (keyImport.select(section)) {
++			hideSuggestions();
++			return;
++		}
+ 		applyCount((section == 1)
+ 			? kImportWordCountLong
+ 			: kImportWordCountShort);
+@@ -13340,6 +13457,9 @@ void WalletImportBox(
+ 		const auto field = state->fields[i];
+ 		state->pasteButtons[i]->setClickedCallback([=] {
+ 			const auto text = QGuiApplication::clipboard()->text();
++			if (keyImport.paste(text, false)) {
++				return;
++			}
+ 			const auto words = SplitPhraseWords(text);
+ 			if (words.size() > 1) {
+ 				distributePaste(words);
+@@ -13358,6 +13478,11 @@ void WalletImportBox(
+ 				not_null<const QMimeData*> data,
+ 				Ui::InputField::MimeAction action) {
+ 			const auto text = data->hasText() ? data->text() : QString();
++			if (keyImport.paste(
++					text,
++					action == Ui::InputField::MimeAction::Check)) {
++				return true;
++			}
+ 			const auto words = SplitPhraseWords(text);
+ 			if (words.size() < 2) {
+ 				return false;
+@@ -13730,9 +13855,13 @@ void AddBackupSection(
+ 				container,
+ 				tr::lng_wallet_backup_enable(),
+ 				st::settingsButtonNoIcon)));
+-	enable->toggleOn(wallet.capabilitiesValue(
+-	) | rpl::map([](const WalletCapabilities &capabilities) {
+-		return capabilities.canEnableBackup && !capabilities.backupEnabled;
++	enable->toggleOn(rpl::combine(
++		wallet.capabilitiesValue(),
++		Tele::IsKeyWalletValue(&show->session())
++	) | rpl::map([](const WalletCapabilities &capabilities, bool key) {
++		return !key
++			&& capabilities.canEnableBackup
++			&& !capabilities.backupEnabled;
+ 	}));
+ 	enable->finishAnimating();
+ 	enable->entity()->addClickHandler([=] {
+@@ -13747,9 +13876,13 @@ void AddBackupSection(
+ 				st::settingsButtonNoIcon)));
+ 	update->toggleOn(rpl::combine(
+ 		Tele::WalletRotateValue(),
+-		wallet.capabilitiesValue()
+-	) | rpl::map([](bool on, const WalletCapabilities &capabilities) {
+-		return on && !capabilities.backupEnabled;
++		wallet.capabilitiesValue(),
++		Tele::WalletReplaceKeyShown(&show->session())
++	) | rpl::map([](
++			bool on,
++			const WalletCapabilities &capabilities,
++			bool replaceKey) {
++		return on && !capabilities.backupEnabled && !replaceKey;
+ 	}));
+ 	update->finishAnimating();
+ 	update->entity()->addClickHandler([=] {
+@@ -13760,13 +13893,32 @@ void AddBackupSection(
+ 			StartPhraseUpdate(show, box, busy);
+ 		}), KeyActionKind::ResumeAfterRestore);
+ 	});
++	const auto replaceKey = container->add(
++		object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
++			container,
++			Settings::CreateButtonWithIcon(
++				container,
++				rpl::single(Tele::WalletReplaceKeyLabel()),
++				st::settingsButtonNoIcon)));
++	replaceKey->toggleOn(Tele::WalletReplaceKeyShown(&show->session()));
++	replaceKey->finishAnimating();
++	replaceKey->entity()->addClickHandler([=] {
++		if (*busy) {
++			return;
++		}
++		RunKeyRequiringAction(show, crl::guard(box, [=] {
++			StartPhraseUpdate(show, box, busy);
++		}), KeyActionKind::ResumeAfterRestore);
++	});
+ 	Ui::AddSkip(container);
+-	Ui::AddDividerText(container, wallet.capabilitiesValue(
+-	) | rpl::map([](const WalletCapabilities &capabilities) {
+-		return (capabilities.backupEnabled || capabilities.canEnableBackup)
+-			? tr::lng_wallet_backup_about_on()
+-			: tr::lng_wallet_backup_about_unavailable();
+-	}) | rpl::flatten_latest());
++	Ui::AddDividerText(container, Tele::WalletBackupAbout(
++		&show->session(),
++		wallet.capabilitiesValue(
++		) | rpl::map([](const WalletCapabilities &capabilities) {
++			return (capabilities.backupEnabled || capabilities.canEnableBackup)
++				? tr::lng_wallet_backup_about_on()
++				: tr::lng_wallet_backup_about_unavailable();
++		}) | rpl::flatten_latest()));
+ 	Ui::AddSkip(container);
+ }
+ 
+@@ -13787,7 +13939,9 @@ void WalletKeysBackupBox(
+ 			container,
+ 			Settings::CreateButtonWithIcon(
+ 				container,
+-				tr::lng_wallet_keys_show_phrase(),
++				Tele::WalletRevealLabel(
++					&show->session(),
++					tr::lng_wallet_keys_show_phrase()),
+ 				st::settingsButtonNoIcon)));
+ 	phrase->toggleOn(rpl::combine(
+ 		wallet.capabilitiesValue(),
+diff --git a/Telegram/SourceFiles/wallet/wallet_engine.cpp b/Telegram/SourceFiles/wallet/wallet_engine.cpp
+index 4fddf857aa08613fdcce48b88d544001ce7fc8a1..3877ccc4a0ec3aaf13967d5715cc19b7fa629842 100644
+--- a/Telegram/SourceFiles/wallet/wallet_engine.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_engine.cpp
+@@ -608,7 +608,7 @@ public:
+ 				throw HostFailed(
+ 					engine::StatuslessHostErrorKind::kCancelled,
+ 					u"wallet engine is closing"_q);
+-			} else if (_cancelledEarly.remove(id)) {
++			} else if (_cancelledEarly.remove(id) || _refusing) {
+ 				throw HostFailed(
+ 					engine::StatuslessHostErrorKind::kCancelled,
+ 					u"cancelled before start"_q);
+@@ -831,6 +831,7 @@ public:
+ 			}
+ 			_baseUrl = base;
+ 			_basePath = QUrl(base).path();
++			_refusing = false;
+ 			pending = base::take(_pending);
+ 			_cancelledEarly.clear();
+ 		}
+@@ -842,6 +843,22 @@ public:
+ 		}
+ 	}
+ 
++	void cancelPending() {
++		auto pending = base::flat_map<uint64, std::shared_ptr<Pending>>();
++		{
++			auto lock = std::lock_guard(_mutex);
++			_refusing = true;
++			pending = base::take(_pending);
++			_cancelledEarly.clear();
++		}
++		for (const auto &[id, entry] : pending) {
++			Fail(
++				entry,
++				engine::StatuslessHostErrorKind::kCancelled,
++				u"cancelled"_q);
++		}
++	}
++
+ 	// Main thread. Completes every waiting request so the worker can never
+ 	// block on a main thread that is tearing the Engine down.
+ 	void close() {
+@@ -914,6 +931,7 @@ private:
+ 
+ 	std::mutex _mutex;
+ 	bool _closed = false;
++	bool _refusing = false;
+ 	QString _baseUrl;
+ 	QString _basePath;
+ 	base::flat_map<uint64, std::shared_ptr<Pending>> _pending;
+@@ -1215,6 +1233,7 @@ Engine::Engine(not_null<Main::Session*> session, not_null<Api*> api)
+ : _session(session)
+ , _accountId(session->uniqueId())
+ , _statuslessHost(std::make_shared<StatuslessHost>(base::make_weak(this), api))
++, _recoveryHost(std::make_shared<StatuslessHost>(base::make_weak(this), api))
+ , _vault(session->domain().walletKeyring().shared_from_this())
+ , _platformHost(std::make_shared<PlatformHost>(
+ 	base::make_weak(this),
+@@ -1235,6 +1254,7 @@ Engine::~Engine() {
+ 	// The send journal is durable, so an interrupted shutdown is recovered
+ 	// by resolve_pending() on the next launch by the engine's own design.
+ 	_statuslessHost->close();
++	_recoveryHost->close();
+ 	_platformHost->close();
+ 	_lifetime.destroy();
+ 	_vault->unregisterAccount(_accountId);
+@@ -1297,6 +1317,20 @@ void Engine::startClient(const engine::WalletClientConfig &config) {
+ 		_platformHost);
+ }
+ 
++auto Engine::recoveryClient(const engine::WalletClientConfig &config)
++-> std::shared_ptr<wallet_engine::WalletClient> {
++	_recoveryHost->startClient(
++		QString::fromStdString(config.providers.toncenter_base_url));
++	return engine::WalletClient::new_statusless(
++		config,
++		_recoveryHost,
++		_platformHost);
++}
++
++void Engine::cancelRecovery() {
++	_recoveryHost->cancelPending();
++}
++
+ auto Engine::client() const
+ -> std::shared_ptr<wallet_engine::WalletClient> {
+ 	return _client;
+diff --git a/Telegram/SourceFiles/wallet/wallet_engine.h b/Telegram/SourceFiles/wallet/wallet_engine.h
+index 83c7fa8ff0daf14ef0cd9e5c2985b0beeb7a51df..34056ae7163d38a054e5c82587c928e3ffb15b71 100644
+--- a/Telegram/SourceFiles/wallet/wallet_engine.h
++++ b/Telegram/SourceFiles/wallet/wallet_engine.h
+@@ -262,6 +262,10 @@ public:
+ 	void startClient(const wallet_engine::WalletClientConfig &config);
+ 	[[nodiscard]] auto client() const
+ 		-> std::shared_ptr<wallet_engine::WalletClient>;
++	[[nodiscard]] auto recoveryClient(
++		const wallet_engine::WalletClientConfig &config)
++		-> std::shared_ptr<wallet_engine::WalletClient>;
++	void cancelRecovery();
+ 
+ 	// The domain's runtime, shared with every other signed-in account.
+ 	[[nodiscard]] VaultRuntime &vault() const;
+@@ -427,6 +431,7 @@ private:
+ 	const not_null<Main::Session*> _session;
+ 	const uint64 _accountId;
+ 	std::shared_ptr<StatuslessHost> _statuslessHost;
++	std::shared_ptr<StatuslessHost> _recoveryHost;
+ 	const std::shared_ptr<VaultRuntime> _vault;
+ 	std::shared_ptr<PlatformHost> _platformHost;
+ 	std::shared_ptr<wallet_engine::WalletLifecycle> _lifecycle;
+diff --git a/Telegram/SourceFiles/wallet/wallet_session.cpp b/Telegram/SourceFiles/wallet/wallet_session.cpp
+index 22c06e39deb7fbf87bb98b319b64d963b54fbbeb..6eac35dd3c18a0a0b3bbcfb004304c40083e4fb3 100644
+--- a/Telegram/SourceFiles/wallet/wallet_session.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_session.cpp
+@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "storage/storage_domain.h"
+ #include "tde2e/tde2e_api.h"
+ #include "tele/tele_options.h"
++#include "tele/tele_wallet_keys.h"
+ #include "ui/widgets/separate_panel.h"
+ #include "wallet/wallet_engine.h"
+ #include "wallet/wallet_key_protection.h"
+@@ -2236,6 +2237,9 @@ std::vector<QString> WordlistSuggestions(
+ }
+ 
+ PhraseMatch DetectPhraseMatch(const std::vector<QString> &words) {
++	if (Tele::WalletPrivateKeys() && Tele::IsWalletKeySecret(words)) {
++		return PhraseMatch::Rotation;
++	}
+ 	auto engineWords = std::vector<std::string>();
+ 	engineWords.reserve(words.size());
+ 	for (const auto &word : words) {
+@@ -3804,14 +3808,19 @@ void Session::revealLocally(
+ 	const auto descriptor = DescriptorFromRecord(record);
+ 	_engine->runLocal([lifecycle, descriptor] {
+ 		return lifecycle->reveal_recovery_phrase(descriptor);
+-	}, [=, grant = auth.grant](engine::RecoveryPhrase phrase) {
++	}, [=, this, grant = auth.grant](engine::RecoveryPhrase phrase) {
+ 		auto words = SplitWords(QString::fromStdString(phrase.phrase));
+-		if (words.size() < 2) {
++		if (words.size() < 2 && !Tele::IsWalletKeySecret(words)) {
+ 			LOG(("Wallet Error: local phrase reveal too short word_count=%1."
+ 				).arg(words.size()));
+ 			fail(u"PHRASE_EMPTY"_q);
+ 			return;
+ 		}
++		Tele::NoteWalletSecret(
++			_session,
++			record.address,
++			record.publicKey,
++			words);
+ 		done(std::move(words));
+ 	}, [=, this, grant = auth.grant](EngineError error) {
+ 		noteSecretReadFailure(
+@@ -4092,6 +4101,14 @@ void Session::fetchShareParts(
+ void Session::validatePhraseIdentity(
+ 		const std::vector<QString> &words,
+ 		Fn<void(std::optional<PhraseIdentity>)> done) {
++	if (Tele::IsWalletKeySecret(words)) {
++		_engine->runLocal([words] {
++			return Tele::WalletKeyIdentity(words);
++		}, done, [done](EngineError) {
++			done(std::nullopt);
++		});
++		return;
++	}
+ 	auto normalized = QStringList();
+ 	for (const auto &word : words) {
+ 		normalized.push_back(NormalizeWord(word));
+@@ -4115,7 +4132,7 @@ void Session::restoreFromWords(
+ 	if (scope && !commentScopeCurrent(scope)) {
+ 		fail(u"PHRASE_ORIGIN_EXPIRED"_q);
+ 		return;
+-	} else if (words.size() < 2) {
++	} else if (words.size() < 2 && !Tele::IsWalletKeySecret(words)) {
+ 		LOG(("Wallet Error: reconstructed phrase too short "
+ 			"word_count=%1 export_request=%2."
+ 			).arg(words.size()).arg(exportRequestId));
+@@ -4333,6 +4350,11 @@ void Session::restoreFromWords(
+ 				rollback([=] { fail(u"PHRASE_ORIGIN_EXPIRED"_q); });
+ 				return;
+ 			}
++			Tele::NoteWalletSecret(
++				_session,
++				record.address,
++				record.publicKey,
++				restored.words);
+ 			done(std::move(restored.words), CustodyOutcome::Installed);
+ 		}, [=, this](EngineError error) {
+ 			// Only stores recorded by this import are removed. The shared
+@@ -4467,6 +4489,98 @@ void Session::restoreFromWords(
+ 	});
+ }
+ 
++void Session::recoverRotatedSecret(
++		const QString &address,
++		std::vector<QString> words,
++		Fn<void(const QString &phrase)> done,
++		Fn<void(const QString &error)> fail) {
++	if (_recoveringSecret) {
++		fail(u"RECOVER_BUSY"_q);
++		return;
++	}
++	auto normalized = QStringList();
++	auto list = std::vector<std::string>();
++	for (const auto &word : words) {
++		normalized.push_back(NormalizeWord(word));
++		list.push_back(normalized.back().toStdString());
++	}
++	const auto key = RotationMnemonicKey(normalized);
++	const auto parsed = ParseAddress(address);
++	if (!key || !parsed) {
++		fail(u"RECOVER_INVALID_WORDS"_q);
++		return;
++	}
++	_engine->cancelRecovery();
++	auto client = std::shared_ptr<engine::WalletClient>();
++	try {
++		client = _engine->recoveryClient(engine::WalletClientConfig{
++			.record_id = "tele-recovery",
++			.address = FormatFriendly(parsed->raw, false).toStdString(),
++			.public_key = std::vector<uint8_t>(
++				key->constData(),
++				key->constData() + key->size()),
++			.local_secret_ref = std::nullopt,
++			.network = engine::Network::kMainnet,
++			.send_validity_seconds = kClientSendValiditySeconds,
++			.resolution_margin_seconds = kClientResolutionMarginSeconds,
++			.providers = engine::ProviderConfig{
++				.toncenter_base_url = "https://toncenter.com",
++				.dns_root_address = std::nullopt,
++				.request_timeout_ms = kClientRequestTimeoutMs,
++			},
++		});
++	} catch (...) {
++		fail(u"RECOVER_FAILED"_q);
++		return;
++	}
++	_recoveringSecret = true;
++	_engine->run([client, list] {
++		auto phrase = std::string();
++		auto error = std::exception_ptr();
++		try {
++			phrase = client->recover_wallet_secret(list).phrase;
++		} catch (...) {
++			error = std::current_exception();
++		}
++		try {
++			client->shutdown();
++		} catch (...) {
++		}
++		if (error) {
++			std::rethrow_exception(error);
++		}
++		return QString::fromStdString(phrase);
++	}, [=, this](const QString &phrase) {
++		_recoveringSecret = false;
++		done(phrase);
++	}, [=, this](EngineError error) {
++		_recoveringSecret = false;
++		LOG(("Wallet Error: rotated secret recovery failed: %1"
++			).arg(error.message));
++		auto code = u"RECOVER_FAILED"_q;
++		try {
++			if (error.underlying) {
++				std::rethrow_exception(error.underlying);
++			}
++		} catch (const engine::wallet_client_error::InvalidProtectedSecret &) {
++			code = u"RECOVER_INVALID_WORDS"_q;
++		} catch (const engine::wallet_client_error
++				::EncryptedCommentLookupFailed &) {
++			code = u"RECOVER_NOT_FOUND"_q;
++		} catch (const engine::wallet_client_error::WalletIdentityMismatch &) {
++			code = u"RECOVER_MISMATCH"_q;
++		} catch (...) {
++		}
++		fail(code);
++	});
++}
++
++void Session::cancelRotatedSecretRecovery() {
++	if (_recoveringSecret) {
++		_engine->cancelRecovery();
++	}
++}
++
+ void Session::restoreFromPhrase(
+ 		KeyAuthorization auth,
+ 		std::vector<QString> words,
+@@ -4819,6 +4933,12 @@ void Session::enableBackup(
+ 		Fn<void(const QString &error)> fail) {
+ 	ensureLoaded();
+ 	fail = LoggedFail(u"backup enable"_q, std::move(fail));
++	if (Tele::IsKeyWallet(_session)) {
++		if (fail) {
++			fail(u"BACKUP_PRIVATE_KEY"_q);
++		}
++		return;
++	}
+ 	if (custodyBusy() || custody().pendingRotation) {
+ 		LOG(("Wallet Error: backup requested while another is in flight."));
+ 		if (fail) {
+@@ -4946,6 +5066,11 @@ void Session::enableBackup(
+ 			return;
+ 		}
+ 		revealLocally(auth, record, [=, this](std::vector<QString> words) {
++			if (Tele::IsWalletKeySecret(words)) {
++				LOG(("Wallet Error: backup refused for a private key."));
++				fail(u"BACKUP_PRIVATE_KEY"_q);
++				return;
++			}
+ 			const auto parts = SealBackupParts(*keys, words);
+ 			if (!parts) {
+ 				LOG(("Wallet Error: backup parts could not be sealed."));
+@@ -6147,6 +6272,11 @@ void Session::replaceWithImported(
+ 					abandon(refusal);
+ 					return;
+ 				}
++				Tele::NoteWalletSecret(
++					_session,
++					record.address,
++					record.publicKey,
++					phrase);
+ 				finishConfirmedReplace(
+ 					oldAddress,
+ 					record,
+diff --git a/Telegram/SourceFiles/wallet/wallet_session.h b/Telegram/SourceFiles/wallet/wallet_session.h
+index c0a4c8474d9de5bfa17f28c2b9ccfa9545340e6b..d3a35342b199ecd6fedd2d0775d34227facbb6a9 100644
+--- a/Telegram/SourceFiles/wallet/wallet_session.h
++++ b/Telegram/SourceFiles/wallet/wallet_session.h
+@@ -637,6 +637,12 @@ public:
+ 		std::optional<Core::CloudPasswordResult> password,
+ 		Fn<void()> done,
+ 		Fn<void(const QString &error)> fail);
++	void recoverRotatedSecret(
++		const QString &address,
++		std::vector<QString> words,
++		Fn<void(const QString &phrase)> done,
++		Fn<void(const QString &error)> fail);
++	void cancelRotatedSecretRecovery();
+ 	void restoreFromPhrase(
+ 		KeyAuthorization auth,
+ 		std::vector<QString> words,
+@@ -1209,6 +1215,7 @@ private:
+ 	bool _custodyResetting = false;
+ 	bool _phraseRevealing = false;
+ 	bool _replacing = false;
++	bool _recoveringSecret = false;
+ 	bool _backupChanging = false;
+ 	rpl::variable<DeviceCustodyState> _deviceCustody;
+ 	rpl::event_stream<> _custodyUpdates;

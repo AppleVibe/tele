@@ -42,7 +42,10 @@ settings → tele → interface.
 | [266](../patches/tdesktop/0266-feat-smaller-minimum-window-size.patch) | the window can be made as small as 256x256 instead of 380x480 | tele → interface, off |
 | [277](../patches/tdesktop/0277-feat-smooth-wheel-scrolling.patch) | each mouse wheel step glides instead of jumping in chats, the chat list, sections, boxes and settings, like profiles already do. touchpads are unchanged | tele → interface, off |
 | [310](../patches/tdesktop/0310-feat-compact-icon-only-folders.patch) | folders shown as icons only get smaller icons and buttons, in the side bar and in the tabs above the chat list | tele → interface, off |
+| [336](../patches/tdesktop/0336-feat-scroll-to-zoom-in-the-media-viewer.patch) | scroll to zoom in the media viewer. hold ctrl or cmd while scrolling to switch photos | tele → interface, off |
+| [339](../patches/tdesktop/0339-feat-smoother-wheel-glides-in-chats.patch) | wheel glides step at your monitor's refresh rate, chats move a cached image while they glide, animated stickers, emoji and gifs pause until the glide ends, and the chat list only repaints rows that changed. tele → debug → log scroll frame rate writes each glide's timings to log.txt | with 277 |
 | [1005](../patches/Telegram/lib_ui/0005-feat-ease-mouse-wheel-steps-in-scroll-areas.patch) | the part of smooth wheel scrolling that lives in the ui library's scroll areas | with 277 |
+| [1008](../patches/Telegram/lib_ui/0008-feat-glide-at-the-screen-refresh-rate.patch) | the part of smoother glides that lives in the ui library: a glide ticks at the monitor's refresh rate while other animations keep their pace | with 277 |
 
 ## chats
 
@@ -78,6 +81,10 @@ settings → tele → chats.
 | [283](../patches/tdesktop/0283-feat-hide-birthday-banners-and-effects.patch) | no birthday banners above the chat list, no confetti in profiles, no cake in the birthday row and no extra gift button in the message field on birthdays | tele → chats, off |
 | [285](../patches/tdesktop/0285-feat-filter-chat-search-by-message-type.patch) | search a chat by message type: photos, videos, files, music, voice messages, round videos, gifs or links. without text it lists every message of that type | tele → chats, off |
 | [292](../patches/tdesktop/0292-feat-turn-off-money.patch) | turn off money, telegram's wallet: it's gone from the app, ton connect requests can't be opened, money transfers in chats show as plain service messages, and money links only say it's off | tele → chats, off, needs a restart |
+| [337](../patches/tdesktop/0337-fix-search-one-person-s-messages-by-type.patch) | searching one person's messages by type works: tele asks the server both ways and filters the rest itself | with 285 |
+| [338](../patches/tdesktop/0338-feat-design-the-money-card-with-a-gift.patch) | money's card takes the colours, pattern and model of one of your collectible gifts, picked in money's ⋮ menu → card design or synced with your gift status. transfers you send in chats use its colours too | tele → chats, on |
+| [344](../patches/tdesktop/0344-feat-hide-the-other-balances-above-the-money-card.patch) | hide the "you also have …" rows above the money card, here or by right-clicking one of them | tele → chats, off |
+| [348](../patches/tdesktop/0348-feat-put-gifts-on-the-money-card-as-stickers.patch) | put your collectible gifts on the money card as stickers: drag them from the card design box or money's collectibles tab, move them around, and click one to take it off | with 338 |
 
 ## messages
 
@@ -156,6 +163,7 @@ settings → tele → sending.
 | [263](../patches/tdesktop/0263-feat-compress-photos-less.patch) | photos are compressed at jpeg quality 94 instead of 87 | tele → sending, off |
 | [264](../patches/tdesktop/0264-feat-thinner-brush-in-the-photo-editor.patch) | the photo editor's brush goes down to 1 px instead of 3.4 px | tele → sending, off |
 | [284](../patches/tdesktop/0284-feat-mention-several-people-in-a-row.patch) | right-click or tab in the @ list adds the person and opens the list again for the next one, and ctrl+click mentions by name instead of @username | tele → sending, off |
+| [349](../patches/tdesktop/0349-fix-confirm-stickers-sent-from-sticker-set-boxes.patch) | stickers sent from a sticker set's box also wait for a second click | with 130 |
 
 ## notifications
 
@@ -262,6 +270,8 @@ settings → tele → profiles and ids.
 | [268](../patches/tdesktop/0268-feat-copy-the-owner-id-of-sticker-sets.patch) | copy the id of the account that made a sticker or emoji set from the set's menu | tele → profiles and ids, off |
 | [286](../patches/tdesktop/0286-feat-peek-at-a-hidden-last-seen.patch) | peek at a last seen your own privacy hides: tele briefly shares yours with that person, reads theirs and puts your settings back, even after a crash | tele → profiles and ids, off |
 | [309](../patches/tdesktop/0309-feat-use-the-blurred-profile-photo-as-the-profile-ba.patch) | profiles use a blurred, darkened copy of the profile photo as the background of their header, instead of the profile colour or gift backdrop | tele → profiles and ids, off |
+| [335](../patches/tdesktop/0335-feat-fill-the-whole-profile-with-the-blurred-photo-s.patch) | with the blurred photo background on, the whole profile takes the colour of the photo's lower edge, not only its header, with the text kept readable | with 309 |
+| [350](../patches/tdesktop/0350-feat-blurred-profile-photo-background-out-of-beta.patch) | the blurred photo background of profiles is out of beta | with 309 |
 
 ### gift studio
 
@@ -300,6 +310,12 @@ settings → tele → debug.
 | [298](../patches/tdesktop/0298-feat-media-in-secret-chats.patch) | secret chats send and receive photos, videos, files, music, voice and round messages, gifs and stickers up to 100 mb, and show locations and contacts they receive | with 288 |
 | [299](../patches/tdesktop/0299-feat-self-destruct-timers-in-secret-chats.patch) | set a self-destruct timer in a secret chat from the button in the message field or the chat menu: messages disappear for both of you after they're read. timed photos and videos open while you hold them, and screenshots are announced | with 288 |
 | [308](../patches/tdesktop/0308-feat-open-the-mtproto-inspector-and-console-as-panel.patch) | the mtproto inspector and console open as tele panels, like the money window, that can be resized and keep the keyboard focus in their page | with 88 |
+| [341](../patches/tdesktop/0341-build-take-wallet-engine-from-gettele-money-for-priv.patch) | tele builds money's wallet engine from gettele/money, a copy of telegram's engine that can import private keys | with 342 |
+| [342](../patches/tdesktop/0342-feat-import-wallets-from-private-keys.patch) | import a wallet into money from its private key, not only from secret words. such a wallet is never backed up to telegram, and you can switch it to 12 secret words later | tele → debug, off |
+| [343](../patches/tdesktop/0343-feat-copy-secret-words-without-waiting.patch) | every list of secret words in money gets a copy words link, and showing them no longer ends with the "sure done?" check | tele → debug, on |
+| [345](../patches/tdesktop/0345-build-fetch-litehtml-for-html-bubbles.patch) | tele downloads litehtml, the html engine of html bubbles, while it builds | with 346 |
+| [346](../patches/tdesktop/0346-feat-render-html-cards-with-litehtml-and-run-their-s.patch) | html bubbles β: .tgw files show as html cards that can run their own scripts, for everyone using tele with the option on; other apps see a file | tele → debug, off |
+| [347](../patches/tdesktop/0347-feat-show-html-bubbles-in-a-playground-chat-and-for-.patch) | an html playground chat shows what you type there as an html card, and .tgw files you get open as cards in the chat | with 346 |
 | [1003](../patches/Telegram/lib_ui/0003-feat-let-picked-fonts-use-their-real-metrics-on-wind.patch) | the part of the picked font fix that lives in the ui library | with 275 |
 
 ## server
@@ -427,6 +443,7 @@ always on, or without a switch of their own.
 | [303](../patches/tdesktop/0303-feat-copy-the-text-of-service-messages.patch) | right-click a service message, like a join, a pin or a gift, to copy its text | always on |
 | [305](../patches/tdesktop/0305-feat-copy-and-open-transaction-links-from-money-tran.patch) | right-click a money transfer message in a chat to copy its transaction link or open it in the explorer | always on |
 | [307](../patches/tdesktop/0307-feat-resize-the-money-window.patch) | the money window can be resized, its content stays in a column in the middle | always on |
+| [340](../patches/tdesktop/0340-fix-quote-the-fee-of-a-wallet-key-update-again.patch) | updating a wallet's key in money no longer fails with "the update could not be completed" | always on |
 | [1001](../patches/Telegram/lib_ui/0001-fix-fullscreen-mini-apps-cover-the-screen-with-their.patch) | a mini app that opens in fullscreen covers the screen from its corner, with its ⋮ and ✕ buttons, instead of hanging off the screen (windows) | always on |
 | [1002](../patches/Telegram/lib_ui/0002-fix-unbreakable-characters-no-longer-scroll-text-fie.patch) | a text field with a long run of characters that can't wrap no longer scrolls sideways and hides everything else | always on |
 | [1006](../patches/Telegram/lib_ui/0006-fix-the-maximize-button-follows-the-real-window-stat.patch) | the maximize button of a window shows and does the right thing after resizing or moving the window drops its maximized or full screen state | always on |
@@ -460,4 +477,5 @@ everything else.
 | [332](../patches/tdesktop/0332-feat-app-and-system-APIs-menu-items-settings-section.patch) | scripts can recolor the theme, set the window title and badge, control the music player and calls, switch accounts, add items to the main and tray menus, settings sections and quick buttons next to messages, and, if you allow it, run programs | with 312 |
 | [333](../patches/tdesktop/0333-feat-a-widget-layer-inline-result-interception-and-a.patch) | scripts can read and change anything in tele's windows, like adding rows to the gift box, and check inline bot results before they're sent. a script's page and its log open over the scripts list, so the list stays where you left it | with 312 |
 | [334](../patches/tdesktop/0334-feat-ask-before-scripts-change-how-messages-and-peop.patch) | scripts need the new display grant, which tele asks you about, before they change how messages, people and chats look or show messages that were never sent, so a script can't quietly make a message say something it doesn't | with 312 |
+| [351](../patches/tdesktop/0351-feat-web-platform-workers-files-sound-webviews-stori.patch) | scripts get the web platform (urls, abort signals, structured clone, intl, websockets, workers, full webcrypto, compression and images), a file area of their own, sounds, webview panels, npm packages, stories, gifts and stars, tele's own data, video chats, the media viewer, banners, selection, compose state, search providers, sticker and gif panels, mini apps, inline answers and buttons under messages. scripts installed from a link check for updates, gettele.app has a catalog of scripts, and new scripts show up in the scripts manager without a restart | with 312 |
 | [1007](../patches/Telegram/lib_ui/0007-feat-let-scripts-swap-label-texts-and-find-full-widt.patch) | text a script changed in tele's windows comes back exactly as it was, formatting and custom emoji included, when the script stops, and rows a script adds to info tables stay above their last full-width line | with 312 |

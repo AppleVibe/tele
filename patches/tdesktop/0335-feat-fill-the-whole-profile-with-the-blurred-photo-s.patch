@@ -1,0 +1,818 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Sun, 11 Oct 2026 18:35:22 +0300
+Subject: [PATCH] feat: fill the whole profile with the blurred photo's colour
+
+---
+ .../SourceFiles/info/info_layer_widget.cpp    |  10 +-
+ .../info/profile/info_profile_top_bar.cpp     |   5 +
+ .../info/profile/info_profile_top_bar.h       |   2 +
+ .../SourceFiles/settings/settings_tele.cpp    |  10 +-
+ Telegram/SourceFiles/tele/tele_options.cpp    |  14 +
+ Telegram/SourceFiles/tele/tele_options.h      |   3 +
+ .../tele/tele_profile_photo_bg.cpp            | 425 ++++++++++++++++++
+ .../SourceFiles/tele/tele_profile_photo_bg.h  |  50 +++
+ .../SourceFiles/tele/tele_settings_io.cpp     |   1 +
+ Telegram/SourceFiles/ui/window_palette.cpp    |  15 +-
+ Telegram/SourceFiles/ui/window_palette.h      |   4 +
+ 11 files changed, 533 insertions(+), 6 deletions(-)
+
+diff --git a/Telegram/SourceFiles/info/info_layer_widget.cpp b/Telegram/SourceFiles/info/info_layer_widget.cpp
+index 4ad4fab661b3d10bbbfbd182f024ef9d8f43ab44..82229eed0638d0a37b34d24b8f789a7af35340dd 100644
+--- a/Telegram/SourceFiles/info/info_layer_widget.cpp
++++ b/Telegram/SourceFiles/info/info_layer_widget.cpp
+@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "window/main_window.h"
+ #include "main/main_session.h"
+ #include "core/application.h"
++#include "tele/tele_profile_photo_bg.h"
+ #include "styles/style_info.h"
+ #include "styles/style_layers.h"
+ 
+@@ -368,7 +369,7 @@ void LayerWidget::paintEvent(QPaintEvent *e) {
+ 		if (clip.intersects(bottom)) {
+ 			if (const auto rounding = _contentWrap->bottomSkipRounding()) {
+ 				rounding->paint(p, rect(), RectPart::FullBottom);
+-			} else {
++			} else if (!Tele::PaintProfilePhotoBgStrip(p, this, bottom, true)) {
+ 				Ui::FillRoundRect(p, bottom, st::boxBg, {
+ 					.p = { QPixmap(), QPixmap(), corners.p[2], corners.p[3] }
+ 				});
+@@ -378,6 +379,13 @@ void LayerWidget::paintEvent(QPaintEvent *e) {
+ 		const auto rounding = _contentWrap->bottomSkipRounding();
+ 		const auto &color = rounding ? rounding->color() : st::boxBg;
+ 		p.fillRect(0, height() - radius, width(), radius, color);
++		if (!rounding) {
++			Tele::PaintProfilePhotoBgStrip(
++				p,
++				this,
++				QRect(0, height() - radius, width(), radius),
++				false);
++		}
+ 	}
+ 	if (_contentWrap->animatingShow()) {
+ 		const auto top = QRect{ 0, 0, width(), radius };
+diff --git a/Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp b/Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp
+index 8030cfba7fc547caae804535dd5f16ba79013ea0..61a0ba44b45427b0b90e808fb4337278a04c7f77 100644
+--- a/Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp
++++ b/Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp
+@@ -460,6 +460,10 @@ TopBar::TopBar(
+ 	_photoBg = Tele::MakeProfilePhotoBg(
+ 		_peer,
+ 		!_topic && !_savedMessages && _source != Source::Preview);
++	_photoBgFill = Tele::MakeProfilePhotoBgFill(
++		this,
++		_photoBg.get(),
++		_wrap.changes() | rpl::to_empty);
+ 
+ 	if (_peer->isMegagroup() || _peer->isChat()) {
+ 		_statusLabel->setMembersLinkCallback([=, peer = _peer] {
+@@ -2956,6 +2960,7 @@ void TopBar::paintEvent(QPaintEvent *e) {
+ 		} else {
+ 			p.drawImage(x, y, _cachedGradient);
+ 		}
++		Tele::PaintProfilePhotoBgSeam(p, _photoBgFill.get());
+ 	}
+ 	if (_patternEmoji && _patternEmoji->ready()) {
+ 		paintAnimatedPattern(p, clipBounds, geometry);
+diff --git a/Telegram/SourceFiles/info/profile/info_profile_top_bar.h b/Telegram/SourceFiles/info/profile/info_profile_top_bar.h
+index 0cf6ce4c4b89120e814d3d2a6a2a6dfff119b5e7..ad4572138c174984fbcae0b60297eac527b717df 100644
+--- a/Telegram/SourceFiles/info/profile/info_profile_top_bar.h
++++ b/Telegram/SourceFiles/info/profile/info_profile_top_bar.h
+@@ -85,6 +85,7 @@ struct MenuCallback;
+ 
+ namespace Tele {
+ class ProfilePhotoBg;
++class ProfilePhotoBgFill;
+ } // namespace Tele
+ 
+ namespace Info::Profile {
+@@ -392,6 +393,7 @@ private:
+ 	std::optional<DocumentId> _localPatternEmojiId;
+ 	std::shared_ptr<Data::EmojiStatusCollectible> _localCollectible;
+ 	std::unique_ptr<Tele::ProfilePhotoBg> _photoBg;
++	std::unique_ptr<Tele::ProfilePhotoBgFill> _photoBgFill;
+ 
+ };
+ 
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 19009435b5fe0987e5dce406702bddd02e092fa2..3f1c925fcbacd18a2d7761b9c606a7942e75ea3f 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -3771,7 +3771,15 @@ void FillProfiles(SectionBuilder &builder) {
+ 	AddOptionToggle(
+ 		builder,
+ 		::Tele::kOptionProfilePhotoBg,
+-		{ u"blur"_q, u"avatar"_q, u"cover"_q, u"background"_q });
++		{ u"blur"_q, u"avatar"_q, u"cover"_q, u"background"_q },
++		{},
++		[&] {
++			AddOptionToggle(
++				builder,
++				::Tele::kOptionProfilePhotoBgWhole,
++				{ u"color"_q, u"colour"_q, u"sections"_q, u"shared media"_q },
++				::Tele::kOptionProfilePhotoBg);
++		});
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Gifts"_q);
+ 	AddOptionToggle(builder, ::Tele::kOptionShowGiftIds);
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 33fc26741f4959a20fd93120b8b9e364b5a9bf21..6a8b76913029a225d4d86ea14fa9cbedb5bdb1c0 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -250,6 +250,7 @@ const char kOptionInvisibleNamesPhrase[] = "tele-invisible-names-phrase";
+ const char kOptionShowHiddenChars[] = "tele-show-hidden-chars";
+ const char kOptionForwardOneByOne[] = "tele-forward-one-by-one";
+ const char kOptionProfilePhotoBg[] = "tele-profile-photo-bg";
++const char kOptionProfilePhotoBgWhole[] = "tele-profile-photo-bg-whole";
+ const char kOptionRemoveMyMessages[] = "tele-remove-my-messages";
+ 
+ namespace {
+@@ -1753,6 +1754,11 @@ base::options::toggle ProfilePhotoBgOption({
+ 	.name = "Blurred photo as profile background β",
+ });
+ 
++base::options::toggle ProfilePhotoBgWholeOption({
++	.id = kOptionProfilePhotoBgWhole,
++	.name = "Fill the whole profile",
++});
++
+ base::options::toggle RemoveMyMessagesOption({
+ 	.id = kOptionRemoveMyMessages,
+ 	.name = "Remove my messages",
+@@ -3605,6 +3611,14 @@ rpl::producer<> ProfilePhotoBackgroundChanges() {
+ 	return ProfilePhotoBgOption.changes();
+ }
+ 
++bool ProfilePhotoBgWhole() {
++	return ProfilePhotoBgWholeOption.value();
++}
++
++rpl::producer<> ProfilePhotoBgWholeChanges() {
++	return ProfilePhotoBgWholeOption.changes();
++}
++
+ bool RemoveMyMessages() {
+ 	return RemoveMyMessagesOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index 09557d50aef3a974dd0f9833a37acfc3b71960e1..b59248347e6c59b5640e27cd34af560b424986c3 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -245,6 +245,7 @@ extern const char kOptionInvisibleNamesPhrase[];
+ extern const char kOptionShowHiddenChars[];
+ extern const char kOptionForwardOneByOne[];
+ extern const char kOptionProfilePhotoBg[];
++extern const char kOptionProfilePhotoBgWhole[];
+ extern const char kOptionRemoveMyMessages[];
+ 
+ [[nodiscard]] bool HideStories();
+@@ -607,6 +608,8 @@ void SetInvisibleNamesPhrase(const QString &value);
+ [[nodiscard]] bool ForwardOneByOne();
+ [[nodiscard]] bool ProfilePhotoBackground();
+ [[nodiscard]] rpl::producer<> ProfilePhotoBackgroundChanges();
++[[nodiscard]] bool ProfilePhotoBgWhole();
++[[nodiscard]] rpl::producer<> ProfilePhotoBgWholeChanges();
+ [[nodiscard]] bool RemoveMyMessages();
+ 
+ } // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_profile_photo_bg.cpp b/Telegram/SourceFiles/tele/tele_profile_photo_bg.cpp
+index 89534b96697a42f4fd1f21f566d1458c9704d20b..ed8a867b074e0982506951e8b1c065f8ecfeb502 100644
+--- a/Telegram/SourceFiles/tele/tele_profile_photo_bg.cpp
++++ b/Telegram/SourceFiles/tele/tele_profile_photo_bg.cpp
+@@ -8,7 +8,14 @@
+ #include "tele/secret/secret_chats.h"
+ #include "tele/tele_options.h"
+ #include "ui/image/image_prepare.h"
++#include "ui/layers/layer_widget.h"
+ #include "ui/painter.h"
++#include "ui/rp_widget.h"
++#include "ui/style/style_core_palette.h"
++#include "ui/window_palette.h"
++#include "window/themes/window_themes_embedded.h"
++#include "styles/palette.h"
++#include "styles/style_layers.h"
+ 
+ namespace Tele {
+ namespace {
+@@ -18,6 +25,11 @@ constexpr auto kRadius = 16;
+ constexpr auto kTargetLightness = 0.3;
+ constexpr auto kMinDarken = 0.2;
+ constexpr auto kMaxDarken = 0.7;
++constexpr auto kDarkLightness = 0.55;
++constexpr auto kLabelContrast = 4.5;
++constexpr auto kSeam = 48;
++constexpr auto kFillDimDark = 0.25;
++constexpr auto kFillDimLight = 0.4;
+ 
+ [[nodiscard]] not_null<PeerData*> PhotoPeer(not_null<PeerData*> peer) {
+ 	if (const auto broadcast = peer->monoforumBroadcast()) {
+@@ -86,6 +98,223 @@ constexpr auto kMaxDarken = 0.7;
+ 	return result;
+ }
+ 
++[[nodiscard]] QColor BottomColor(QImage image) {
++	if (image.format() != QImage::Format_ARGB32_Premultiplied
++		&& image.format() != QImage::Format_RGB32) {
++		image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
++	}
++	const auto rows = std::clamp(
++		int(image.devicePixelRatio()),
++		1,
++		image.height());
++	return Average(image.copy(
++		0,
++		image.height() - rows,
++		image.width(),
++		rows));
++}
++
++[[nodiscard]] float64 Lightness(const QColor &color) {
++	const auto linear = [](float64 value) {
++		return (value <= 0.04045)
++			? (value / 12.92)
++			: std::pow((value + 0.055) / 1.055, 2.4);
++	};
++	const auto r = linear(float64(color.redF()));
++	const auto g = linear(float64(color.greenF()));
++	const auto b = linear(float64(color.blueF()));
++	const auto l = std::cbrt(
++		0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
++	const auto m = std::cbrt(
++		0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
++	const auto s = std::cbrt(
++		0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
++	return 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
++}
++
++[[nodiscard]] bool Dark(const QColor &color) {
++	return Lightness(color) < kDarkLightness;
++}
++
++[[nodiscard]] float64 RelativeLuminance(QRgb color) {
++	const auto linear = [](int value) {
++		const auto v = value / 255.;
++		return (v <= 0.04045) ? (v / 12.92) : std::pow((v + 0.055) / 1.055, 2.4);
++	};
++	return 0.2126 * linear(qRed(color))
++		+ 0.7152 * linear(qGreen(color))
++		+ 0.0722 * linear(qBlue(color));
++}
++
++[[nodiscard]] float64 Contrast(QRgb a, QRgb b) {
++	const auto x = RelativeLuminance(a) + 0.05;
++	const auto y = RelativeLuminance(b) + 0.05;
++	return std::max(x, y) / std::min(x, y);
++}
++
++[[nodiscard]] QRgb Readable(QRgb label, QRgb bg, bool dark) {
++	const auto towards = dark ? 255 : 0;
++	auto result = label;
++	for (auto step = 1; step <= 20 && Contrast(result, bg) < kLabelContrast; ++step) {
++		const auto mix = [&](int channel) {
++			return channel + (towards - channel) * step / 20;
++		};
++		result = qRgba(
++			mix(qRed(label)),
++			mix(qGreen(label)),
++			mix(qBlue(label)),
++			qAlpha(label));
++	}
++	return result;
++}
++
++[[nodiscard]] const std::vector<int> &LabelSlots() {
++	static const auto result = [] {
++		const auto colors = {
++			&st::windowSubTextFg,
++			&st::windowSubTextFgOver,
++			&st::dialogsTextFg,
++			&st::dialogsTextFgOver,
++			&st::dialogsDateFg,
++			&st::dialogsDateFgOver,
++			&st::placeholderFg,
++		};
++		auto list = std::vector<int>();
++		list.reserve(colors.size());
++		for (const auto color : colors) {
++			const auto index = style::main_palette::indexOfColor(*color);
++			if (index >= 0) {
++				list.push_back(index);
++			}
++		}
++		return list;
++	}();
++	return result;
++}
++
++[[nodiscard]] QByteArray BaseColors(bool dark) {
++	if (Dark(st::windowBg->c) == dark) {
++		return style::main_palette::save();
++	}
++	static auto cache = std::array<QByteArray, 2>();
++	auto &result = cache[dark ? 1 : 0];
++	if (result.isEmpty()) {
++		using Window::Theme::EmbeddedType;
++		result = Window::Theme::PrepareEmbeddedPalette(
++			dark ? EmbeddedType::Night : EmbeddedType::Default,
++			std::nullopt)->save();
++	}
++	return result;
++}
++
++[[nodiscard]] const std::vector<int> &FillSlots() {
++	static const auto result = [] {
++		const auto colors = {
++			&st::windowBg,
++			&st::windowBgOver,
++			&st::windowBgRipple,
++			&st::windowShadowFgFallback,
++			&st::lightButtonBg,
++			&st::lightButtonBgOver,
++			&st::lightButtonBgRipple,
++			&st::menuBg,
++			&st::menuBgOver,
++			&st::menuBgRipple,
++			&st::boxBg,
++			&st::boxSearchBg,
++			&st::boxDividerBg,
++			&st::contactsBg,
++			&st::contactsBgOver,
++			&st::filterInputActiveBg,
++			&st::filterInputInactiveBg,
++			&st::overviewCheckBorder,
++		};
++		auto list = std::vector<int>();
++		list.reserve(colors.size());
++		for (const auto color : colors) {
++			const auto index = style::main_palette::indexOfColor(*color);
++			if (index >= 0) {
++				list.push_back(index);
++			}
++		}
++		return list;
++	}();
++	return result;
++}
++
++[[nodiscard]] QRgb Shift(QRgb value, QRgb base, const QColor &color) {
++	const auto r = qRed(value) - qRed(base);
++	const auto g = qGreen(value) - qGreen(base);
++	const auto b = qBlue(value) - qBlue(base);
++	const auto fits = [](int channel) {
++		return (channel >= 0) && (channel <= 255);
++	};
++	const auto sign = (fits(color.red() + r)
++		&& fits(color.green() + g)
++		&& fits(color.blue() + b)) ? 1 : -1;
++	return qRgb(
++		std::clamp(color.red() + sign * r, 0, 255),
++		std::clamp(color.green() + sign * g, 0, 255),
++		std::clamp(color.blue() + sign * b, 0, 255));
++}
++
++[[nodiscard]] std::unique_ptr<style::palette> FillPalette(
++		const QColor &color) {
++	auto bytes = BaseColors(Dark(color));
++	const auto &slots = FillSlots();
++	if (bytes.size() != style::palette::kCount * 4 || slots.empty()) {
++		return nullptr;
++	}
++	const auto data = reinterpret_cast<uchar*>(bytes.data());
++	const auto read = [&](int index) {
++		const auto from = data + index * 4;
++		return qRgba(from[0], from[1], from[2], from[3]);
++	};
++	const auto base = read(slots.front());
++	if (qAlpha(base) != 255) {
++		return nullptr;
++	}
++	for (const auto index : slots) {
++		const auto value = read(index);
++		if (qAlpha(value) != 255) {
++			continue;
++		}
++		const auto shifted = Shift(value, base, color);
++		const auto to = data + index * 4;
++		to[0] = uchar(qRed(shifted));
++		to[1] = uchar(qGreen(shifted));
++		to[2] = uchar(qBlue(shifted));
++	}
++	const auto dark = Dark(color);
++	for (const auto index : LabelSlots()) {
++		const auto readable = Readable(read(index), color.rgb(), dark);
++		const auto to = data + index * 4;
++		to[0] = uchar(qRed(readable));
++		to[1] = uchar(qGreen(readable));
++		to[2] = uchar(qBlue(readable));
++	}
++	auto result = std::make_unique<style::palette>();
++	if (!result->load(bytes)) {
++		return nullptr;
++	}
++	result->finalize();
++	return result;
++}
++
++void ReleasePalette(std::shared_ptr<style::palette> palette) {
++	if (style::main_palette::CurrentOverride()) {
++		crl::on_main([=] { ReleasePalette(palette); });
++		return;
++	}
++	const auto forget = style::main_palette::Override(
++		style::main_palette::get().get());
++}
++
++[[nodiscard]] base::flat_set<ProfilePhotoBgFill*> &Fills() {
++	static auto result = base::flat_set<ProfilePhotoBgFill*>();
++	return result;
++}
++
+ } // namespace
+ 
+ ProfilePhotoBg::ProfilePhotoBg(not_null<PeerData*> peer)
+@@ -120,6 +349,9 @@ QImage ProfilePhotoBg::prepare(QSize size) const {
+ 	const auto full = size * ratio;
+ 	if (_blurred.isNull() || full.isEmpty()) {
+ 		return QImage();
++	} else if (_prepared.size() == full
++		&& _prepared.devicePixelRatio() == ratio) {
++		return _prepared;
+ 	}
+ 	const auto side = _blurred.width();
+ 	const auto part = (int64(full.width()) >= int64(full.height()))
+@@ -142,6 +374,7 @@ QImage ProfilePhotoBg::prepare(QSize size) const {
+ 		Qt::IgnoreAspectRatio,
+ 		Qt::SmoothTransformation);
+ 	result.setDevicePixelRatio(ratio);
++	_prepared = result;
+ 	return result;
+ }
+ 
+@@ -161,6 +394,7 @@ bool ProfilePhotoBg::refresh() {
+ 			return false;
+ 		}
+ 		_blurred = QImage();
++		_prepared = QImage();
+ 		_key = InMemoryKey();
+ 		return true;
+ 	}
+@@ -171,6 +405,7 @@ bool ProfilePhotoBg::refresh() {
+ 	}
+ 	_key = key;
+ 	_blurred = Blurred(*image, _edge);
++	_prepared = QImage();
+ 	return true;
+ }
+ 
+@@ -189,6 +424,164 @@ void ProfilePhotoBg::waitForLoad() {
+ 	}, _loading);
+ }
+ 
++ProfilePhotoBgFill::ProfilePhotoBgFill(
++	not_null<Ui::RpWidget*> cover,
++	not_null<ProfilePhotoBg*> bg,
++	rpl::producer<> wrapChanges)
++: _cover(cover)
++, _bg(bg) {
++	Fills().emplace(this);
++	rpl::merge(
++		_bg->changes(),
++		ProfilePhotoBgWholeChanges(),
++		style::PaletteChanged(),
++		std::move(wrapChanges),
++		_cover->sizeValue() | rpl::map([=](QSize size) {
++			return QSize(size.width(), _cover->maximumHeight());
++		}) | rpl::distinct_until_changed() | rpl::to_empty
++	) | rpl::on_next([=] {
++		refresh();
++	}, _lifetime);
++}
++
++ProfilePhotoBgFill::~ProfilePhotoBgFill() {
++	Fills().remove(this);
++	unregisterPalettes();
++	if (_palette) {
++		ReleasePalette(std::move(_palette));
++	}
++}
++
++std::optional<QColor> ProfilePhotoBgFill::computeColor() const {
++	if (!ProfilePhotoBgWhole()
++		|| !_bg->active()
++		|| !_cover->parentWidget()) {
++		return std::nullopt;
++	}
++	const auto image = _bg->prepare(
++		QSize(_cover->width(), _cover->maximumHeight()));
++	if (image.isNull()) {
++		return std::nullopt;
++	}
++	const auto color = BottomColor(image);
++	const auto factor = 1. - (Dark(color) ? kFillDimDark : kFillDimLight);
++	const auto dim = [&](int channel) {
++		return int(channel * factor + 0.5);
++	};
++	return QColor(dim(color.red()), dim(color.green()), dim(color.blue()));
++}
++
++void ProfilePhotoBgFill::refresh() {
++	if (style::main_palette::CurrentOverride()) {
++		crl::on_main(this, [=] { refresh(); });
++		return;
++	}
++	const auto color = computeColor();
++	const auto version = style::PaletteVersion();
++	if (color == _color && (!color || version == _version)) {
++		return;
++	}
++	_version = version;
++	auto palette = color ? FillPalette(*color) : nullptr;
++	auto old = std::exchange(_palette, std::move(palette));
++	_color = _palette ? color : std::nullopt;
++	if (_palette) {
++		registerPalettes();
++	} else {
++		unregisterPalettes();
++	}
++	if (old) {
++		ReleasePalette(std::move(old));
++	}
++	repaint();
++}
++
++void ProfilePhotoBgFill::registerPalettes() {
++	const auto content = _cover->parentWidget();
++	if (_content == content) {
++		return;
++	}
++	unregisterPalettes();
++	_content = content;
++	Ui::SetWidgetPalette(content, [=]() -> const style::palette* {
++		return _palette.get();
++	});
++	Ui::SetWidgetPalette(_cover.get(), []() -> const style::palette* {
++		return nullptr;
++	});
++}
++
++void ProfilePhotoBgFill::unregisterPalettes() {
++	if (const auto content = base::take(_content)) {
++		Ui::RemoveWidgetPalette(content);
++		Ui::RemoveWidgetPalette(_cover.get());
++	}
++}
++
++void ProfilePhotoBgFill::repaint() {
++	_cover->update();
++	const auto content = _cover->parentWidget();
++	if (!content) {
++		return;
++	}
++	content->update();
++	for (auto w = content->parentWidget(); w; w = w->parentWidget()) {
++		if (dynamic_cast<Ui::LayerWidget*>(w)) {
++			const auto radius = st::boxRadius;
++			w->update(0, w->height() - radius, w->width(), radius);
++			return;
++		} else if (w->isWindow()) {
++			return;
++		}
++	}
++}
++
++void ProfilePhotoBgFill::paintSeam(QPainter &p) const {
++	if (!_color) {
++		return;
++	}
++	const auto bottom = _cover->height();
++	const auto height = std::min(style::ConvertScale(kSeam), bottom / 2);
++	if (height <= 0) {
++		return;
++	}
++	auto transparent = *_color;
++	transparent.setAlpha(0);
++	auto gradient = QLinearGradient(0, bottom - height, 0, bottom);
++	gradient.setColorAt(0., transparent);
++	gradient.setColorAt(1., *_color);
++	p.fillRect(
++		QRect(0, bottom - height, _cover->width(), height),
++		QBrush(gradient));
++}
++
++bool ProfilePhotoBgFill::paintsIn(not_null<QWidget*> layer) const {
++	return _color && layer->isAncestorOf(_cover.get());
++}
++
++void ProfilePhotoBgFill::paintStrip(
++		QPainter &p,
++		QRect strip,
++		bool rounded) const {
++	if (!rounded) {
++		p.fillRect(strip, *_color);
++		return;
++	}
++	const auto radius = st::boxRadius;
++	p.save();
++	p.setClipRect(strip, Qt::IntersectClip);
++	{
++		auto hq = PainterHighQualityEnabler(p);
++		p.setPen(Qt::NoPen);
++		p.setBrush(*_color);
++		p.drawRoundedRect(
++			strip.marginsAdded({ 0, radius, 0, 0 }),
++			radius,
++			radius);
++	}
++	p.restore();
++}
++
+ std::unique_ptr<ProfilePhotoBg> MakeProfilePhotoBg(
+ 		not_null<PeerData*> peer,
+ 		bool allowed) {
+@@ -209,4 +602,36 @@ rpl::producer<> ProfilePhotoBgChanges(const ProfilePhotoBg *bg) {
+ 	return bg ? bg->changes() : rpl::never<>();
+ }
+ 
++std::unique_ptr<ProfilePhotoBgFill> MakeProfilePhotoBgFill(
++		not_null<Ui::RpWidget*> cover,
++		ProfilePhotoBg *bg,
++		rpl::producer<> wrapChanges) {
++	return bg
++		? std::make_unique<ProfilePhotoBgFill>(
++			cover,
++			bg,
++			std::move(wrapChanges))
++		: nullptr;
++}
++
++void PaintProfilePhotoBgSeam(QPainter &p, const ProfilePhotoBgFill *fill) {
++	if (fill) {
++		fill->paintSeam(p);
++	}
++}
++
++bool PaintProfilePhotoBgStrip(
++		QPainter &p,
++		not_null<QWidget*> layer,
++		QRect strip,
++		bool rounded) {
++	for (const auto fill : Fills()) {
++		if (fill->paintsIn(layer)) {
++			fill->paintStrip(p, strip, rounded);
++			return true;
++		}
++	}
++	return false;
++}
++
+ } // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_profile_photo_bg.h b/Telegram/SourceFiles/tele/tele_profile_photo_bg.h
+index a2c91e2ed6225c7eb4fb4bc926e9a73aec6ff8b0..370231c5ad6c6ae40b896a5c59bb822dfcc2b20c 100644
+--- a/Telegram/SourceFiles/tele/tele_profile_photo_bg.h
++++ b/Telegram/SourceFiles/tele/tele_profile_photo_bg.h
+@@ -1,10 +1,19 @@
+ #pragma once
+ 
++#include "base/weak_ptr.h"
+ #include "ui/image/image_location.h"
+ #include "ui/userpic_view.h"
+ 
+ class PeerData;
+ 
++namespace style {
++class palette;
++} // namespace style
++
++namespace Ui {
++class RpWidget;
++} // namespace Ui
++
+ namespace Tele {
+ 
+ class ProfilePhotoBg final {
+@@ -24,6 +33,7 @@ private:
+ 	Ui::PeerUserpicView _view;
+ 	InMemoryKey _key;
+ 	QImage _blurred;
++	mutable QImage _prepared;
+ 	QColor _edge;
+ 	rpl::event_stream<> _changes;
+ 	rpl::lifetime _loading;
+@@ -31,6 +41,36 @@ private:
+ 
+ };
+ 
++class ProfilePhotoBgFill final : public base::has_weak_ptr {
++public:
++	ProfilePhotoBgFill(
++		not_null<Ui::RpWidget*> cover,
++		not_null<ProfilePhotoBg*> bg,
++		rpl::producer<> wrapChanges);
++	~ProfilePhotoBgFill();
++
++	void paintSeam(QPainter &p) const;
++	[[nodiscard]] bool paintsIn(not_null<QWidget*> layer) const;
++	void paintStrip(QPainter &p, QRect strip, bool rounded) const;
++
++private:
++	void refresh();
++	void registerPalettes();
++	void unregisterPalettes();
++	void repaint();
++	[[nodiscard]] std::optional<QColor> computeColor() const;
++
++	const not_null<Ui::RpWidget*> _cover;
++	const not_null<ProfilePhotoBg*> _bg;
++	QWidget *_content = nullptr;
++	std::optional<QColor> _color;
++	std::unique_ptr<style::palette> _palette;
++	int _version = -1;
++
++	rpl::lifetime _lifetime;
++
++};
++
+ [[nodiscard]] std::unique_ptr<ProfilePhotoBg> MakeProfilePhotoBg(
+ 	not_null<PeerData*> peer,
+ 	bool allowed);
+@@ -39,5 +79,15 @@ private:
+ 	const ProfilePhotoBg *bg);
+ [[nodiscard]] rpl::producer<> ProfilePhotoBgChanges(
+ 	const ProfilePhotoBg *bg);
++[[nodiscard]] std::unique_ptr<ProfilePhotoBgFill> MakeProfilePhotoBgFill(
++	not_null<Ui::RpWidget*> cover,
++	ProfilePhotoBg *bg,
++	rpl::producer<> wrapChanges);
++void PaintProfilePhotoBgSeam(QPainter &p, const ProfilePhotoBgFill *fill);
++bool PaintProfilePhotoBgStrip(
++	QPainter &p,
++	not_null<QWidget*> layer,
++	QRect strip,
++	bool rounded);
+ 
+ } // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index 54ca06cad4be5757f2452a612dea38f521840e11..07f095d38298b26cc817227c5eb6426bf08f0629 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -270,6 +270,7 @@ struct Spec {
+ 		Toggle(kOptionNoPhoneInHeader),
+ 		Toggle(kOptionHidePhoneInProfile),
+ 		Toggle(kOptionProfilePhotoBg),
++		Toggle(kOptionProfilePhotoBgWhole),
+ 		Toggle(kOptionRemoveMyMessages),
+ 		Toggle(kOptionStickerCaptionsShow),
+ 		Toggle(kOptionStickerCaptionsSend),
+diff --git a/Telegram/SourceFiles/ui/window_palette.cpp b/Telegram/SourceFiles/ui/window_palette.cpp
+index 003a1871a2242d25a48f0826938f6d8a1c1d8b29..2ac9ea6b2adf3b84ee226b2691818f4b6a254268 100644
+--- a/Telegram/SourceFiles/ui/window_palette.cpp
++++ b/Telegram/SourceFiles/ui/window_palette.cpp
+@@ -26,6 +26,16 @@ void SetWindowPalette(
+ 	});
+ }
+ 
++void SetWidgetPalette(
++		not_null<const QWidget*> widget,
++		Fn<const style::palette*()> resolve) {
++	Registry[widget.get()] = std::move(resolve);
++}
++
++void RemoveWidgetPalette(not_null<const QWidget*> widget) {
++	Registry.remove(widget.get());
++}
++
+ bool HasWindowPalettes() {
+ 	return !Registry.empty();
+ }
+@@ -34,14 +44,11 @@ const style::palette *WindowPaletteFor(not_null<const QWidget*> widget) {
+ 	if (Registry.empty()) {
+ 		return nullptr;
+ 	}
+-	auto w = widget->window();
+-	while (w) {
++	for (auto w = widget.get(); w; w = w->parentWidget()) {
+ 		const auto i = Registry.find(w);
+ 		if (i != end(Registry)) {
+ 			return i->second();
+ 		}
+-		const auto parent = w->parentWidget();
+-		w = parent ? parent->window() : nullptr;
+ 	}
+ 	return nullptr;
+ }
+diff --git a/Telegram/SourceFiles/ui/window_palette.h b/Telegram/SourceFiles/ui/window_palette.h
+index 131a8e30fae517c8c64df055545e92e71f73ab22..c9b00783db548541dc54f7e2fa722f0353b38fb1 100644
+--- a/Telegram/SourceFiles/ui/window_palette.h
++++ b/Telegram/SourceFiles/ui/window_palette.h
+@@ -18,6 +18,10 @@ class RpWidget;
+ void SetWindowPalette(
+ 	not_null<RpWidget*> window,
+ 	Fn<const style::palette*()> resolve);
++void SetWidgetPalette(
++	not_null<const QWidget*> widget,
++	Fn<const style::palette*()> resolve);
++void RemoveWidgetPalette(not_null<const QWidget*> widget);
+ [[nodiscard]] bool HasWindowPalettes();
+ [[nodiscard]] const style::palette *WindowPaletteFor(
+ 	not_null<const QWidget*> widget);

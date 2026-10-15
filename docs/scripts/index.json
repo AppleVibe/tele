@@ -1,0 +1,125 @@
+[
+  {
+    "id": "away-auto-reply",
+    "name": "away auto-reply",
+    "description": "answers private messages once while you are away",
+    "author": "tele",
+    "icon": "💤",
+    "grants": [
+      "onUpdate(new_message)",
+      "account.write(send)"
+    ],
+    "version": "1.0.0",
+    "homepage": "https://gettele.app/scripting/away-auto-reply"
+  },
+  {
+    "id": "calculator",
+    "name": "calculator",
+    "description": "/calc for quick math in any chat",
+    "author": "tele",
+    "icon": "🧮",
+    "grants": [],
+    "version": "1.0.0",
+    "homepage": "https://gettele.app/scripting/calculator-command"
+  },
+  {
+    "id": "call-assistant",
+    "name": "call assistant",
+    "description": "music pause, auto-mute and a call log",
+    "author": "tele",
+    "icon": "📞",
+    "grants": [
+      "calls",
+      "app"
+    ],
+    "version": "1.0.0",
+    "homepage": "https://gettele.app/scripting/call-assistant"
+  },
+  {
+    "id": "compose-snippets",
+    "name": "compose snippets",
+    "description": "expand short codes while you type",
+    "author": "tele",
+    "icon": "✂️",
+    "grants": [
+      "account.read(draft, peers)",
+      "account.write(draft)"
+    ],
+    "version": "1.0.0",
+    "homepage": "https://gettele.app/scripting/compose-snippets"
+  },
+  {
+    "id": "drop-guard",
+    "name": "drop guard",
+    "description": "stops risky files from being dropped into chats",
+    "author": "tele",
+    "icon": "🛡️",
+    "grants": [
+      "interceptDrop"
+    ],
+    "version": "1.0.0",
+    "homepage": "https://gettele.app/scripting/drop-guard"
+  },
+  {
+    "id": "link-cleaner",
+    "name": "link cleaner",
+    "description": "strips tracking parameters from links you open",
+    "author": "tele",
+    "icon": "🧹",
+    "grants": [
+      "interceptLink"
+    ],
+    "version": "1.0.0",
+    "homepage": "https://gettele.app/scripting/link-cleaner"
+  },
+  {
+    "id": "music-status",
+    "name": "music status",
+    "description": "shows the song you listen to in your bio",
+    "author": "tele",
+    "icon": "🎵",
+    "grants": [
+      "call(account.updateProfile)"
+    ],
+    "version": "1.0.0",
+    "homepage": "https://gettele.app/scripting/music-status-in-your-bio"
+  },
+  {
+    "id": "quick-translate",
+    "name": "quick translate",
+    "description": "translate any message in place",
+    "author": "tele",
+    "icon": "🌐",
+    "grants": [
+      "fetch(translate.googleapis.com)",
+      "display(messages)"
+    ],
+    "version": "1.0.0",
+    "homepage": "https://gettele.app/scripting/quick-translate-button"
+  },
+  {
+    "id": "quiet-hours",
+    "name": "quiet hours",
+    "description": "no notifications at night, mentions still come through",
+    "author": "tele",
+    "icon": "🤫",
+    "grants": [
+      "interceptNotification",
+      "account.read(messages)"
+    ],
+    "version": "1.0.0",
+    "homepage": "https://gettele.app/scripting/quiet-hours"
+  },
+  {
+    "id": "theme-scheduler",
+    "name": "theme scheduler",
+    "description": "night mode by the clock",
+    "author": "tele",
+    "icon": "🌗",
+    "grants": [
+      "app"
+    ],
+    "version": "1.0.0",
+    "homepage": "https://gettele.app/scripting/theme-scheduler"
+  }
+]

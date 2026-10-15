@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Tue, 13 Oct 2026 17:26:32 +0300
+Subject: [PATCH] build: take wallet-engine from gettele/money for private key
+ import
+
+---
+ Telegram/build/docker/centos_env/Dockerfile | 2 ++
+ Telegram/build/prepare/prepare.py           | 4 +++-
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/Telegram/build/docker/centos_env/Dockerfile b/Telegram/build/docker/centos_env/Dockerfile
+index e6d22fce93363f059e6929bb30f541549065a6c4..ed05e34e15e6cec80ab4c308b9397c1d1507b877 100644
+--- a/Telegram/build/docker/centos_env/Dockerfile
++++ b/Telegram/build/docker/centos_env/Dockerfile
+@@ -1014,6 +1014,8 @@ cd wallet-engine
+ git remote add origin https://github.com/i582/wallet-engine.git
+ git fetch --depth=1 origin e59e0d89d7ee90c388bf36e3334c5b276f396697
+ git reset --hard FETCH_HEAD
++git fetch --depth=1 https://github.com/gettele/money.git "tele/$(git rev-parse HEAD)/5"
++git reset --hard FETCH_HEAD
+ git apply ../patches/wallet-engine.patch
+ cd ..
+ # One archive for every Rust library. Each staticlib carries its own copy of
+diff --git a/Telegram/build/prepare/prepare.py b/Telegram/build/prepare/prepare.py
+index 1248e5e6405325dc74fb4f9d211ecddebcf89752..600f8f3384b2556f9a30a08f2ae0d05d67903576 100644
+--- a/Telegram/build/prepare/prepare.py
++++ b/Telegram/build/prepare/prepare.py
+@@ -2005,6 +2005,8 @@ win_mac:
+     git clone https://github.com/i582/wallet-engine.git
+     cd wallet-engine
+     git checkout """ + walletEngineRevision + """
++    git fetch https://github.com/gettele/money.git tele/""" + walletEngineRevision + """/5
++    git checkout FETCH_HEAD
+     git apply ../patches/wallet-engine.patch
+ """)
+ 
+@@ -2024,7 +2026,7 @@ win_mac:
+ # flushes a cache whose generated source the CI prune had already deleted.
+ # The wallet-engine patch rewrites those sources, so it is a dependency here.
+ stage('tdesktop_rust', """
+-version: 2.""" + tlottieRevision + '.' + walletEngineRevision + """
++version: 2.""" + tlottieRevision + '.' + walletEngineRevision + """.tele5
+ depends:patches/wallet-engine.patch
+ win:
+     SET "RUSTUP_HOME=%THIRDPARTY_DIR%\\rust\\rustup"

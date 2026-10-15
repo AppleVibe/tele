@@ -2,13 +2,31 @@
 
 every tele patch, grouped by the release that brought it, newest first. [features](features.md) has the same rows grouped by settings page. release notes and the in-app what's new are made from these rows, so their format is strict: see [the patch row](development.md#the-patch-row).
 
-all 341 patches, newest release first.
+all 359 patches, newest release first.
 
 ### [tele 21](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.21)
 
 | # | what it does | where to toggle |
 |---|---|---|
 | [334](../patches/tdesktop/0334-feat-ask-before-scripts-change-how-messages-and-peop.patch) | scripts need the new display grant, which tele asks you about, before they change how messages, people and chats look or show messages that were never sent, so a script can't quietly make a message say something it doesn't | with 312 |
+| [335](../patches/tdesktop/0335-feat-fill-the-whole-profile-with-the-blurred-photo-s.patch) | with the blurred photo background on, the whole profile takes the colour of the photo's lower edge, not only its header, with the text kept readable | with 309 |
+| [336](../patches/tdesktop/0336-feat-scroll-to-zoom-in-the-media-viewer.patch) | scroll to zoom in the media viewer. hold ctrl or cmd while scrolling to switch photos | tele → interface, off |
+| [337](../patches/tdesktop/0337-fix-search-one-person-s-messages-by-type.patch) | searching one person's messages by type works: tele asks the server both ways and filters the rest itself | with 285 |
+| [338](../patches/tdesktop/0338-feat-design-the-money-card-with-a-gift.patch) | money's card takes the colours, pattern and model of one of your collectible gifts, picked in money's ⋮ menu → card design or synced with your gift status. transfers you send in chats use its colours too | tele → chats, on |
+| [339](../patches/tdesktop/0339-feat-smoother-wheel-glides-in-chats.patch) | wheel glides step at your monitor's refresh rate, chats move a cached image while they glide, animated stickers, emoji and gifs pause until the glide ends, and the chat list only repaints rows that changed. tele → debug → log scroll frame rate writes each glide's timings to log.txt | with 277 |
+| [340](../patches/tdesktop/0340-fix-quote-the-fee-of-a-wallet-key-update-again.patch) | updating a wallet's key in money no longer fails with "the update could not be completed" | always on |
+| [341](../patches/tdesktop/0341-build-take-wallet-engine-from-gettele-money-for-priv.patch) | tele builds money's wallet engine from gettele/money, a copy of telegram's engine that can import private keys | with 342 |
+| [342](../patches/tdesktop/0342-feat-import-wallets-from-private-keys.patch) | import a wallet into money from its private key, not only from secret words. such a wallet is never backed up to telegram, and you can switch it to 12 secret words later | tele → debug, off |
+| [343](../patches/tdesktop/0343-feat-copy-secret-words-without-waiting.patch) | every list of secret words in money gets a copy words link, and showing them no longer ends with the "sure done?" check | tele → debug, on |
+| [344](../patches/tdesktop/0344-feat-hide-the-other-balances-above-the-money-card.patch) | hide the "you also have …" rows above the money card, here or by right-clicking one of them | tele → chats, off |
+| [345](../patches/tdesktop/0345-build-fetch-litehtml-for-html-bubbles.patch) | tele downloads litehtml, the html engine of html bubbles, while it builds | with 346 |
+| [346](../patches/tdesktop/0346-feat-render-html-cards-with-litehtml-and-run-their-s.patch) | html bubbles β: .tgw files show as html cards that can run their own scripts, for everyone using tele with the option on; other apps see a file | tele → debug, off |
+| [347](../patches/tdesktop/0347-feat-show-html-bubbles-in-a-playground-chat-and-for-.patch) | an html playground chat shows what you type there as an html card, and .tgw files you get open as cards in the chat | with 346 |
+| [348](../patches/tdesktop/0348-feat-put-gifts-on-the-money-card-as-stickers.patch) | put your collectible gifts on the money card as stickers: drag them from the card design box or money's collectibles tab, move them around, and click one to take it off | with 338 |
+| [349](../patches/tdesktop/0349-fix-confirm-stickers-sent-from-sticker-set-boxes.patch) | stickers sent from a sticker set's box also wait for a second click | with 130 |
+| [350](../patches/tdesktop/0350-feat-blurred-profile-photo-background-out-of-beta.patch) | the blurred photo background of profiles is out of beta | with 309 |
+| [351](../patches/tdesktop/0351-feat-web-platform-workers-files-sound-webviews-stori.patch) | scripts get the web platform (urls, abort signals, structured clone, intl, websockets, workers, full webcrypto, compression and images), a file area of their own, sounds, webview panels, npm packages, stories, gifts and stars, tele's own data, video chats, the media viewer, banners, selection, compose state, search providers, sticker and gif panels, mini apps, inline answers and buttons under messages. scripts installed from a link check for updates, gettele.app has a catalog of scripts, and new scripts show up in the scripts manager without a restart | with 312 |
+| [1008](../patches/Telegram/lib_ui/0008-feat-glide-at-the-screen-refresh-rate.patch) | the part of smoother glides that lives in the ui library: a glide ticks at the monitor's refresh rate while other animations keep their pace | with 277 |
 
 ### [tele 20](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.20)
 

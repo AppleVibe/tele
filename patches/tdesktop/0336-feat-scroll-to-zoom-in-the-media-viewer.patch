@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Sun, 11 Oct 2026 18:35:22 +0300
+Subject: [PATCH] feat: scroll to zoom in the media viewer
+
+---
+ .../media/view/media_view_overlay_widget.cpp          |  6 ++++--
+ Telegram/SourceFiles/settings/settings_tele.cpp       |  4 ++++
+ Telegram/SourceFiles/tele/tele_options.cpp            | 11 +++++++++++
+ Telegram/SourceFiles/tele/tele_options.h              |  2 ++
+ Telegram/SourceFiles/tele/tele_settings_io.cpp        |  1 +
+ 5 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp b/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp
+index 48a0b93e6601212902777be5000a74038c99889b..2499e00dd9951bd48dfada016934c6554912a36f 100644
+--- a/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp
++++ b/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp
+@@ -7549,18 +7549,20 @@ void OverlayWidget::handleWheelEvent(not_null<QWheelEvent*> e) {
+ 		&& ((e->source() == Qt::MouseEventNotSynthesized)
+ 			|| (e->source() == Qt::MouseEventSynthesizedBySystem));
+ 	const auto anchor = zoomAnchor(e->globalPosition());
++	const auto zoom = (e->modifiers().testFlag(Qt::ControlModifier)
++		!= (Tele::ScrollZoom() && !_stories));
+ 	_verticalWheelDelta += angle.y();
+ 	while (std::abs(_verticalWheelDelta) >= step) {
+ 		if (_verticalWheelDelta < 0) {
+ 			_verticalWheelDelta += step;
+-			if (e->modifiers().testFlag(Qt::ControlModifier)) {
++			if (zoom) {
+ 				zoomOut(anchor);
+ 			} else if (acceptForJump) {
+ 				moveToNext(1);
+ 			}
+ 		} else {
+ 			_verticalWheelDelta -= step;
+-			if (e->modifiers().testFlag(Qt::ControlModifier)) {
++			if (zoom) {
+ 				zoomIn(anchor);
+ 			} else if (acceptForJump) {
+ 				moveToNext(-1);
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 3f1c925fcbacd18a2d7761b9c606a7942e75ea3f..425357c8983838fde279ca1224e912b9600a6816 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -2793,6 +2793,10 @@ void FillInterface(SectionBuilder &builder) {
+ 		builder,
+ 		::Tele::kOptionSmoothScroll,
+ 		{ u"wheel"_q, u"mouse"_q, u"animation"_q, u"scroll"_q });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionScrollZoom,
++		{ u"trackpad"_q, u"touchpad"_q, u"wheel"_q, u"photo"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Chat list"_q);
+ 	AddOptionToggle(builder, ::Tele::kOptionHideAllChats);
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 6a8b76913029a225d4d86ea14fa9cbedb5bdb1c0..2af7461426d5a4a93b5dac6a1663c120e1fd3d13 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -63,6 +63,7 @@ const char kOptionReduceMotion[] = "tele-reduce-motion";
+ const char kOptionReduceMotionSaved[] = "tele-reduce-motion-saved";
+ const char kOptionListKeys[] = "tele-list-keys";
+ const char kOptionSmoothScroll[] = "tele-smooth-scroll";
++const char kOptionScrollZoom[] = "tele-scroll-zoom";
+ const char kOptionStaticUserpicsChats[] = "tele-static-userpics-chats";
+ const char kOptionHideMentionsButton[] = "tele-hide-mentions-button";
+ const char kOptionHideReactionsButton[] = "tele-hide-reactions-button";
+@@ -620,6 +621,12 @@ base::options::toggle SmoothScrollOption({
+ 	.description = "Eases each mouse wheel step, like profiles already do.",
+ });
+ 
++base::options::toggle ScrollZoomOption({
++	.id = kOptionScrollZoom,
++	.name = "Scroll to zoom in the media viewer",
++	.description = "Hold Ctrl or Cmd while scrolling to switch photos.",
++});
++
+ base::options::toggle StaticUserpicsChatsOption({
+ 	.id = kOptionStaticUserpicsChats,
+ 	.name = "Static userpics in chats and profiles",
+@@ -3475,6 +3482,10 @@ bool ViewerLoop() {
+ 	return ViewerLoopOption.value();
+ }
+ 
++bool ScrollZoom() {
++	return ScrollZoomOption.value();
++}
++
+ void SetViewerLoop(bool enabled) {
+ 	ViewerLoopOption.set(enabled);
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index b59248347e6c59b5640e27cd34af560b424986c3..a2fa374b6ed0370bb14f681278de17faca4b9c4d 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -57,6 +57,7 @@ extern const char kOptionReduceMotion[];
+ extern const char kOptionReduceMotionSaved[];
+ extern const char kOptionListKeys[];
+ extern const char kOptionSmoothScroll[];
++extern const char kOptionScrollZoom[];
+ extern const char kOptionGhostInMenu[];
+ extern const char kOptionStaticUserpicsChats[];
+ extern const char kOptionHideMentionsButton[];
+@@ -334,6 +335,7 @@ void SetLinkPreviews(const QString &value);
+ void SetReduceMotionSaved(const QString &value);
+ [[nodiscard]] rpl::producer<bool> ListKeysValue();
+ [[nodiscard]] rpl::producer<bool> SmoothScrollValue();
++[[nodiscard]] bool ScrollZoom();
+ [[nodiscard]] bool StaticUserpicsChats();
+ [[nodiscard]] rpl::producer<> StaticUserpicsChatsChanges();
+ [[nodiscard]] bool HideMentionsButton();
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index 07f095d38298b26cc817227c5eb6426bf08f0629..3aee062fa76f651342dee37b546e6347208dbac9 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -147,6 +147,7 @@ struct Spec {
+ 		Toggle(kOptionReduceMotion),
+ 		Toggle(kOptionListKeys),
+ 		Toggle(kOptionSmoothScroll),
++		Toggle(kOptionScrollZoom),
+ 		Toggle(kOptionLocalFolders),
+ 		Toggle(kOptionUnsortedFolder),
+ 		Toggle(kOptionCompactFolders),

@@ -49,7 +49,8 @@ follow upstream's build doc for your platform, starting from the "prepare librar
 - leave `TELE_BUILD` at its default, `0`. that makes a dev build: the title bar says `tele #DEV`, the self-updater and what's new are off. only set a real number when you test the updater itself, and go back to `0` afterwards.
 - to test crash reports, add `-D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF`, like ci.
 - the binary is called `tele`: `out/Debug/tele.exe` on windows, `out/Debug/tele.app` on macos, `out/Debug/tele` on linux (or `Release`). an old `Telegram.exe` in `out` is from a build before the rename.
-- after moving tdesktop to another tag, run upstream's prepare script again: each tag's `Telegram/build/prepare/prepare.py` can pin other library versions.
+- after moving tdesktop to another tag, run upstream's prepare script again: each tag's `Telegram/build/prepare/prepare.py` can pin other library versions. tele's own patches change it too (money's wallet engine comes from gettele/money), so also run it after a `tele.py checkout` that brings a new `prepare.py`. on windows `win.bat skip-release silent wallet-engine tdesktop_rust` redoes only the wallet stages.
+- the first configure downloads litehtml for html bubbles, so it needs network once.
 
 ### windows
 
@@ -62,6 +63,8 @@ cmake --build ..\out --config Debug --parallel --target Telegram
 
 - `win.bat skip-release silent` prepares only the debug libraries and rebuilds stale ones without asking. that's all a debug build needs.
 - `-- /p:LinkIncremental=true` at the end of the build command turns incremental linking on for that build only. after one full link, rebuilding a single edited `.cpp` takes seconds instead of minutes. a build without the flag throws the incremental state away.
+- a full debug build with every core busy can stop with `C1060: compiler is out of heap space`: build with fewer jobs (`--parallel 4 ... -- /p:CL_MPCount=6`) and run it again; it continues where it stopped.
+- the debug `.pdb` of a tele build is bigger than 4 GB, past the linker's default limit (`LNK1140`). `set LINK=/PDBPAGESIZE:8192` before building raises it; the first time, delete `out\Debug\tele.pdb` and the `.ilk` so they're made with the new page size.
 - older msvc toolsets can fail to build libjxl with `_sub_overflow_i32` not found. force-include `intrin.h` for that one stage, then continue:
 
   ```

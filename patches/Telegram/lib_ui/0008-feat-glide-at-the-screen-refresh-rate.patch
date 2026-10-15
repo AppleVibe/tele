@@ -1,0 +1,359 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Mon, 12 Oct 2026 23:42:54 +0300
+Subject: [PATCH] feat: glide at the screen refresh rate
+
+---
+ ui/effects/animations.cpp     | 76 +++++++++++++++++++++++++++++++++++
+ ui/effects/animations.h       |  5 +++
+ ui/widgets/elastic_scroll.cpp |  1 +
+ ui/widgets/scroll_area.cpp    |  1 +
+ ui/widgets/smooth_wheel.cpp   | 61 +++++++++++++++++++++++++---
+ ui/widgets/smooth_wheel.h     | 20 ++++++++-
+ 6 files changed, 156 insertions(+), 8 deletions(-)
+
+diff --git a/ui/effects/animations.cpp b/ui/effects/animations.cpp
+index bb268d6a0ff6ab3c2109c852603315854aba3b8d..b60b959ef868dac9023a7bfbf5d4bb2d383cfd98 100644
+--- a/ui/effects/animations.cpp
++++ b/ui/effects/animations.cpp
+@@ -18,6 +18,9 @@
+ #include <range/v3/algorithm/remove_if.hpp>
+ #include <range/v3/algorithm/remove.hpp>
+ #include <range/v3/algorithm/find.hpp>
++#include <range/v3/algorithm/any_of.hpp>
++
++#include <cmath>
+ 
+ namespace Ui {
+ namespace Animations {
+@@ -28,6 +31,29 @@ constexpr auto kIgnoreUpdatesTimeout = crl::time(4);
+ 
+ Manager *ManagerInstance = nullptr;
+ bool ScheduleWithInvokeQueued = false;
++struct HighRate {
++	const Basic *animation = nullptr;
++	float64 tick = 0.;
++};
++std::vector<HighRate> HighRates;
++float64 HighRateNext = 0.;
++crl::time NormalLast = 0;
++
++[[nodiscard]] float64 HighRateTick() {
++	auto result = 0.;
++	for (const auto &entry : HighRates) {
++		if (result == 0. || entry.tick < result) {
++			result = entry.tick;
++		}
++	}
++	return result;
++}
++
++[[nodiscard]] bool IsHighRate(const Basic *animation) {
++	return ranges::any_of(HighRates, [&](const HighRate &entry) {
++		return (entry.animation == animation);
++	});
++}
+ 
+ } // namespace
+ 
+@@ -130,6 +156,25 @@ void Manager::update() {
+ 	if (_forceImmediateUpdate) {
+ 		_forceImmediateUpdate = false;
+ 	}
++	const auto high = HighRateTick();
++	// Others step on the high tick nearest to their usual one.
++	const auto all = (high == 0.)
++		|| (now - NormalLast >= float64(kAnimationTick) - high / 2.);
++	if (all) {
++		NormalLast = now;
++	}
++	// High rate animations step only on their own ticks, so updates
++	// requested by repaints don't make their frames uneven.
++	const auto highDue = (high > 0.)
++		&& (float64(now) + 0.5 >= HighRateNext);
++	if (highDue) {
++		// The next tick keeps the phase: after a late tick it comes at the
++		// first boundary after now, not a whole tick after the late one.
++		const auto behind = float64(now) - HighRateNext;
++		HighRateNext += (behind >= 0.)
++			? ((std::floor(behind / high) + 1.) * high)
++			: high;
++	}
+ 	schedule();
+ 
+ 	_updating = true;
+@@ -137,6 +182,10 @@ void Manager::update() {
+ 
+ 	_lastUpdateTime = now;
+ 	const auto isFinished = [&](const ActiveBasicPointer &element) {
++		if (high > 0.
++			&& !(IsHighRate(element.get()) ? highDue : all)) {
++			return false;
++		}
+ 		return !element.call(now);
+ 	};
+ 	_active.erase(ranges::remove_if(_active, isFinished), end(_active));
+@@ -183,6 +232,15 @@ void Manager::schedule() {
+ 		if (_forceImmediateUpdate) {
+ 			_forceImmediateUpdate = false;
+ 			updateQueued();
++		} else if (HighRateTick() > 0.) {
++			const auto wait = HighRateNext - float64(crl::now());
++			if (wait >= 0.5) {
++				_timerId = startTimer(
++					crl::time(wait + 0.5),
++					Qt::PreciseTimer);
++			} else {
++				updateQueued();
++			}
+ 		} else {
+ 			const auto next = _lastUpdateTime + kAnimationTick;
+ 			const auto now = crl::now();
+@@ -218,5 +276,23 @@ void Manager::SetScheduleWithInvokeQueued(bool value) {
+ 	ScheduleWithInvokeQueued = value;
+ }
+ 
++void Manager::SetHighRate(not_null<const Basic*> animation, float64 rate) {
++	ClearHighRate(animation);
++	if (rate <= 0.) {
++		return;
++	}
++	const auto tick = 1000. / rate;
++	if (tick < float64(kAnimationTick)) {
++		HighRates.push_back({ .animation = animation.get(), .tick = tick });
++	}
++}
++
++void Manager::ClearHighRate(not_null<const Basic*> animation) {
++	HighRates.erase(ranges::remove(
++		HighRates,
++		animation.get(),
++		&HighRate::animation), end(HighRates));
++}
++
+ } // namespace Animations
+ } // namespace Ui
+diff --git a/ui/effects/animations.h b/ui/effects/animations.h
+index 254bab9811e462471f901430140c9e8bf628603b..bb58087de83ae718281546521dcfa9b6b3f9a826 100644
+--- a/ui/effects/animations.h
++++ b/ui/effects/animations.h
+@@ -151,6 +151,11 @@ public:
+ 
+ 	static void SetScheduleWithInvokeQueued(bool value);
+ 
++	// A high rate animation ticks at the given refresh rate (when it is
++	// faster than the usual tick), the others keep the usual tick.
++	static void SetHighRate(not_null<const Basic*> animation, float64 rate);
++	static void ClearHighRate(not_null<const Basic*> animation);
++
+ private:
+ 	class ActiveBasicPointer {
+ 	public:
+diff --git a/ui/widgets/elastic_scroll.cpp b/ui/widgets/elastic_scroll.cpp
+index c134b201f0d36e05ce0f797d4533e04dfe68c8c0..e1c8361e11b65c424bc9048bb3e31b8a3bf288a8 100644
+--- a/ui/widgets/elastic_scroll.cpp
++++ b/ui/widgets/elastic_scroll.cpp
+@@ -418,6 +418,7 @@ ElasticScroll::ElasticScroll(
+ , _position(Position{ 0, 0 })
+ , _movement(Movement::None) {
+ 	setAttribute(Qt::WA_AcceptTouchEvents);
++	_smoothWheel.setWidget(this);
+ 
+ 	_bar->visibleFromDragged(
+ 	) | rpl::on_next([=](int from) {
+diff --git a/ui/widgets/scroll_area.cpp b/ui/widgets/scroll_area.cpp
+index f2a4090240552bc4078b671afa2b90aee810c7c9..21aebe985f9916af133e8bcca020f48ac48396e1 100644
+--- a/ui/widgets/scroll_area.cpp
++++ b/ui/widgets/scroll_area.cpp
+@@ -417,6 +417,7 @@ ScrollArea::ScrollArea(
+ , _touchEnabled(handleTouch) {
+ 	setLayoutDirection(style::LayoutDirection());
+ 	setFocusPolicy(Qt::NoFocus);
++	_smoothWheel.setWidget(this);
+ 
+ 	_verticalBar->shadowVisibilityChanged(
+ 	) | rpl::on_next([=](const ScrollBar::ShadowVisibility &data) {
+diff --git a/ui/widgets/smooth_wheel.cpp b/ui/widgets/smooth_wheel.cpp
+index 75d73fd7932cc09bc0bec3e08f08d78b79ed26a6..59c78e86bc673af51cd67be26b983df28aa016d6 100644
+--- a/ui/widgets/smooth_wheel.cpp
++++ b/ui/widgets/smooth_wheel.cpp
+@@ -8,15 +8,19 @@
+ 
+ #include "ui/effects/animation_value.h"
+ 
++#include <QtGui/QGuiApplication>
++#include <QtGui/QScreen>
+ #include <QtGui/QWheelEvent>
++#include <QtWidgets/QWidget>
+ 
+ namespace Ui {
+ namespace {
+ 
+-constexpr auto kStepTime = crl::time(260);
++constexpr auto kStepTime = std::chrono::milliseconds(260);
+ constexpr auto kNotch = 120;
+ 
+ bool Enabled = false;
++SmoothWheelHooks Hooks;
+ 
+ } // namespace
+ 
+@@ -28,12 +32,50 @@ bool SmoothWheelScroll() {
+ 	return Enabled;
+ }
+ 
++void SetSmoothWheelHooks(SmoothWheelHooks hooks) {
++	Hooks = std::move(hooks);
++}
++
+ SmoothWheel::SmoothWheel() {
+-	_animation.init([=](crl::time now) {
+-		step(now);
++	_animation.init([=] {
++		step();
+ 	});
+ }
+ 
++SmoothWheel::~SmoothWheel() {
++	// The owner is being destroyed, so no hook is called with it.
++	if (base::take(_gliding)) {
++		Animations::Manager::ClearHighRate(&_animation);
++	}
++}
++
++void SmoothWheel::setWidget(not_null<QWidget*> widget) {
++	_widget = widget;
++}
++
++void SmoothWheel::setGliding(bool gliding) {
++	if (_gliding == gliding) {
++		return;
++	}
++	_gliding = gliding;
++	if (gliding) {
++		const auto screen = _widget
++			? _widget->screen()
++			: QGuiApplication::primaryScreen();
++		Animations::Manager::SetHighRate(
++			&_animation,
++			screen ? screen->refreshRate() : 0.);
++		if (_widget && Hooks.started) {
++			Hooks.started(_widget);
++		}
++	} else {
++		Animations::Manager::ClearHighRate(&_animation);
++		if (_widget && Hooks.finished) {
++			Hooks.finished(_widget);
++		}
++	}
++}
++
+ bool SmoothWheel::handle(
+ 		not_null<QWheelEvent*> e,
+ 		int pixels,
+@@ -65,10 +107,11 @@ bool SmoothWheel::handle(
+ 	const auto base = animating ? _target : from;
+ 	_target = std::clamp(base + pixels, 0, _max());
+ 	_from = from;
+-	_started = crl::now();
++	_started = std::chrono::steady_clock::now();
+ 	_lastApplied = from;
+ 	if (!animating) {
+ 		_animation.start();
++		setGliding(true);
+ 	}
+ 	return true;
+ }
+@@ -76,6 +119,7 @@ bool SmoothWheel::handle(
+ void SmoothWheel::stop() {
+ 	_animation.stop();
+ 	_lastApplied = -1;
++	setGliding(false);
+ }
+ 
+ void SmoothWheel::follow(int shift) {
+@@ -85,12 +129,14 @@ void SmoothWheel::follow(int shift) {
+ 	_target += shift;
+ }
+ 
+-void SmoothWheel::step(crl::time now) {
++void SmoothWheel::step() {
+ 	if (const auto before = _current(); before != _lastApplied) {
+ 		follow(before - _lastApplied);
+ 	}
++	const auto elapsed = std::chrono::duration<float64, std::milli>(
++		std::chrono::steady_clock::now() - _started);
+ 	const auto progress = std::clamp(
+-		(now - _started) / float64(kStepTime),
++		elapsed.count() / float64(kStepTime.count()),
+ 		0.,
+ 		1.);
+ 	const auto value = anim::interpolate(
+@@ -100,6 +146,9 @@ void SmoothWheel::step(crl::time now) {
+ 	const auto max = _max();
+ 	const auto clamped = std::clamp(value, 0, max);
+ 	_apply(clamped);
++	if (_widget && Hooks.frame) {
++		Hooks.frame(_widget);
++	}
+ 	const auto actual = _current();
+ 	if (actual != clamped) {
+ 		follow(actual - clamped);
+diff --git a/ui/widgets/smooth_wheel.h b/ui/widgets/smooth_wheel.h
+index 1937ba84f0094a02e44ef817b0f7956a9932e835..047072cd392ed956aae859b43f04934f5803156b 100644
+--- a/ui/widgets/smooth_wheel.h
++++ b/ui/widgets/smooth_wheel.h
+@@ -8,6 +8,8 @@
+ 
+ #include "ui/effects/animations.h"
+ 
++#include <chrono>
++
+ class QWheelEvent;
+ 
+ namespace Ui {
+@@ -15,10 +17,21 @@ namespace Ui {
+ void SetSmoothWheelScroll(bool enabled);
+ [[nodiscard]] bool SmoothWheelScroll();
+ 
++// Lets the app follow glides: their start, every applied frame and the end.
++struct SmoothWheelHooks {
++	Fn<void(not_null<QWidget*>)> started;
++	Fn<void(not_null<QWidget*>)> frame;
++	Fn<void(not_null<QWidget*>)> finished;
++};
++void SetSmoothWheelHooks(SmoothWheelHooks hooks);
++
+ // Eases mouse wheel notches like the profile does, touchpads stay as is.
+ class SmoothWheel final {
+ public:
+ 	SmoothWheel();
++	~SmoothWheel();
++
++	void setWidget(not_null<QWidget*> widget);
+ 
+ 	[[nodiscard]] bool handle(
+ 		not_null<QWheelEvent*> e,
+@@ -29,17 +42,20 @@ public:
+ 	void stop();
+ 
+ private:
+-	void step(crl::time now);
++	void step();
+ 	void follow(int shift);
++	void setGliding(bool gliding);
+ 
+ 	Animations::Basic _animation;
++	QWidget *_widget = nullptr;
++	bool _gliding = false;
+ 	Fn<int()> _current;
+ 	Fn<int()> _max;
+ 	Fn<void(int)> _apply;
+ 	int _from = 0;
+ 	int _target = 0;
+ 	int _lastApplied = -1;
+-	crl::time _started = 0;
++	std::chrono::steady_clock::time_point _started;
+ 
+ };
+ 

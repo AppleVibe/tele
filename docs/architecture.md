@@ -92,6 +92,8 @@ everything below is inside the patched tree (tdesktop after `tele.py checkout`),
 ### where code lives
 
 - `tele/tele_*.cpp` and `tele/tele_*.h`: all fork code, in `namespace Tele`. one module per feature or shared piece, e.g. `tele_ghost.*`, `tele_deleted.*`, `tele_title.*`.
+- bigger features have their own folders: `tele/scripting/` (the script engine, see [scripting](scripting.md)) and `tele/secret/` (secret chats). html bubbles are `tele/tele_html_*`.
+- third-party code tele adds: QuickJS-ng (`Telegram/ThirdParty/quickjs-ng/`, built by `Telegram/cmake/quickjs/`, optimized even in debug builds) for scripts and html card scripts, and litehtml for html bubbles, which `Telegram/cmake/tele_html/` downloads at configure time (a pinned commit with its sha256) and patches with `tele_litehtml_patch.cmake`. money's wallet engine comes from [gettele/money](https://github.com/gettele/money), a copy of telegram's engine with private key import: tele's `prepare.py` hunk checks out its tag for the engine revision upstream pins.
 - `settings/settings_tele.cpp` and `.h`: the tele settings section and its pages.
 - `Telegram/CMakeLists.txt`: one `nice_target_sources(Telegram ${src_loc} ...)` block lists `settings/settings_tele.*` and every `tele/*` file. a new file has to be added there.
 - upstream files get small hunks: an include plus a call into `Tele::`.
@@ -152,7 +154,7 @@ tele rearranges seven menus: the message menu, the chat ⋯ menu, the chat list 
 
 ### launch flags
 
-`tele/tele_launch_flags.*` parses `-noteleserver`, `-noteleupdate` and `-teleoffline` (both of the others plus third-party services) and exposes `Tele::ServerOffForLaunch()`, `Tele::UpdatesOffForLaunch()` and `Tele::OfflineForLaunch()`. every network request tele adds checks the matching flag at its lowest level: the badges fetch and crash reports check the server flag, the updater and the changelog fetch check the update flag, third-party requests like calcmula check the offline flag. the platform launchers pass the flags on when tele restarts itself.
+`tele/tele_launch_flags.*` parses `-noteleserver`, `-noteleupdate` and `-teleoffline` (both of the others plus third-party services) and exposes `Tele::ServerOffForLaunch()`, `Tele::UpdatesOffForLaunch()` and `Tele::OfflineForLaunch()`. every network request tele adds checks the matching flag at its lowest level: the badges fetch and crash reports check the server flag, the updater and the changelog fetch check the update flag, third-party requests like calcmula and the update checks of link-installed scripts check the offline flag. the platform launchers pass the flags on when tele restarts itself.
 
 ### tele server client
 

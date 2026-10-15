@@ -1,0 +1,3175 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Tue, 13 Oct 2026 21:26:56 +0300
+Subject: [PATCH] feat: show html bubbles in a playground chat and for .tgw
+ files
+
+---
+ Telegram/CMakeLists.txt                       |    8 +
+ .../history/view/history_view_element.cpp     |    4 +
+ Telegram/SourceFiles/main/main_session.cpp    |    2 +
+ .../SourceFiles/settings/settings_tele.cpp    |    4 +
+ .../SourceFiles/tele/tele_changelog_chat.cpp  |   42 +-
+ Telegram/SourceFiles/tele/tele_html_card.cpp  | 1087 +++++++++++++++++
+ Telegram/SourceFiles/tele/tele_html_card.h    |  180 +++
+ .../SourceFiles/tele/tele_html_playground.cpp |  318 +++++
+ .../SourceFiles/tele/tele_html_playground.h   |   32 +
+ .../tele/tele_html_playground_section.cpp     |  828 +++++++++++++
+ .../tele/tele_html_playground_section.h       |   38 +
+ .../SourceFiles/tele/tele_html_samples.cpp    |  282 +++++
+ Telegram/SourceFiles/tele/tele_html_samples.h |    7 +
+ .../SourceFiles/tele/tele_menu_registry.cpp   |   14 +-
+ .../SourceFiles/tele/tele_message_menu.cpp    |    2 +
+ Telegram/SourceFiles/tele/tele_options.cpp    |   22 +
+ Telegram/SourceFiles/tele/tele_options.h      |    3 +
+ .../SourceFiles/tele/tele_settings_io.cpp     |    1 +
+ 18 files changed, 2866 insertions(+), 8 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_html_card.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_html_card.h
+ create mode 100644 Telegram/SourceFiles/tele/tele_html_playground.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_html_playground.h
+ create mode 100644 Telegram/SourceFiles/tele/tele_html_playground_section.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_html_playground_section.h
+ create mode 100644 Telegram/SourceFiles/tele/tele_html_samples.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_html_samples.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 0fb1be1065ad0d7f7bedcd9e07999245c64d0142..df97c9ec83593f28c96effb5a4b669864c4b4fbf 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2624,6 +2624,14 @@ PRIVATE
+     tele/tele_hidden_words.h
+     tele/tele_html.cpp
+     tele/tele_html.h
++    tele/tele_html_card.cpp
++    tele/tele_html_card.h
++    tele/tele_html_playground.cpp
++    tele/tele_html_playground.h
++    tele/tele_html_playground_section.cpp
++    tele/tele_html_playground_section.h
++    tele/tele_html_samples.cpp
++    tele/tele_html_samples.h
+     tele/tele_html_script.cpp
+     tele/tele_html_script.h
+     tele/tele_ignored.cpp
+diff --git a/Telegram/SourceFiles/history/view/history_view_element.cpp b/Telegram/SourceFiles/history/view/history_view_element.cpp
+index fb2356b2e4fe9551200c2f84011f3e11abe6bd04..02aee1d5b866d4f5684f15d14cff8256c6d0dbf7 100644
+--- a/Telegram/SourceFiles/history/view/history_view_element.cpp
++++ b/Telegram/SourceFiles/history/view/history_view_element.cpp
+@@ -74,6 +74,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/scripting/tele_script_messages.h"
+ #include "tele/tele_code_lines.h"
+ #include "tele/tele_communities.h"
++#include "tele/tele_html_card.h"
+ #include "tele/tele_ignored.h"
+ #include "tele/tele_invisible.h"
+ #include "tele/tele_options.h"
+@@ -1741,6 +1742,9 @@ void Element::refreshMedia(Element *replacing) {
+ 	if (!item->computeUnavailableReason().isEmpty()) {
+ 		_media = nullptr;
+ 		return;
++	} else if (auto html = Tele::Html::CreateMedia(this)) {
++		_media = std::move(html);
++		return;
+ 	}
+ 	if (const auto media = item->media()) {
+ 		if (media->canBeGrouped()) {
+diff --git a/Telegram/SourceFiles/main/main_session.cpp b/Telegram/SourceFiles/main/main_session.cpp
+index 6d6cf5b7a4f35847ba2270037c092bc35b59687c..1ba6adb93dc17ca7cba5a7348de34c6f5b2c965b 100644
+--- a/Telegram/SourceFiles/main/main_session.cpp
++++ b/Telegram/SourceFiles/main/main_session.cpp
+@@ -78,6 +78,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_punctual_scheduled.h"
+ #include "tele/scripting/tele_script_hooks.h"
+ #include "tele/tele_send_order.h"
++#include "tele/tele_html_playground.h"
+ #include "styles/style_layers.h"
+ 
+ #ifndef TDESKTOP_DISABLE_SPELLCHECK
+@@ -307,6 +308,7 @@ Session::Session(
+ 	Tele::SetupKeptStore(this);
+ 	Tele::SetupKeptChats(this);
+ 	Tele::Secret::Setup(this);
++	Tele::Html::SetupPlayground(this);
+ 	Tele::Scripting::SetupScripts(this);
+ }
+ 
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 9f8488d9bcd996ea9e3618856bfdc04a0ea03bbc..cf2e808aa86af56845b36ae2b73c9698cb0167b7 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -4136,6 +4136,10 @@ void FillDebug(SectionBuilder &builder) {
+ 		builder,
+ 		::Tele::kOptionSecretChats,
+ 		{ u"secret chat"_q, u"encrypted"_q, u"e2e"_q, u"freshgram"_q });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionHtmlBubbles,
++		{ u"html"_q, u"tgw"_q, u"widget"_q, u"card"_q, u"playground"_q });
+ 	AddSkip(builder);
+ }
+ 
+diff --git a/Telegram/SourceFiles/tele/tele_changelog_chat.cpp b/Telegram/SourceFiles/tele/tele_changelog_chat.cpp
+index b3caec8d8d1126a9da0dda844bdc77dcbe2bd4b4..bcef7a8255863ff3ab7a919221cf40cdf5b9e7bd 100644
+--- a/Telegram/SourceFiles/tele/tele_changelog_chat.cpp
++++ b/Telegram/SourceFiles/tele/tele_changelog_chat.cpp
+@@ -18,6 +18,7 @@
+ #include "main/main_session.h"
+ #include "tele/tele_changelog.h"
+ #include "tele/tele_changelog_section.h"
++#include "tele/tele_html_playground.h"
+ #include "tele/tele_lowercase.h"
+ #include "ui/boxes/confirm_box.h"
+ #include "ui/layers/generic_box.h"
+@@ -210,11 +211,14 @@ void ShowProfile(
+ } // namespace
+ 
+ bool IsChangelogPeer(const PeerData *peer) {
+-	return peer && (peer->id == ChangelogPeerId());
++	return peer
++		&& ((peer->id == ChangelogPeerId()) || Html::IsPlaygroundPeer(peer));
+ }
+ 
+ QImage *ChangelogUserpic(not_null<const PeerData*> peer) {
+-	if (!IsChangelogPeer(peer)) {
++	if (Html::IsPlaygroundPeer(peer)) {
++		return Html::PlaygroundUserpic();
++	} else if (!IsChangelogPeer(peer)) {
+ 		return nullptr;
+ 	}
+ 	static auto result = QImage(u":/gui/art/tele_userpic.jpg"_q).scaled(
+@@ -227,7 +231,11 @@ QImage *ChangelogUserpic(not_null<const PeerData*> peer) {
+ }
+ 
+ std::optional<QString> ChangelogStatus(not_null<const UserData*> user) {
+-	return IsChangelogPeer(user) ? StatusText() : std::optional<QString>();
++	return Html::IsPlaygroundPeer(user)
++		? Html::PlaygroundStatus()
++		: IsChangelogPeer(user)
++		? StatusText()
++		: std::optional<QString>();
+ }
+ 
+ [[nodiscard]] HistoryMessageMarkupData UrlButtons(
+@@ -283,7 +291,10 @@ bool ShowChangelogChat(
+ 		not_null<Window::SessionController*> controller,
+ 		PeerId peerId,
+ 		const Window::SectionShow &params) {
+-	if (peerId != ChangelogPeerId()) {
++	if (peerId == Html::PlaygroundPeerId()) {
++		Html::ShowPlayground(controller, params);
++		return true;
++	} else if (peerId != ChangelogPeerId()) {
+ 		return false;
+ 	}
+ 	ShowChangelogHistory(controller, params);
+@@ -315,6 +326,8 @@ bool ShowChangelogProfile(
+ 	const auto peer = info->content()->peer();
+ 	if (!IsChangelogPeer(peer)) {
+ 		return false;
++	} else if (Html::IsPlaygroundPeer(peer)) {
++		return true;
+ 	} else if (!params.thirdColumn) {
+ 		ShowProfile(controller, peer->asUser());
+ 	}
+@@ -328,6 +341,21 @@ bool FillChangelogMenu(
+ 	const auto history = request.key.history();
+ 	if (!history || !IsChangelogPeer(history->peer)) {
+ 		return false;
++	} else if (Html::IsPlaygroundPeer(history->peer)) {
++		if (history->unreadCount() > 0) {
++			addAction(tr::lng_context_mark_read(tr::now), [=] {
++				Html::MarkPlaygroundRead(history);
++			}, &st::menuIconMarkRead);
++		}
++		addAction({
++			.text = Lower(u"Reset the playground"_q),
++			.handler = [=] {
++				Html::ConfirmResetPlayground(controller, history);
++			},
++			.icon = &st::menuIconDeleteAttention,
++			.isAttention = true,
++		});
++		return true;
+ 	}
+ 	if (history->unreadCount() > 0) {
+ 		addAction(tr::lng_context_mark_read(tr::now), [=] {
+@@ -361,7 +389,11 @@ bool PerformChangelogQuickAction(
+ 	if (action == Action::Read) {
+ 		MarkRead(history);
+ 	} else if (action == Action::Delete) {
+-		ConfirmDelete(controller, history);
++		if (Html::IsPlaygroundPeer(peer)) {
++			Html::ConfirmResetPlayground(controller, history);
++		} else {
++			ConfirmDelete(controller, history);
++		}
+ 	}
+ 	return true;
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_html_card.cpp b/Telegram/SourceFiles/tele/tele_html_card.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..3cc9c7a516693f15076e2bc24f5c0ce6bdbf3c9c
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html_card.cpp
+@@ -0,0 +1,1087 @@
++#include "tele/tele_html_card.h"
++
++#include "apiwrap.h"
++#include "base/call_delayed.h"
++#include "api/api_common.h"
++#include "core/application.h"
++#include "core/click_handler_types.h"
++#include "data/data_document.h"
++#include "data/data_document_media.h"
++#include "data/data_file_origin.h"
++#include "data/data_media_types.h"
++#include "data/data_session.h"
++#include "data/data_thread.h"
++#include "history/history.h"
++#include "history/history_item.h"
++#include "history/view/history_view_cursor_state.h"
++#include "history/view/history_view_element.h"
++#include "main/main_account.h"
++#include "main/main_domain.h"
++#include "main/main_session.h"
++#include "main/session/session_show.h"
++#include "settings.h"
++#include "storage/localimageloader.h"
++#include "storage/storage_media_prepare.h"
++#include "tele/tele_html_playground.h"
++#include "tele/tele_html_script.h"
++#include "tele/tele_lowercase.h"
++#include "tele/tele_options.h"
++#include "ui/chat/chat_style.h"
++#include "ui/chat/attach/attach_prepare.h"
++#include "ui/layers/generic_box.h"
++#include "ui/painter.h"
++#include "ui/text/text_utilities.h"
++#include "ui/toast/toast.h"
++#include "ui/widgets/labels.h"
++#include "ui/widgets/popup_menu.h"
++#include "window/window_controller.h"
++#include "window/window_peer_menu.h"
++#include "window/window_session_controller.h"
++#include "styles/style_boxes.h"
++#include "styles/style_chat.h"
++#include "styles/style_layers.h"
++#include "styles/style_menu_icons.h"
++
++#include <QtCore/QCryptographicHash>
++#include <QtGui/QClipboard>
++#include <QtGui/QGuiApplication>
++
++namespace Tele::Html {
++namespace {
++
++constexpr auto kMaxTgwSize = int64(256 * 1024);
++constexpr auto kTransitionDuration = crl::time(240);
++constexpr auto kBareWidthFactor = 1.5;
++constexpr auto kFrameInterval = crl::time(15);
++constexpr auto kMaxLiveScripts = 16;
++constexpr auto kMaxCssHeight = 4096;
++constexpr auto kTempLifetime = crl::time(10 * 60 * 1000);
++
++std::vector<base::weak_ptr<Card>> StartQueue;
++std::vector<base::weak_ptr<Card>> Live;
++bool StartScheduled = false;
++
++void ProcessStartQueue() {
++	StartScheduled = false;
++	while (!StartQueue.empty()) {
++		const auto card = StartQueue.front().get();
++		StartQueue.erase(begin(StartQueue));
++		if (card && card->visible() && !card->script()) {
++			card->start();
++			break;
++		}
++	}
++	if (!StartQueue.empty() && !StartScheduled) {
++		StartScheduled = true;
++		crl::on_main([] { ProcessStartQueue(); });
++	}
++}
++
++void ScheduleStart(not_null<Card*> card) {
++	StartQueue.push_back(base::make_weak(card.get()));
++	if (!StartScheduled) {
++		StartScheduled = true;
++		crl::on_main([] { ProcessStartQueue(); });
++	}
++}
++
++void TouchLive(not_null<Card*> card) {
++	Live.erase(ranges::remove_if(Live, [&](const base::weak_ptr<Card> &weak) {
++		const auto strong = weak.get();
++		return !strong || (strong == card.get()) || !strong->script();
++	}), end(Live));
++	Live.push_back(base::make_weak(card.get()));
++	for (auto i = begin(Live); int(Live.size()) > kMaxLiveScripts;) {
++		if (i == end(Live)) {
++			break;
++		}
++		const auto strong = i->get();
++		if (strong && strong != card.get() && !strong->visible()) {
++			strong->stopScript();
++			i = Live.erase(i);
++		} else {
++			++i;
++		}
++	}
++}
++
++using CardKey = std::pair<Main::Session*, FullMsgId>;
++
++struct CardEntry {
++	std::shared_ptr<Card> card;
++};
++
++std::map<CardKey, CardEntry> Cards;
++base::flat_set<Main::Session*> Watched;
++std::map<Main::Session*, base::flat_set<FullMsgId>> Tracked;
++
++void Watch(not_null<Main::Session*> session) {
++	if (!Watched.emplace(session).second) {
++		return;
++	}
++	session->data().itemRemoved(
++	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
++		Cards.erase(CardKey{ session.get(), item->fullId() });
++		const auto i = Tracked.find(session);
++		if (i != end(Tracked)) {
++			i->second.remove(item->fullId());
++		}
++	}, session->lifetime());
++	session->lifetime().add([=] {
++		Watched.remove(session);
++		Tracked.erase(session);
++		for (auto i = begin(Cards); i != end(Cards);) {
++			if (i->first.first == session) {
++				i = Cards.erase(i);
++			} else {
++				++i;
++			}
++		}
++	});
++}
++
++void Track(not_null<HistoryItem*> item) {
++	const auto session = &item->history()->session();
++	Watch(session);
++	Tracked[session].emplace(item->fullId());
++}
++
++[[nodiscard]] bool LinkAllowed(const QString &url) {
++	const auto lower = url.trimmed().toLower();
++	return lower.startsWith(u"https://"_q)
++		|| lower.startsWith(u"http://"_q)
++		|| lower.startsWith(u"tg://"_q)
++		|| lower.startsWith(u"ton://"_q)
++		|| lower.startsWith(u"mailto:"_q);
++}
++
++[[nodiscard]] QString CardFileName(const QString &source) {
++	const auto hash = QCryptographicHash::hash(
++		source.toUtf8(),
++		QCryptographicHash::Sha256).toHex().left(12);
++	return u"card-"_q + QString::fromLatin1(hash) + u".tgw"_q;
++}
++
++void SendAsTgw(
++		not_null<Window::SessionController*> controller,
++		QString source) {
++	const auto chosen = std::make_shared<Data::Thread*>(nullptr);
++	const auto weak = base::make_weak(controller);
++	Window::ShowChooseRecipientBox(
++		controller,
++		[=](not_null<Data::Thread*> thread) {
++			*chosen = thread;
++			return true;
++		},
++		rpl::single(Lower(u"Send as .tgw to"_q)),
++		[=] {
++			const auto strong = weak.get();
++			const auto thread = *chosen;
++			if (!strong || !thread) {
++				return;
++			}
++			const auto folder = cWorkingDir() + u"tdata/tele_html_send"_q;
++			QDir().mkpath(folder);
++			const auto path = folder + '/' + CardFileName(source);
++			auto file = QFile(path);
++			base::call_delayed(kTempLifetime, [=] {
++				QFile::remove(path);
++			});
++			if (!file.open(QIODevice::WriteOnly)) {
++				strong->showToast(Lower(u"Couldn't write the .tgw file."_q));
++				return;
++			}
++			file.write(source.toUtf8());
++			file.close();
++			auto list = Storage::PrepareMediaList(
++				QStringList{ path },
++				st::sendMediaPreviewSize,
++				strong->session().premium());
++			if (list.error != Ui::PreparedList::Error::None
++				|| list.files.empty()) {
++				strong->showToast(Lower(u"Couldn't send the .tgw file."_q));
++				return;
++			}
++			for (auto &prepared : list.files) {
++				prepared.type = Ui::PreparedFile::Type::File;
++			}
++			thread->session().api().sendFiles(
++				std::move(list),
++				SendMediaType::File,
++				nullptr,
++				Api::SendAction(thread));
++			strong->showToast(Lower(u"Sent as a .tgw file."_q));
++		});
++}
++
++void ScriptLogBox(
++		not_null<Ui::GenericBox*> box,
++		std::weak_ptr<Card> weak) {
++	box->setTitle(rpl::single(Lower(u"Script log"_q)));
++	box->setWidth(st::boxWideWidth);
++	const auto text = [=] {
++		const auto card = weak.lock();
++		const auto script = card ? card->script() : nullptr;
++		if (!script) {
++			return Lower(u"The card is gone."_q);
++		}
++		const auto &lines = script->log();
++		if (lines.empty()) {
++			return Lower(u"Nothing logged yet."_q);
++		}
++		auto result = QStringList();
++		for (const auto &line : lines) {
++			result.push_back(line);
++		}
++		return result.join('\n');
++	};
++	const auto label = box->addRow(object_ptr<Ui::FlatLabel>(
++		box,
++		text(),
++		st::boxLabel));
++	label->setSelectable(true);
++	if (const auto card = weak.lock()) {
++		if (const auto script = card->script()) {
++			script->logUpdates(
++			) | rpl::on_next([=] {
++				label->setText(text());
++			}, label->lifetime());
++		}
++	}
++	box->addButton(rpl::single(Lower(u"Copy"_q)), [=] {
++		QGuiApplication::clipboard()->setText(text());
++		box->showToast(Lower(u"Copied."_q));
++	});
++	box->addButton(rpl::single(Lower(u"Close"_q)), [=] {
++		box->closeBox();
++	});
++}
++
++[[nodiscard]] Window::SessionController *ControllerFor(
++		not_null<Main::Session*> session) {
++	const auto check = [&](Window::Controller *window) {
++		const auto controller = window ? window->sessionController() : nullptr;
++		return (controller && &controller->session() == session)
++			? controller
++			: nullptr;
++	};
++	if (const auto result = check(Core::App().activeWindow())) {
++		return result;
++	}
++	return check(Core::App().activePrimaryWindow());
++}
++
++} // namespace
++
++Card::Card(QString source)
++: _source(std::move(source))
++, _parsed(ParseCard(_source))
++, _static(CheckMarkup(_parsed.body).isEmpty()
++	? _parsed.body
++	: u"<p class=\"small muted\">This card is too complex to show.</p>"_q)
++, _body(_static)
++, _frames([=](crl::time now) { return frame(now); }) {
++	for (const auto &script : _parsed.scripts) {
++		_joined += script;
++		_joined += u"\n;\n"_q;
++	}
++}
++
++bool Card::visible() const {
++	return _shown > 0;
++}
++
++void Card::shown(bool shown) {
++	_shown = std::max(_shown + (shown ? 1 : -1), 0);
++	if (_shown > 0) {
++		if (!_script && !_joined.isEmpty()) {
++			ScheduleStart(this);
++		} else if (_script) {
++			_script->setPaused(false);
++			TouchLive(this);
++			checkAnimation();
++		}
++	} else if (_script) {
++		_frames.stop();
++		_script->setPaused(true);
++	}
++}
++
++void Card::start() {
++	if (_script || _joined.isEmpty()) {
++		return;
++	}
++	_script = Script::Create(_joined, [=] {
++		rerender();
++		checkAnimation();
++	});
++	TouchLive(this);
++	rerender();
++	checkAnimation();
++}
++
++void Card::stopScript() {
++	_frames.stop();
++	_script = nullptr;
++	setBody(_static);
++}
++
++void Card::setBody(QString body) {
++	if (body == _body) {
++		return;
++	}
++	_body = std::move(body);
++	++_generation;
++	_updates.fire({});
++}
++
++Card::~Card() {
++	_frames.stop();
++	_script = nullptr;
++}
++
++bool Card::frame(crl::time now) {
++	if (!_script || !_script->animating() || !visible()) {
++		return false;
++	} else if (now - _lastFrame < kFrameInterval) {
++		return true;
++	}
++	_lastFrame = now;
++	_script->tick(now);
++	rerender();
++	return _script && _script->animating();
++}
++
++const QString &Card::source() const {
++	return _source;
++}
++
++const ParsedCard &Card::parsed() const {
++	return _parsed;
++}
++
++const QString &Card::body() const {
++	return _body;
++}
++
++uint64 Card::generation() const {
++	return _generation;
++}
++
++Script *Card::script() const {
++	return _script.get();
++}
++
++void Card::action(const QString &name, const QString &value) {
++	if (_script) {
++		_script->action(name, value);
++	}
++}
++
++rpl::producer<QString> Card::transitions() const {
++	return _transitions.events();
++}
++
++rpl::producer<> Card::updates() const {
++	return _updates.events();
++}
++
++void Card::rerender() {
++	if (!_script) {
++		return;
++	}
++	auto html = _script->render();
++	if (html.trimmed().isEmpty()) {
++		html = _static;
++	} else if (const auto error = CheckMarkup(html); !error.isEmpty()) {
++		_script->warn(u"render() output is too complex (%1)"_q.arg(error));
++		html = _static;
++	}
++	const auto transition = _script->takeTransition();
++	if (html == _body) {
++		return;
++	}
++	if (!transition.isEmpty() && transition != u"none"_q) {
++		_transitions.fire_copy(transition);
++	}
++	_body = std::move(html);
++	++_generation;
++	_updates.fire({});
++}
++
++void Card::checkAnimation() {
++	if (_script && _script->animating() && visible()) {
++		if (!_frames.animating()) {
++			_frames.start();
++		}
++	} else {
++		_frames.stop();
++	}
++}
++
++CardMedia::CardMedia(
++	not_null<HistoryView::Element*> parent,
++	std::shared_ptr<Card> card)
++: Media(parent)
++, _card(std::move(card)) {
++	subscribe();
++}
++
++CardMedia::CardMedia(
++	not_null<HistoryView::Element*> parent,
++	not_null<DocumentData*> document)
++: Media(parent)
++, _document(document)
++, _documentMedia(document->createMediaView()) {
++	_document->forceToCache(true);
++	checkDocument();
++	if (!_card) {
++		_document->session().downloaderTaskFinished(
++		) | rpl::on_next([=] {
++			if (!_card) {
++				checkDocument();
++				if (_card) {
++					history()->owner().requestViewResize(_parent);
++				}
++			}
++		}, _lifetime);
++	}
++}
++
++CardMedia::~CardMedia() {
++	setShown(false);
++	if (hasHeavyPart()) {
++		unloadHeavyPart();
++		_parent->checkHeavyPart();
++	}
++}
++
++void CardMedia::subscribe() {
++	if (!_card) {
++		return;
++	}
++	_card->transitions(
++	) | rpl::on_next([=](const QString &kind) {
++		startTransition(kind);
++	}, _lifetime);
++	_card->updates(
++	) | rpl::on_next([=] {
++		updated();
++	}, _lifetime);
++}
++
++void CardMedia::setShown(bool shown) const {
++	if (_shownInCard == shown || !_card) {
++		return;
++	}
++	_shownInCard = shown;
++	_card->shown(shown);
++}
++
++void CardMedia::loadDocument() {
++	if (!_document || _card || _documentFailed || _document->cancelled()) {
++		return;
++	} else if (!_documentMedia->loaded() && !_document->loading()) {
++		_document->save(_parent->data()->fullId(), QString());
++	}
++}
++
++void CardMedia::checkDocument() {
++	if (!_document || _card || _documentFailed) {
++		return;
++	} else if (!_documentMedia->loaded()) {
++		return;
++	}
++	auto bytes = _documentMedia->bytes();
++	if (bytes.isEmpty()) {
++		const auto path = _document->filepath(true);
++		if (!path.isEmpty()) {
++			auto file = QFile(path);
++			if (file.size() <= kMaxTgwSize
++				&& file.open(QIODevice::ReadOnly)) {
++				bytes = file.readAll();
++			}
++		}
++	}
++	if (bytes.isEmpty() || bytes.size() > kMaxTgwSize) {
++		_documentFailed = true;
++		return;
++	}
++	_card = ResolveCard(_parent->data(), QString::fromUtf8(bytes));
++	subscribe();
++}
++
++void CardMedia::updated() {
++	_cacheDirty = true;
++	if (!_layout || !_layoutWidth) {
++		history()->owner().requestViewResize(_parent);
++		return;
++	}
++	const auto scheme = layoutScheme();
++	const auto oldHeight = height();
++	const auto oldNatural = _layout ? _layout->contentWidth() : 0;
++	const auto doc = document(scheme, _layoutWidth);
++	const auto margins = padding();
++	const auto newHeight = int(std::ceil(std::min(doc->height(), kMaxCssHeight) * zoom()))
++		+ margins.top()
++		+ margins.bottom()
++		+ infoSkip();
++	if (newHeight != oldHeight || doc->contentWidth() != oldNatural) {
++		history()->owner().requestViewResize(_parent);
++	} else {
++		repaintCard();
++	}
++}
++
++void CardMedia::repaintCard() const {
++	const auto topLeft = _parent->mediaTopLeft();
++	if (topLeft.isNull()) {
++		_parent->repaint();
++	} else {
++		_parent->repaint(QRect(topLeft, currentSize()));
++	}
++}
++
++void CardMedia::startTransition(const QString &kind) {
++	if (_cache.isNull()) {
++		return;
++	}
++	_transition = std::make_unique<Transition>();
++	_transition->kind = kind;
++	_transition->from = _cache;
++	_transition->animation.start([=] {
++		repaintCard();
++		if (_transition && !_transition->animation.animating()) {
++			crl::on_main(this, [=] {
++				if (_transition && !_transition->animation.animating()) {
++					_transition = nullptr;
++				}
++			});
++		}
++	}, 0., 1., kTransitionDuration, anim::easeOutCubic);
++}
++
++void CardMedia::activate(const Hit &hit) {
++	if (!_card) {
++		return;
++	} else if (!hit.action.isEmpty()) {
++		_card->action(hit.action, hit.value);
++	}
++}
++
++bool CardMedia::bubble() const {
++	return _card ? _card->parsed().bubble : true;
++}
++
++QMargins CardMedia::padding() const {
++	return bubble() ? st::msgPadding : QMargins();
++}
++
++int CardMedia::infoSkip() const {
++	const auto item = _parent->data();
++	if (!hideMessageText() && !item->emptyText()) {
++		return 0;
++	} else if (bubble()) {
++		return st::msgDateFont->height;
++	}
++	return st::msgDateImgDelta
++		+ 2 * st::msgDateImgPadding.y()
++		+ st::msgDateFont->height;
++}
++
++float64 CardMedia::zoom() const {
++	return style::Scale() / 100.;
++}
++
++int CardMedia::maxContentWidth() const {
++	const auto margins = padding();
++	const auto full = bubble()
++		? st::msgMaxWidth
++		: int(st::msgMaxWidth * kBareWidthFactor);
++	return std::max(full - margins.left() - margins.right(), 1);
++}
++
++Scheme CardMedia::layoutScheme() const {
++	if (_layoutScheme && _layout) {
++		return _lastScheme;
++	}
++	auto result = Scheme();
++	result.fg = st::windowFg->c;
++	result.muted = st::windowSubTextFg->c;
++	result.card = st::windowBg->c;
++	result.border = st::windowFg->c;
++	result.border.setAlphaF(0.12);
++	result.link = st::windowActiveTextFg->c;
++	result.accent = st::windowActiveTextFg->c;
++	result.dark = (st::windowBg->c.lightness() < 128);
++	return result;
++}
++
++Scheme CardMedia::paintScheme(
++		const HistoryView::PaintContext &context) const {
++	if (!bubble()) {
++		auto result = Scheme();
++		result.fg = st::windowFg->c;
++		result.muted = st::windowSubTextFg->c;
++		result.card = st::windowBg->c;
++		result.border = st::windowFg->c;
++		result.border.setAlphaF(0.12);
++		result.link = st::windowActiveTextFg->c;
++		result.accent = st::windowActiveTextFg->c;
++		result.dark = (st::windowBg->c.lightness() < 128);
++		return result;
++	}
++	const auto stm = &context.st->messageStyle(context.outbg, false);
++	auto result = Scheme();
++	result.fg = stm->historyTextFg->c;
++	result.muted = stm->msgDateFg->c;
++	result.card = stm->msgBg->c;
++	result.border = stm->historyTextFg->c;
++	result.border.setAlphaF(0.14);
++	result.link = stm->textPalette.linkFg->c;
++	result.accent = stm->textPalette.linkFg->c;
++	result.dark = (stm->msgBg->c.lightness() < 128);
++	return result;
++}
++
++Document *CardMedia::document(const Scheme &scheme, int width) const {
++	if (!_card) {
++		return nullptr;
++	}
++	const auto key = scheme.key();
++	if (!_layout
++		|| _layoutGeneration != _card->generation()
++		|| _layoutScheme != key) {
++		_layout = std::make_unique<Document>(
++			_card->parsed().styles,
++			_card->body(),
++			scheme,
++			width);
++		_layoutGeneration = _card->generation();
++		_layoutScheme = key;
++		_lastScheme = scheme;
++		_layoutWidth = 0;
++		_cacheDirty = true;
++		_handlers.clear();
++	}
++	if (_layoutWidth != width) {
++		_layout->layout(width);
++		_layoutWidth = width;
++		_cacheDirty = true;
++	}
++	return _layout.get();
++}
++
++QRect CardMedia::contentRect() const {
++	const auto margins = padding();
++	return QRect(
++		margins.left(),
++		margins.top(),
++		std::max(width() - margins.left() - margins.right(), 1),
++		std::max(
++			height() - margins.top() - margins.bottom() - infoSkip(),
++			1));
++}
++
++QPoint CardMedia::toDocument(QPoint point) const {
++	const auto rect = contentRect();
++	const auto scale = zoom();
++	return QPoint(
++		int(std::floor((point.x() - rect.x()) / scale)),
++		int(std::floor((point.y() - rect.y()) / scale)));
++}
++
++QSize CardMedia::countOptimalSize() {
++	const auto margins = padding();
++	if (!_card) {
++		return QSize(
++			st::msgMinWidth,
++			margins.top() + margins.bottom()
++				+ 2 * st::msgDateFont->height
++				+ infoSkip());
++	}
++	const auto scale = zoom();
++	const auto css = std::max(int(maxContentWidth() / scale), 1);
++	const auto doc = document(layoutScheme(), css);
++	const auto natural = int(std::ceil(doc->contentWidth() * scale));
++	const auto minimal = bubble() ? st::msgMinWidth : st::msgMinWidth / 2;
++	const auto width = std::max(
++		natural + margins.left() + margins.right(),
++		minimal);
++	const auto inner = std::max(width - margins.left() - margins.right(), 1);
++	const auto fitted = document(
++		layoutScheme(),
++		std::max(int(inner / scale), 1));
++	const auto height = int(std::ceil(std::min(fitted->height(), kMaxCssHeight) * scale))
++		+ margins.top()
++		+ margins.bottom()
++		+ infoSkip();
++	return { width, height };
++}
++
++QSize CardMedia::countCurrentSize(int newWidth) {
++	const auto margins = padding();
++	const auto width = std::min(newWidth, std::max(maxWidth(), 1));
++	if (!_card) {
++		return { width, minHeight() };
++	}
++	const auto scale = zoom();
++	const auto inner = std::max(width - margins.left() - margins.right(), 1);
++	const auto doc = document(layoutScheme(), std::max(int(inner / scale), 1));
++	const auto height = int(std::ceil(std::min(doc->height(), kMaxCssHeight) * scale))
++		+ margins.top()
++		+ margins.bottom()
++		+ infoSkip();
++	return { width, height };
++}
++
++void CardMedia::validateCache(const Scheme &scheme) const {
++	const auto rect = contentRect();
++	const auto scale = zoom();
++	const auto css = std::max(int(rect.width() / scale), 1);
++	const auto doc = document(scheme, css);
++	const auto ratio = style::DevicePixelRatio();
++	const auto size = rect.size() * ratio;
++	if (!_cacheDirty && _cache.size() == size) {
++		return;
++	}
++	if (_cache.size() != size) {
++		_cache = QImage(size, QImage::Format_ARGB32_Premultiplied);
++	}
++	_cache.setDevicePixelRatio(ratio);
++	_cache.fill(Qt::transparent);
++	auto q = QPainter(&_cache);
++	q.setRenderHint(QPainter::Antialiasing);
++	q.setRenderHint(QPainter::SmoothPixmapTransform);
++	q.scale(scale, scale);
++	doc->paint(q, QRect(
++		0,
++		0,
++		int(std::ceil(rect.width() / scale)),
++		int(std::ceil(rect.height() / scale))));
++	q.end();
++	_cacheDirty = false;
++	setShown(true);
++	history()->owner().registerHeavyViewPart(_parent);
++}
++
++void CardMedia::paintPlaceholder(
++		Painter &p,
++		const HistoryView::PaintContext &context,
++		QRect rect) const {
++	const auto stm = context.messageStyle();
++	p.setFont(st::msgDateFont);
++	p.setPen(stm->msgDateFg);
++	const auto name = _document
++		? _document->filename()
++		: QString();
++	const auto loading = _document && _document->loading();
++	const auto text = loading
++		? Lower(u"Loading %1…"_q).arg(name)
++		: Lower(u"Card %1"_q).arg(name);
++	p.drawText(
++		rect,
++		st::msgDateFont->elided(text, rect.width()),
++		style::al_left);
++}
++
++void CardMedia::draw(
++		Painter &p,
++		const HistoryView::PaintContext &context) const {
++	if (width() < 1 || height() < 1) {
++		return;
++	}
++	const auto rect = contentRect();
++	if (!_card) {
++		const_cast<CardMedia*>(this)->loadDocument();
++		paintPlaceholder(p, context, rect);
++	} else {
++		const auto scheme = paintScheme(context);
++		validateCache(scheme);
++		const auto progress = (_transition
++			&& _transition->animation.animating())
++			? _transition->animation.value(1.)
++			: 1.;
++		if (progress < 1.) {
++			const auto &kind = _transition->kind;
++			const auto shift = (1. - progress) * st::msgPadding.left() * 2.;
++			auto from = QPointF();
++			auto to = QPointF();
++			if (kind == u"slide-left"_q) {
++				from = QPointF(-progress * shift, 0);
++				to = QPointF(shift, 0);
++			} else if (kind == u"slide-right"_q) {
++				from = QPointF(progress * shift, 0);
++				to = QPointF(-shift, 0);
++			} else if (kind == u"slide-up"_q) {
++				from = QPointF(0, -progress * shift);
++				to = QPointF(0, shift);
++			} else if (kind == u"slide-down"_q) {
++				from = QPointF(0, progress * shift);
++				to = QPointF(0, -shift);
++			}
++			p.save();
++			p.setClipRect(rect.marginsAdded(padding()));
++			p.setOpacity(1. - progress);
++			p.drawImage(QPointF(rect.topLeft()) + from, _transition->from);
++			p.setOpacity(progress);
++			if (kind == u"pop"_q) {
++				const auto scale = 0.94 + 0.06 * progress;
++				const auto center = QPointF(rect.center());
++				p.translate(center);
++				p.scale(scale, scale);
++				p.translate(-center);
++			}
++			p.drawImage(QPointF(rect.topLeft()) + to, _cache);
++			p.restore();
++		} else {
++			p.drawImage(rect.topLeft(), _cache);
++		}
++		if (!bubble() && context.selected()) {
++			p.fillRect(rect, context.st->msgSelectOverlay());
++		}
++	}
++	if (infoSkip() > 0) {
++		const auto corner = resolveCustomInfoRightBottom();
++		_parent->drawInfo(
++			p,
++			context,
++			corner.x(),
++			corner.y(),
++			width(),
++			bubble()
++				? HistoryView::InfoDisplayType::Default
++				: HistoryView::InfoDisplayType::Background);
++	}
++}
++
++QPoint CardMedia::resolveCustomInfoRightBottom() const {
++	if (bubble()) {
++		return QPoint(
++			width() - (st::msgPadding.right() - st::msgDateDelta.x()),
++			height() - (st::msgPadding.bottom() - st::msgDateDelta.y()));
++	}
++	const auto skipx = st::msgDateImgPadding.x();
++	const auto skipy = st::msgDateImgPadding.y();
++	return QPoint(width() - skipx, height() - skipy);
++}
++
++ClickHandlerPtr CardMedia::handlerFor(const Hit &hit) const {
++	const auto key = hit.link.isEmpty()
++		? (u"a:"_q + hit.action + '\n' + hit.value)
++		: (u"l:"_q + hit.link);
++	const auto i = _handlers.find(key);
++	if (i != end(_handlers)) {
++		return i->second;
++	}
++	auto handler = ClickHandlerPtr();
++	if (!hit.link.isEmpty()) {
++		handler = std::make_shared<HiddenUrlClickHandler>(hit.link);
++	} else {
++		const auto weak = base::make_weak(const_cast<CardMedia*>(this));
++		handler = std::make_shared<LambdaClickHandler>([=] {
++			if (const auto strong = weak.get()) {
++				strong->activate(hit);
++			}
++		});
++	}
++	_handlers.emplace(key, handler);
++	return handler;
++}
++
++HistoryView::TextState CardMedia::textState(
++		QPoint point,
++		HistoryView::StateRequest request) const {
++	auto result = HistoryView::TextState(_parent);
++	if (width() < 1) {
++		return result;
++	}
++	if (infoSkip() > 0) {
++		const auto corner = resolveCustomInfoRightBottom();
++		const auto info = _parent->bottomInfoTextState(
++			corner.x(),
++			corner.y(),
++			point,
++			bubble()
++				? HistoryView::InfoDisplayType::Default
++				: HistoryView::InfoDisplayType::Background);
++		if (info.link
++			|| info.cursor != HistoryView::CursorState::None
++			|| info.customTooltip) {
++			return info;
++		}
++	}
++	const auto rect = contentRect();
++	if (!_card || !_layout || !rect.contains(point)) {
++		return result;
++	}
++	const auto local = toDocument(point);
++	_lastPoint = local;
++	if (_layout->hover(local)) {
++		_cacheDirty = true;
++		repaintCard();
++	}
++	const auto hit = _layout->hitTest(local);
++	if (hit.actionable()
++		&& (hit.link.isEmpty() || LinkAllowed(hit.link))) {
++		result.link = handlerFor(hit);
++	}
++	return result;
++}
++
++bool CardMedia::toggleSelectionByHandlerClick(
++		const ClickHandlerPtr &p) const {
++	return false;
++}
++
++bool CardMedia::dragItemByHandler(const ClickHandlerPtr &p) const {
++	return false;
++}
++
++void CardMedia::clickHandlerActiveChanged(
++		const ClickHandlerPtr &p,
++		bool active) {
++	if (!active && _layout && _layout->leave()) {
++		_cacheDirty = true;
++		repaintCard();
++	}
++}
++
++bool CardMedia::hideMessageText() const {
++	return !_document;
++}
++
++bool CardMedia::needsBubble() const {
++	if (bubble()) {
++		return true;
++	}
++	const auto item = _parent->data();
++	return !item->isService()
++		&& (_parent->displayReply()
++			|| _parent->displayForwardedFrom()
++			|| _parent->displayFromName()
++			|| item->viaBot()
++			|| (!hideMessageText() && !item->emptyText()));
++}
++
++bool CardMedia::skipBubbleTail() const {
++	return false;
++}
++
++DocumentData *CardMedia::getDocument() const {
++	return _document;
++}
++
++TextForMimeData CardMedia::selectedText(TextSelection selection) const {
++	return TextForMimeData::Simple(_layout ? _layout->plainText() : QString());
++}
++
++bool CardMedia::hasHeavyPart() const {
++	return !_cache.isNull() || (_transition != nullptr);
++}
++
++void CardMedia::unloadHeavyPart() {
++	setShown(false);
++	_cache = QImage();
++	_cacheDirty = true;
++	_transition = nullptr;
++}
++
++std::shared_ptr<Card> CardMedia::card() const {
++	return _card;
++}
++
++bool IsTgwDocument(not_null<DocumentData*> document) {
++	return document->filename().endsWith(u".tgw"_q, Qt::CaseInsensitive)
++		&& (document->size > 0)
++		&& (document->size <= kMaxTgwSize);
++}
++
++std::unique_ptr<HistoryView::Media> CreateMedia(
++		not_null<HistoryView::Element*> view) {
++	const auto item = view->data();
++	if (item->isService()) {
++		return nullptr;
++	} else if (const auto media = item->media()) {
++		const auto document = media->document();
++		if (!document
++			|| media->webpage()
++			|| item->groupId()
++			|| !IsTgwDocument(document)) {
++			return nullptr;
++		}
++		Track(item);
++		return HtmlBubbles()
++			? std::make_unique<CardMedia>(view, document)
++			: nullptr;
++	} else if (!HtmlBubbles() || !IsPlaygroundPeer(item->history()->peer)) {
++		return nullptr;
++	}
++	const auto text = item->originalText().text;
++	if (text.trimmed().isEmpty()) {
++		return nullptr;
++	}
++	return std::make_unique<CardMedia>(view, ResolveCard(item, text));
++}
++
++std::shared_ptr<Card> ResolveCard(
++		not_null<HistoryItem*> item,
++		const QString &source) {
++	const auto session = &item->history()->session();
++	Watch(session);
++	const auto key = CardKey{ session, item->fullId() };
++	auto &entry = Cards[key];
++	if (!entry.card || entry.card->source() != source) {
++		entry.card = std::make_shared<Card>(source);
++	}
++	return entry.card;
++}
++
++std::shared_ptr<Card> FindCard(not_null<HistoryItem*> item) {
++	const auto session = &item->history()->session();
++	const auto i = Cards.find(CardKey{ session, item->fullId() });
++	return (i != end(Cards)) ? i->second.card : nullptr;
++}
++
++void ClearCards() {
++	Cards.clear();
++}
++
++void RefreshViews() {
++	for (const auto &[session, ids] : Tracked) {
++		for (const auto &id : ids) {
++			if (const auto item = session->data().message(id)) {
++				session->data().requestItemViewRefresh(item);
++			}
++		}
++	}
++}
++
++void AppendMenuActions(
++		not_null<Ui::PopupMenu*> menu,
++		std::shared_ptr<Main::SessionShow> show,
++		not_null<HistoryItem*> item) {
++	if (!HtmlBubbles()) {
++		return;
++	}
++	const auto session = &item->history()->session();
++	if (IsPlaygroundPeer(item->history()->peer)
++		&& !item->isService()
++		&& !item->originalText().text.trimmed().isEmpty()) {
++		const auto source = item->originalText().text;
++		menu->addAction(Lower(u"Send as .tgw to…"_q), [=] {
++			if (const auto controller = ControllerFor(session)) {
++				SendAsTgw(controller, source);
++			}
++		}, &st::menuIconForward);
++	}
++	const auto card = FindCard(item);
++	if (card && !card->parsed().scripts.empty()) {
++		const auto weak = std::weak_ptr<Card>(card);
++		menu->addAction(Lower(u"Script log"_q), [=] {
++			show->showBox(Box(ScriptLogBox, weak));
++		}, &st::menuIconInfo);
++	}
++}
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_html_card.h b/Telegram/SourceFiles/tele/tele_html_card.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a840d4fc3160509c54a7ab42125f8d5a4fb5fc8
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html_card.h
+@@ -0,0 +1,180 @@
++#pragma once
++
++#include "base/weak_ptr.h"
++#include "history/view/media/history_view_media.h"
++#include "tele/tele_html.h"
++#include "ui/effects/animations.h"
++
++class DocumentData;
++class HistoryItem;
++
++namespace Data {
++class DocumentMedia;
++} // namespace Data
++
++namespace Main {
++class SessionShow;
++} // namespace Main
++
++namespace Ui {
++class PopupMenu;
++} // namespace Ui
++
++namespace Tele::Html {
++
++class Script;
++
++class Card final : public base::has_weak_ptr {
++public:
++	explicit Card(QString source);
++	~Card();
++
++	[[nodiscard]] const QString &source() const;
++	[[nodiscard]] const ParsedCard &parsed() const;
++	[[nodiscard]] const QString &body() const;
++	[[nodiscard]] uint64 generation() const;
++	[[nodiscard]] Script *script() const;
++
++	void action(const QString &name, const QString &value);
++	void shown(bool shown);
++	void start();
++	void stopScript();
++	[[nodiscard]] bool visible() const;
++
++	[[nodiscard]] rpl::producer<QString> transitions() const;
++	[[nodiscard]] rpl::producer<> updates() const;
++
++private:
++	void rerender();
++	void checkAnimation();
++	bool frame(crl::time now);
++	void setBody(QString body);
++
++	const QString _source;
++	const ParsedCard _parsed;
++	const QString _static;
++	QString _joined;
++	QString _body;
++	int _shown = 0;
++	uint64 _generation = 0;
++	std::unique_ptr<Script> _script;
++	Ui::Animations::Basic _frames;
++	crl::time _lastFrame = 0;
++	rpl::event_stream<QString> _transitions;
++	rpl::event_stream<> _updates;
++
++};
++
++class CardMedia final : public HistoryView::Media {
++public:
++	CardMedia(
++		not_null<HistoryView::Element*> parent,
++		std::shared_ptr<Card> card);
++	CardMedia(
++		not_null<HistoryView::Element*> parent,
++		not_null<DocumentData*> document);
++	~CardMedia();
++
++	void draw(Painter &p, const HistoryView::PaintContext &context) const override;
++	HistoryView::TextState textState(
++		QPoint point,
++		HistoryView::StateRequest request) const override;
++
++	bool toggleSelectionByHandlerClick(const ClickHandlerPtr &p) const override;
++	bool dragItemByHandler(const ClickHandlerPtr &p) const override;
++	void clickHandlerActiveChanged(
++		const ClickHandlerPtr &p,
++		bool active) override;
++
++	bool hideMessageText() const override;
++	bool needsBubble() const override;
++	bool customInfoLayout() const override {
++		return true;
++	}
++	QPoint resolveCustomInfoRightBottom() const override;
++	bool skipBubbleTail() const override;
++	DocumentData *getDocument() const override;
++	TextForMimeData selectedText(TextSelection selection) const override;
++	bool hasTextForCopy() const override {
++		return true;
++	}
++
++	bool hasHeavyPart() const override;
++	void unloadHeavyPart() override;
++
++	[[nodiscard]] std::shared_ptr<Card> card() const;
++
++private:
++	struct Transition {
++		QString kind;
++		QImage from;
++		Ui::Animations::Simple animation;
++	};
++
++	QSize countOptimalSize() override;
++	QSize countCurrentSize(int newWidth) override;
++
++	void subscribe();
++	void loadDocument();
++	void checkDocument();
++	void updated();
++	void startTransition(const QString &kind);
++	void repaintCard() const;
++	void activate(const Hit &hit);
++	void setShown(bool shown) const;
++
++	[[nodiscard]] bool bubble() const;
++	[[nodiscard]] QMargins padding() const;
++	[[nodiscard]] int infoSkip() const;
++	[[nodiscard]] float64 zoom() const;
++	[[nodiscard]] int maxContentWidth() const;
++	[[nodiscard]] Scheme layoutScheme() const;
++	[[nodiscard]] Scheme paintScheme(
++		const HistoryView::PaintContext &context) const;
++	[[nodiscard]] Document *document(const Scheme &scheme, int width) const;
++	[[nodiscard]] QRect contentRect() const;
++	[[nodiscard]] QPoint toDocument(QPoint point) const;
++	void validateCache(const Scheme &scheme) const;
++	void paintPlaceholder(
++		Painter &p,
++		const HistoryView::PaintContext &context,
++		QRect rect) const;
++	[[nodiscard]] ClickHandlerPtr handlerFor(const Hit &hit) const;
++
++	DocumentData *_document = nullptr;
++	std::shared_ptr<Data::DocumentMedia> _documentMedia;
++	std::shared_ptr<Card> _card;
++	bool _documentFailed = false;
++
++	mutable std::unique_ptr<Document> _layout;
++	mutable uint64 _layoutGeneration = 0;
++	mutable uint64 _layoutScheme = 0;
++	mutable Scheme _lastScheme;
++	mutable int _layoutWidth = 0;
++	mutable QImage _cache;
++	mutable bool _cacheDirty = true;
++	mutable std::unique_ptr<Transition> _transition;
++	mutable base::flat_map<QString, ClickHandlerPtr> _handlers;
++	mutable QPoint _lastPoint;
++	mutable bool _hovered = false;
++	mutable bool _shownInCard = false;
++	rpl::lifetime _lifetime;
++
++};
++
++[[nodiscard]] bool IsTgwDocument(not_null<DocumentData*> document);
++[[nodiscard]] std::unique_ptr<HistoryView::Media> CreateMedia(
++	not_null<HistoryView::Element*> view);
++[[nodiscard]] std::shared_ptr<Card> ResolveCard(
++	not_null<HistoryItem*> item,
++	const QString &source);
++[[nodiscard]] std::shared_ptr<Card> FindCard(not_null<HistoryItem*> item);
++void ClearCards();
++void RefreshViews();
++
++void AppendMenuActions(
++	not_null<Ui::PopupMenu*> menu,
++	std::shared_ptr<Main::SessionShow> show,
++	not_null<HistoryItem*> item);
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_html_playground.cpp b/Telegram/SourceFiles/tele/tele_html_playground.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..56909fc60bceb362b5b31ce508197f1a7a05a385
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html_playground.cpp
+@@ -0,0 +1,318 @@
++#include "tele/tele_html_playground.h"
++
++#include "base/unixtime.h"
++#include "data/data_histories.h"
++#include "data/data_peer.h"
++#include "data/data_session.h"
++#include "data/data_user.h"
++#include "data/notify/data_peer_notify_settings.h"
++#include "history/history.h"
++#include "history/history_item.h"
++#include "main/main_session.h"
++#include "settings.h"
++#include "tele/tele_html_card.h"
++#include "tele/tele_html_playground_section.h"
++#include "tele/tele_html_samples.h"
++#include "tele/tele_lowercase.h"
++#include "tele/tele_options.h"
++#include "ui/boxes/confirm_box.h"
++#include "window/window_session_controller.h"
++#include "styles/style_layers.h"
++
++#include <QtCore/QJsonArray>
++#include <QtCore/QJsonDocument>
++#include <QtCore/QJsonObject>
++#include <QtCore/QSaveFile>
++
++namespace Tele::Html {
++namespace {
++
++constexpr auto kMaxUserId = BareId(0xFFFFFFFFFFFFULL);
++constexpr auto kUserId = UserId(kMaxUserId - (kMaxUserId % 1000) + 1);
++constexpr auto kUserpicSize = 320;
++constexpr auto kMaxStored = 500;
++
++base::flat_set<not_null<Main::Session*>> Clearing;
++base::flat_set<not_null<Main::Session*>> SaveScheduled;
++
++[[nodiscard]] QString StorePath() {
++	return cWorkingDir() + u"tdata/tele_html_playground.json"_q;
++}
++
++[[nodiscard]] QString SessionKey(not_null<Main::Session*> session) {
++	return QString::number(session->userId().bare)
++		+ (session->isTestMode() ? u"t"_q : QString());
++}
++
++[[nodiscard]] QJsonObject ReadStore() {
++	auto file = QFile(StorePath());
++	if (!file.open(QIODevice::ReadOnly)) {
++		return {};
++	}
++	return QJsonDocument::fromJson(file.readAll()).object();
++}
++
++void WriteStore(const QJsonObject &object) {
++	auto file = QSaveFile(StorePath());
++	if (file.open(QIODevice::WriteOnly)) {
++		file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
++		file.commit();
++	}
++}
++
++[[nodiscard]] std::vector<QString> Stored(not_null<Main::Session*> session) {
++	auto result = std::vector<QString>();
++	const auto list = ReadStore().value(SessionKey(session)).toArray();
++	for (const auto &value : list) {
++		const auto text = value.toString();
++		if (!text.trimmed().isEmpty()) {
++			result.push_back(text);
++		}
++	}
++	return result;
++}
++
++[[nodiscard]] std::vector<not_null<HistoryItem*>> Sent(
++		not_null<History*> history) {
++	auto result = std::vector<not_null<HistoryItem*>>();
++	for (const auto &item : history->clientSideMessages()) {
++		if (item->isHistoryEntry() && item->out()) {
++			result.push_back(item);
++		}
++	}
++	ranges::sort(result, [](
++			not_null<HistoryItem*> a,
++			not_null<HistoryItem*> b) {
++		return a->id < b->id;
++	});
++	return result;
++}
++
++void Save(not_null<Main::Session*> session) {
++	const auto history = session->data().historyLoaded(PlaygroundPeerId());
++	auto list = QJsonArray();
++	if (history) {
++		const auto sent = Sent(history);
++		const auto from = std::max(int(sent.size()) - kMaxStored, 0);
++		for (auto i = from; i < int(sent.size()); ++i) {
++			list.push_back(sent[i]->originalText().text);
++		}
++	}
++	auto store = ReadStore();
++	if (list.isEmpty()) {
++		store.remove(SessionKey(session));
++	} else {
++		store.insert(SessionKey(session), list);
++	}
++	WriteStore(store);
++}
++
++void ScheduleSave(not_null<Main::Session*> session) {
++	if (!SaveScheduled.emplace(session).second) {
++		return;
++	}
++	crl::on_main(session.get(), [=] {
++		SaveScheduled.remove(session);
++		if (!Clearing.contains(session) && HtmlBubbles()) {
++			Save(session);
++		}
++	});
++}
++
++[[nodiscard]] not_null<UserData*> EnsureUser(
++		not_null<Main::Session*> session) {
++	using Flag = MTPDuser::Flag;
++	const auto owner = &session->data();
++	const auto user = owner->processUser(MTP_user(
++		MTP_flags(Flag::f_first_name | Flag::f_photo),
++		MTP_long(kUserId.bare),
++		MTPlong(),
++		MTP_string(u"HTML playground"_q),
++		MTPstring(),
++		MTPstring(),
++		MTPstring(),
++		MTP_userProfilePhotoEmpty(),
++		MTPUserStatus(),
++		MTPint(),
++		MTPVector<MTPRestrictionReason>(),
++		MTPstring(),
++		MTPstring(),
++		MTPEmojiStatus(),
++		MTPVector<MTPUsername>(),
++		MTPRecentStory(),
++		MTPPeerColor(),
++		MTPPeerColor(),
++		MTPint(),
++		MTPlong(),
++		MTPlong(),
++		MTPlong()));
++	if (user->notify().settingsUnknown()) {
++		user->notify().resetToDefault();
++	}
++	return user;
++}
++
++[[nodiscard]] not_null<History*> EnsureHistory(not_null<UserData*> user) {
++	const auto history = user->owner().history(user);
++	if (!history->folderKnown()) {
++		history->applyDialogFields(nullptr, 0, 0, 0);
++		history->dialogEntryApplied();
++	}
++	return history;
++}
++
++void Post(
++		not_null<History*> history,
++		const QString &text,
++		bool out) {
++	const auto session = &history->session();
++	const auto owner = &session->data();
++	const auto item = history->makeMessage({
++		.id = owner->nextLocalMessageId(),
++		.flags = MessageFlag::Local
++			| (out ? MessageFlag::Outgoing : MessageFlag()),
++		.from = out ? session->userPeerId() : history->peer->id,
++		.date = base::unixtime::now(),
++	}, TextWithEntities{ text }, MTP_messageMediaEmpty());
++	history->addNewLocalMessage(item);
++}
++
++void Create(not_null<Main::Session*> session) {
++	if (const auto history = session->data().historyLoaded(
++			PlaygroundPeerId())) {
++		if (!history->clientSideMessages().empty()) {
++			return;
++		}
++	}
++	const auto user = EnsureUser(session);
++	const auto history = EnsureHistory(user);
++	for (const auto &sample : PlaygroundSamples()) {
++		Post(history, sample, false);
++	}
++	for (const auto &text : Stored(session)) {
++		Post(history, text, true);
++	}
++	session->data().sendHistoryChangeNotifications();
++}
++
++void Destroy(not_null<Main::Session*> session) {
++	const auto history = session->data().historyLoaded(PlaygroundPeerId());
++	if (!history) {
++		return;
++	}
++	Clearing.emplace(session);
++	session->data().deleteConversationLocally(history->peer);
++	Clearing.remove(session);
++}
++
++} // namespace
++
++PeerId PlaygroundPeerId() {
++	return peerFromUser(kUserId);
++}
++
++bool IsPlaygroundPeer(const PeerData *peer) {
++	return peer && (peer->id == PlaygroundPeerId());
++}
++
++QImage *PlaygroundUserpic() {
++	static auto result = [] {
++		auto image = QImage(
++			QSize(kUserpicSize, kUserpicSize),
++			QImage::Format_ARGB32_Premultiplied);
++		auto p = QPainter(&image);
++		auto gradient = QLinearGradient(0, 0, kUserpicSize, kUserpicSize);
++		gradient.setColorAt(0., QColor(0xff, 0x8a, 0x3d));
++		gradient.setColorAt(1., QColor(0xe0, 0x3e, 0x7a));
++		p.fillRect(image.rect(), gradient);
++		auto font = QFont();
++		font.setPixelSize(kUserpicSize * 3 / 8);
++		font.setBold(true);
++		p.setFont(font);
++		p.setPen(Qt::white);
++		p.setRenderHint(QPainter::TextAntialiasing);
++		p.drawText(image.rect(), Qt::AlignCenter, u"</>"_q);
++		return image;
++	}();
++	return &result;
++}
++
++QString PlaygroundStatus() {
++	return Lower(u"Local HTML cards"_q);
++}
++
++void SetupPlayground(not_null<Main::Session*> session) {
++	session->data().itemRemoved(
++	) | rpl::filter([=](not_null<const HistoryItem*> item) {
++		return item->out() && IsPlaygroundPeer(item->history()->peer);
++	}) | rpl::on_next([=] {
++		if (!Clearing.contains(session)) {
++			ScheduleSave(session);
++		}
++	}, session->lifetime());
++
++	HtmlBubblesValue(
++	) | rpl::on_next([=](bool enabled) {
++		if (enabled) {
++			crl::on_main(session.get(), [=] {
++				if (HtmlBubbles()) {
++					Create(session);
++				}
++			});
++		} else {
++			ClearCards();
++			Destroy(session);
++		}
++		RefreshViews();
++	}, session->lifetime());
++}
++
++void ShowPlayground(
++		not_null<Window::SessionController*> controller,
++		const Window::SectionShow &params) {
++	const auto session = &controller->session();
++	if (HtmlBubbles()) {
++		Create(session);
++	}
++	const auto history = session->data().historyLoaded(PlaygroundPeerId());
++	if (!history) {
++		return;
++	}
++	controller->showSection(
++		std::make_shared<PlaygroundMemento>(history),
++		params);
++}
++
++void SendToPlayground(not_null<History*> history, const QString &text) {
++	Post(history, text, true);
++	history->owner().sendHistoryChangeNotifications();
++	ScheduleSave(&history->session());
++}
++
++void ConfirmResetPlayground(
++		not_null<Window::SessionController*> controller,
++		not_null<History*> history) {
++	const auto session = &history->session();
++	controller->show(Ui::MakeConfirmBox({
++		.text = Lower(u"Reset the HTML playground? Your cards here "
++			"will be deleted."_q),
++		.confirmed = [=](Fn<void()> &&close) {
++			close();
++			Destroy(session);
++			auto store = ReadStore();
++			store.remove(SessionKey(session));
++			WriteStore(store);
++			if (HtmlBubbles()) {
++				Create(session);
++			}
++		},
++		.confirmText = Lower(u"Reset"_q),
++		.confirmStyle = &st::attentionBoxButton,
++	}));
++}
++
++void MarkPlaygroundRead(not_null<History*> history) {
++	history->owner().histories().readInbox(history);
++}
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_html_playground.h b/Telegram/SourceFiles/tele/tele_html_playground.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..3397e5861b13044a2c25679bfcd54e098f78e89a
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html_playground.h
+@@ -0,0 +1,32 @@
++#pragma once
++
++class History;
++class PeerData;
++
++namespace Main {
++class Session;
++} // namespace Main
++
++namespace Window {
++class SessionController;
++struct SectionShow;
++} // namespace Window
++
++namespace Tele::Html {
++
++[[nodiscard]] PeerId PlaygroundPeerId();
++[[nodiscard]] bool IsPlaygroundPeer(const PeerData *peer);
++[[nodiscard]] QImage *PlaygroundUserpic();
++[[nodiscard]] QString PlaygroundStatus();
++
++void SetupPlayground(not_null<Main::Session*> session);
++void ShowPlayground(
++	not_null<Window::SessionController*> controller,
++	const Window::SectionShow &params);
++void SendToPlayground(not_null<History*> history, const QString &text);
++void ConfirmResetPlayground(
++	not_null<Window::SessionController*> controller,
++	not_null<History*> history);
++void MarkPlaygroundRead(not_null<History*> history);
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_html_playground_section.cpp b/Telegram/SourceFiles/tele/tele_html_playground_section.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..39a485026d183b21467939e95b30aff52de7ba37
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html_playground_section.cpp
+@@ -0,0 +1,828 @@
++#include "tele/tele_html_playground_section.h"
++
++#include "data/data_peer_values.h"
++#include "data/data_session.h"
++#include "data/data_histories.h"
++#include "history/history.h"
++#include "history/history_item.h"
++#include "history/history_view_swipe_back_session.h"
++#include "history/view/history_view_top_bar_widget.h"
++#include "main/main_session.h"
++#include "tele/tele_html_playground.h"
++#include "tele/tele_lowercase.h"
++#include "ui/controls/send_button.h"
++#include "ui/widgets/fields/input_field.h"
++#include "ui/chat/chat_style.h"
++#include "ui/widgets/elastic_scroll.h"
++#include "ui/widgets/shadow.h"
++#include "ui/ui_utility.h"
++#include "window/window_adaptive.h"
++#include "window/window_session_controller.h"
++#include "styles/style_chat.h"
++#include "styles/style_chat_helpers.h"
++#include "styles/style_window.h"
++
++namespace Tele::Html {
++namespace {
++
++using namespace HistoryView;
++
++class PlaygroundWidget final
++	: public Window::SectionWidget
++	, private HistoryView::WindowListDelegate {
++public:
++	PlaygroundWidget(
++		QWidget *parent,
++		not_null<Window::SessionController*> controller,
++		not_null<History*> history);
++
++	Dialogs::RowDescriptor activeChat() const override;
++
++	bool hasTopBarShadow() const override {
++		return true;
++	}
++
++	QPixmap grabForShowAnimation(
++		const Window::SectionSlideParams &params) override;
++
++	bool showInternal(
++		not_null<Window::SectionMemento*> memento,
++		const Window::SectionShow &params) override;
++	std::shared_ptr<Window::SectionMemento> createMemento() override;
++
++	void setInternalState(
++		const QRect &geometry,
++		not_null<PlaygroundMemento*> memento);
++
++	bool floatPlayerHandleWheelEvent(QEvent *e) override;
++	QRect floatPlayerAvailableRect() override;
++
++	Context listContext() override;
++	bool listScrollTo(int top, bool syntetic = true) override;
++	void listCancelRequest() override;
++	void listDeleteRequest() override;
++	void listTryProcessKeyInput(not_null<QKeyEvent*> e) override;
++	rpl::producer<Data::MessagesSlice> listSource(
++		Data::MessagePosition aroundId,
++		int limitBefore,
++		int limitAfter) override;
++	bool listAllowsMultiSelect() override;
++	bool listIsItemGoodForSelection(not_null<HistoryItem*> item) override;
++	bool listIsLessInOrder(
++		not_null<HistoryItem*> first,
++		not_null<HistoryItem*> second) override;
++	void listSelectionChanged(SelectedItems &&items) override;
++	void listMarkReadTill(not_null<HistoryItem*> item) override;
++	void listMarkContentsRead(
++		const base::flat_set<not_null<HistoryItem*>> &items) override;
++	MessagesBarData listMessagesBar(
++		const std::vector<not_null<Element*>> &elements,
++		bool markLastAsRead) override;
++	void listContentRefreshed() override;
++	void listUpdateDateLink(
++		ClickHandlerPtr &link,
++		not_null<Element*> view) override;
++	bool listElementHideReply(not_null<const Element*> view) override;
++	bool listElementShownUnread(not_null<const Element*> view) override;
++	bool listIsGoodForAroundPosition(
++		not_null<const Element*> view) override;
++	void listSendBotCommand(
++		const QString &command,
++		const FullMsgId &context) override;
++	void listSearch(
++		const QString &query,
++		const FullMsgId &context) override;
++	void listHandleViaClick(not_null<UserData*> bot) override;
++	not_null<Ui::ChatTheme*> listChatTheme() override;
++	CopyRestrictionType listCopyRestrictionType(HistoryItem *item) override;
++	CopyRestrictionType listCopyMediaRestrictionType(
++		not_null<HistoryItem*> item) override;
++	CopyRestrictionType listSelectRestrictionType() override;
++	auto listAllowedReactionsValue()
++		-> rpl::producer<Data::AllowedReactions> override;
++	void listShowPremiumToast(not_null<DocumentData*> document) override;
++	void listOpenPhoto(
++		not_null<PhotoData*> photo,
++		FullMsgId context) override;
++	void listOpenDocument(
++		not_null<DocumentData*> document,
++		FullMsgId context,
++		bool showInMediaView) override;
++	void listPaintEmpty(
++		Painter &p,
++		const Ui::ChatPaintContext &context) override;
++	QString listElementAuthorRank(not_null<const Element*> view) override;
++	bool listElementHideTopicButton(not_null<const Element*> view) override;
++	History *listTranslateHistory() override;
++	void listAddTranslatedItems(
++		not_null<TranslateTracker*> tracker) override;
++	Ui::ElasticScroll *listScrollArea() const override;
++	bool listThanosEffectEnabled() const override;
++
++private:
++	void resizeEvent(QResizeEvent *e) override;
++	void paintEvent(QPaintEvent *e) override;
++
++	void showAnimatedHook(
++		const Window::SectionSlideParams &params) override;
++	void showFinishedHook() override;
++	void doSetInnerFocus() override;
++	void checkActivation() override;
++
++	void onScroll();
++	void updateInnerVisibleArea();
++	void updateControlsGeometry();
++	void updateAdaptiveLayout();
++	void saveState(not_null<PlaygroundMemento*> memento);
++	void restoreState(not_null<PlaygroundMemento*> memento);
++
++	void setupSearch();
++	void cancelSearch();
++	void scheduleRefresh();
++	void markRead();
++	[[nodiscard]] std::vector<not_null<HistoryItem*>> items() const;
++	[[nodiscard]] Data::MessagesSlice buildSlice(
++		Data::MessagePosition aroundId) const;
++
++	void confirmDeleteSelected();
++	void clearSelected();
++	void recountChatWidth();
++	void setupCompose();
++	void send();
++	void scrollToBottom();
++	[[nodiscard]] int composeHeight() const;
++
++	const not_null<History*> _history;
++	std::shared_ptr<Ui::ChatTheme> _theme;
++	QPointer<ListWidget> _inner;
++	object_ptr<TopBarWidget> _topBar;
++	object_ptr<Ui::PlainShadow> _topBarShadow;
++
++	bool _skipScrollEvent = false;
++	std::unique_ptr<Ui::ElasticScroll> _scroll;
++
++	object_ptr<Ui::RpWidget> _compose;
++	object_ptr<Ui::InputField> _field;
++	object_ptr<Ui::SendButton> _send;
++	object_ptr<Ui::PlainShadow> _composeShadow;
++
++	rpl::event_stream<> _refreshes;
++	QString _query;
++	bool _refreshScheduled = false;
++	bool _scrollToBottom = false;
++
++};
++
++PlaygroundWidget::PlaygroundWidget(
++	QWidget *parent,
++	not_null<Window::SessionController*> controller,
++	not_null<History*> history)
++: Window::SectionWidget(parent, controller, history->peer)
++, HistoryView::WindowListDelegate(controller)
++, _history(history)
++, _topBar(this, controller)
++, _topBarShadow(this)
++, _scroll(std::make_unique<Ui::ElasticScroll>(
++	this,
++	controller->chatStyle()->value(lifetime(), st::historyScroll)))
++, _compose(this)
++, _field(
++	_compose.data(),
++	st::historyComposeField,
++	Ui::InputField::Mode::MultiLine,
++	rpl::single(Lower(u"HTML, with <style> and <script>"_q)))
++, _send(_compose.data(), st::historySend)
++, _composeShadow(this) {
++	controller->chatStyle()->paletteChanged(
++	) | rpl::on_next([=] {
++		_scroll->updateBars();
++	}, _scroll->lifetime());
++
++	Window::ChatThemeValueFromPeer(
++		controller,
++		history->peer
++	) | rpl::on_next([=](std::shared_ptr<Ui::ChatTheme> &&theme) {
++		_theme = std::move(theme);
++		controller->setChatStyleTheme(_theme);
++	}, lifetime());
++
++	_topBar->setActiveChat(
++		TopBarWidget::ActiveChat{
++			.key = _history,
++			.section = Dialogs::EntryState::Section::History,
++		},
++		nullptr);
++
++	_topBar->move(0, 0);
++	_topBar->resizeToWidth(width());
++	_topBar->show();
++
++	_topBar->deleteSelectionRequest(
++	) | rpl::on_next([=] {
++		confirmDeleteSelected();
++	}, _topBar->lifetime());
++	_topBar->clearSelectionRequest(
++	) | rpl::on_next([=] {
++		clearSelected();
++	}, _topBar->lifetime());
++	setupSearch();
++
++	_topBarShadow->raise();
++	controller->adaptive().value(
++	) | rpl::on_next([=] {
++		updateAdaptiveLayout();
++	}, lifetime());
++
++	_scroll->setHandleTouch(false);
++	_inner = _scroll->setOwnedWidget(object_ptr<ListWidget>(
++		this,
++		&controller->session(),
++		static_cast<ListDelegate*>(this)));
++	_inner->lower();
++	_scroll->move(0, _topBar->height());
++	_scroll->show();
++	_scroll->setOverscrollBg(QColor(0, 0, 0, 0));
++	_scroll->setOverscrollEdges([=] {
++		return _inner->loadedAtTopKnown() && _inner->loadedAtTop();
++	}, [=] {
++		return _inner->loadedAtBottomKnown() && _inner->loadedAtBottom();
++	});
++	_scroll->scrolls(
++	) | rpl::on_next([=] {
++		onScroll();
++	}, lifetime());
++
++	_inner->scrollKeyEvents(
++	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
++		_scroll->keyPressEvent(e);
++	}, lifetime());
++
++	const auto owner = &_history->owner();
++	owner->newItemAdded(
++	) | rpl::filter([=](not_null<HistoryItem*> item) {
++		return (item->history() == _history);
++	}) | rpl::on_next([=] {
++		scheduleRefresh();
++		markRead();
++	}, lifetime());
++	owner->itemRemoved(
++	) | rpl::filter([=](not_null<const HistoryItem*> item) {
++		return (item->history() == _history);
++	}) | rpl::on_next([=] {
++		scheduleRefresh();
++	}, lifetime());
++	owner->historyCleared(
++	) | rpl::filter([=](not_null<const History*> history) {
++		return (history == _history);
++	}) | rpl::on_next([=] {
++		scheduleRefresh();
++	}, lifetime());
++
++	Window::SetupSwipeBackSection(this, _scroll.get(), _inner);
++	setupCompose();
++
++	crl::on_main(this, [=] {
++		markRead();
++	});
++}
++
++void PlaygroundWidget::setupCompose() {
++	_compose->paintRequest(
++	) | rpl::on_next([=](QRect clip) {
++		QPainter(_compose.data()).fillRect(clip, st::historyComposeAreaBg);
++	}, _compose->lifetime());
++	_field->setMinHeight(
++		st::historySendSize.height() - 2 * st::historySendPadding);
++	_field->setMaxHeight(st::historyComposeFieldMaxHeight);
++	_field->setDocumentMargin(4.);
++	_field->setAdditionalMargin(style::ConvertScale(4) - 4);
++	_field->setSubmitSettings(Ui::InputField::SubmitSettings::CtrlEnter);
++	_field->submits(
++	) | rpl::on_next([=] {
++		send();
++	}, _field->lifetime());
++	_field->heightValue(
++	) | rpl::on_next([=] {
++		updateControlsGeometry();
++	}, _field->lifetime());
++	_send->setClickedCallback([=] {
++		send();
++	});
++	_compose->show();
++	_field->show();
++	_send->show();
++	_composeShadow->show();
++}
++
++int PlaygroundWidget::composeHeight() const {
++	return std::max(
++		_field->height() + 2 * st::historySendPadding,
++		_send->height());
++}
++
++void PlaygroundWidget::send() {
++	const auto text = _field->getLastText();
++	if (text.trimmed().isEmpty()) {
++		return;
++	}
++	_field->clear();
++	_scrollToBottom = true;
++	SendToPlayground(_history, text);
++}
++
++void PlaygroundWidget::scrollToBottom() {
++	_scroll->scrollToY(_scroll->scrollTopMax());
++}
++
++void PlaygroundWidget::setupSearch() {
++	_topBar->searchRequest(
++	) | rpl::on_next([=] {
++		_topBar->toggleSearch(true, anim::type::normal);
++	}, _topBar->lifetime());
++	_topBar->searchCancelled(
++	) | rpl::on_next([=] {
++		cancelSearch();
++	}, _topBar->lifetime());
++	_topBar->searchQuery(
++	) | rpl::on_next([=](const QString &query) {
++		const auto now = query.trimmed();
++		if (_query != now) {
++			_query = now;
++			_refreshes.fire({});
++		}
++	}, _topBar->lifetime());
++}
++
++void PlaygroundWidget::cancelSearch() {
++	_topBar->searchClear();
++	_topBar->toggleSearch(false, anim::type::normal);
++	doSetInnerFocus();
++}
++
++void PlaygroundWidget::scheduleRefresh() {
++	if (_refreshScheduled) {
++		return;
++	}
++	_refreshScheduled = true;
++	crl::on_main(this, [=] {
++		_refreshScheduled = false;
++		_refreshes.fire({});
++		if (base::take(_scrollToBottom)) {
++			crl::on_main(this, [=] {
++				scrollToBottom();
++			});
++		}
++	});
++}
++
++void PlaygroundWidget::markRead() {
++	if (_history->unreadCount() > 0) {
++		_history->owner().histories().readInbox(_history);
++	}
++}
++
++std::vector<not_null<HistoryItem*>> PlaygroundWidget::items() const {
++	auto result = std::vector<not_null<HistoryItem*>>();
++	for (const auto &item : _history->clientSideMessages()) {
++		if (item->isHistoryEntry()) {
++			result.push_back(item);
++		}
++	}
++	ranges::sort(result, [](
++			not_null<HistoryItem*> a,
++			not_null<HistoryItem*> b) {
++		return a->id < b->id;
++	});
++	return result;
++}
++
++Data::MessagesSlice PlaygroundWidget::buildSlice(
++		Data::MessagePosition aroundId) const {
++	auto items = this->items();
++	if (!_query.isEmpty()) {
++		const auto skip = [&](not_null<HistoryItem*> item) {
++			return !item->originalText().text.contains(
++				_query,
++				Qt::CaseInsensitive);
++		};
++		items.erase(ranges::remove_if(items, skip), end(items));
++	}
++	auto result = Data::MessagesSlice();
++	const auto size = int(items.size());
++	result.fullCount = size;
++	result.skippedBefore = result.skippedAfter = 0;
++	if (!size) {
++		return result;
++	}
++	const auto i = ranges::find(
++		items,
++		aroundId.fullId,
++		&HistoryItem::fullId);
++	result.nearestToAround = ((i != end(items)) ? *i : items.back())
++		->fullId();
++	result.ids.reserve(size);
++	for (const auto &item : items) {
++		result.ids.push_back(item->fullId());
++	}
++	return result;
++}
++
++void PlaygroundWidget::updateAdaptiveLayout() {
++	_topBarShadow->moveToLeft(
++		controller()->adaptive().isOneColumn() ? 0 : st::lineWidth,
++		_topBar->height());
++}
++
++Dialogs::RowDescriptor PlaygroundWidget::activeChat() const {
++	return {
++		_history,
++		FullMsgId(_history->peer->id, ShowAtUnreadMsgId)
++	};
++}
++
++QPixmap PlaygroundWidget::grabForShowAnimation(
++		const Window::SectionSlideParams &params) {
++	_topBar->updateControlsVisibility();
++	if (params.withTopBarShadow) _topBarShadow->hide();
++	auto result = Ui::GrabWidget(this);
++	if (params.withTopBarShadow) _topBarShadow->show();
++	return result;
++}
++
++void PlaygroundWidget::checkActivation() {
++	_inner->checkActivation();
++	markRead();
++}
++
++void PlaygroundWidget::doSetInnerFocus() {
++	if (!_topBar->searchSetFocus()) {
++		_field->setFocus();
++	}
++}
++
++bool PlaygroundWidget::showInternal(
++		not_null<Window::SectionMemento*> memento,
++		const Window::SectionShow &params) {
++	if (const auto changelog = dynamic_cast<PlaygroundMemento*>(
++			memento.get())) {
++		if (changelog->history() == _history) {
++			restoreState(changelog);
++			return true;
++		}
++	}
++	return false;
++}
++
++void PlaygroundWidget::setInternalState(
++		const QRect &geometry,
++		not_null<PlaygroundMemento*> memento) {
++	setGeometry(geometry);
++	Ui::SendPendingMoveResizeEvents(this);
++	restoreState(memento);
++}
++
++std::shared_ptr<Window::SectionMemento> PlaygroundWidget::createMemento() {
++	auto result = std::make_shared<PlaygroundMemento>(_history);
++	saveState(result.get());
++	return result;
++}
++
++void PlaygroundWidget::saveState(not_null<PlaygroundMemento*> memento) {
++	_inner->saveState(memento->list());
++}
++
++void PlaygroundWidget::restoreState(not_null<PlaygroundMemento*> memento) {
++	_inner->restoreState(memento->list());
++}
++
++void PlaygroundWidget::resizeEvent(QResizeEvent *e) {
++	if (!width() || !height()) {
++		return;
++	}
++	recountChatWidth();
++	updateControlsGeometry();
++}
++
++void PlaygroundWidget::recountChatWidth() {
++	auto layout = (width() < st::adaptiveChatWideWidth)
++		? Window::Adaptive::ChatLayout::Normal
++		: Window::Adaptive::ChatLayout::Wide;
++	controller()->adaptive().setChatLayout(layout);
++}
++
++void PlaygroundWidget::updateControlsGeometry() {
++	const auto contentWidth = width();
++
++	const auto newScrollTop = _scroll->isHidden()
++		? std::nullopt
++		: base::make_optional(_scroll->scrollTop() + takeTopDelta());
++	_topBar->resizeToWidth(contentWidth);
++	_topBarShadow->resize(contentWidth, st::lineWidth);
++
++	const auto top = _topBar->height();
++	const auto compose = composeHeight();
++	const auto fieldLeft = st::historySendPadding;
++	const auto fieldWidth = std::max(
++		contentWidth - fieldLeft - _send->width() - st::historySendRight,
++		1);
++	_compose->setGeometry(0, height() - compose, contentWidth, compose);
++	_field->resizeToWidth(fieldWidth);
++	_field->moveToLeft(
++		fieldLeft,
++		compose - _field->height() - st::historySendPadding);
++	_send->moveToRight(
++		st::historySendRight,
++		compose - _send->height());
++	_composeShadow->setGeometry(
++		0,
++		height() - compose - st::lineWidth,
++		contentWidth,
++		st::lineWidth);
++	const auto scrollSize = QSize(contentWidth, height() - top - compose);
++	if (_scroll->size() != scrollSize) {
++		_skipScrollEvent = true;
++		_scroll->resize(scrollSize);
++		_inner->resizeToWidth(scrollSize.width(), _scroll->height());
++		_skipScrollEvent = false;
++	}
++	_scroll->move(0, top);
++	if (!_scroll->isHidden()) {
++		if (newScrollTop) {
++			_scroll->scrollToY(*newScrollTop);
++		}
++		updateInnerVisibleArea();
++	}
++}
++
++void PlaygroundWidget::paintEvent(QPaintEvent *e) {
++	if (animatingShow()) {
++		SectionWidget::paintEvent(e);
++		return;
++	} else if (controller()->contentOverlapped(this, e)) {
++		return;
++	}
++
++	const auto aboveHeight = _topBar->height();
++	const auto bg = e->rect().intersected(QRect(
++		0,
++		aboveHeight,
++		width(),
++		height() - aboveHeight - composeHeight()));
++	SectionWidget::PaintBackground(controller(), _theme.get(), this, bg);
++}
++
++void PlaygroundWidget::onScroll() {
++	if (_skipScrollEvent) {
++		return;
++	}
++	updateInnerVisibleArea();
++}
++
++void PlaygroundWidget::updateInnerVisibleArea() {
++	const auto scrollTop = _scroll->scrollTop();
++	_inner->setVisibleTopBottom(scrollTop, scrollTop + _scroll->height());
++}
++
++void PlaygroundWidget::showAnimatedHook(
++		const Window::SectionSlideParams &params) {
++	_topBar->setAnimatingMode(true);
++	if (params.withTopBarShadow) {
++		_topBarShadow->show();
++	}
++}
++
++void PlaygroundWidget::showFinishedHook() {
++	_topBar->setAnimatingMode(false);
++	_inner->showFinished();
++	markRead();
++	scrollToBottom();
++	_field->setFocus();
++}
++
++bool PlaygroundWidget::floatPlayerHandleWheelEvent(QEvent *e) {
++	return _scroll->viewportEvent(e);
++}
++
++QRect PlaygroundWidget::floatPlayerAvailableRect() {
++	return mapToGlobal(_scroll->geometry());
++}
++
++Context PlaygroundWidget::listContext() {
++	return Context::ChatPreview;
++}
++
++bool PlaygroundWidget::listScrollTo(int top, bool syntetic) {
++	top = std::clamp(top, 0, _scroll->scrollTopMax());
++	if (_scroll->scrollTop() == top) {
++		updateInnerVisibleArea();
++		return false;
++	}
++	_scroll->scrollToY(top);
++	return true;
++}
++
++void PlaygroundWidget::listCancelRequest() {
++	if (_inner && !_inner->getSelectedIds().empty()) {
++		clearSelected();
++		return;
++	} else if (_topBar->searchMode()) {
++		cancelSearch();
++		return;
++	}
++	controller()->showBackFromStack();
++}
++
++void PlaygroundWidget::listDeleteRequest() {
++	confirmDeleteSelected();
++}
++
++void PlaygroundWidget::listTryProcessKeyInput(not_null<QKeyEvent*> e) {
++}
++
++rpl::producer<Data::MessagesSlice> PlaygroundWidget::listSource(
++		Data::MessagePosition aroundId,
++		int limitBefore,
++		int limitAfter) {
++	return rpl::single(
++		rpl::empty
++	) | rpl::then(
++		_refreshes.events()
++	) | rpl::map([=] {
++		return buildSlice(aroundId);
++	});
++}
++
++bool PlaygroundWidget::listAllowsMultiSelect() {
++	return true;
++}
++
++bool PlaygroundWidget::listIsItemGoodForSelection(
++		not_null<HistoryItem*> item) {
++	return !item->isService();
++}
++
++bool PlaygroundWidget::listIsLessInOrder(
++		not_null<HistoryItem*> first,
++		not_null<HistoryItem*> second) {
++	return first->id < second->id;
++}
++
++void PlaygroundWidget::listSelectionChanged(SelectedItems &&items) {
++	auto state = TopBarWidget::SelectedState();
++	state.count = items.size();
++	for (const auto &item : items) {
++		if (item.canDelete) {
++			++state.canDeleteCount;
++		}
++	}
++	_topBar->showSelected(state);
++}
++
++void PlaygroundWidget::listMarkReadTill(not_null<HistoryItem*> item) {
++	markRead();
++}
++
++void PlaygroundWidget::listMarkContentsRead(
++	const base::flat_set<not_null<HistoryItem*>> &items) {
++}
++
++MessagesBarData PlaygroundWidget::listMessagesBar(
++		const std::vector<not_null<Element*>> &elements,
++		bool markLastAsRead) {
++	return {};
++}
++
++void PlaygroundWidget::listContentRefreshed() {
++}
++
++void PlaygroundWidget::listUpdateDateLink(
++	ClickHandlerPtr &link,
++	not_null<Element*> view) {
++}
++
++bool PlaygroundWidget::listElementHideReply(not_null<const Element*> view) {
++	return false;
++}
++
++bool PlaygroundWidget::listElementShownUnread(not_null<const Element*> view) {
++	return false;
++}
++
++bool PlaygroundWidget::listIsGoodForAroundPosition(
++		not_null<const Element*> view) {
++	return true;
++}
++
++void PlaygroundWidget::listSendBotCommand(
++	const QString &command,
++	const FullMsgId &context) {
++}
++
++void PlaygroundWidget::listSearch(
++		const QString &query,
++		const FullMsgId &context) {
++	controller()->searchMessages(query, Dialogs::Key());
++}
++
++void PlaygroundWidget::listHandleViaClick(not_null<UserData*> bot) {
++}
++
++not_null<Ui::ChatTheme*> PlaygroundWidget::listChatTheme() {
++	return _theme.get();
++}
++
++CopyRestrictionType PlaygroundWidget::listCopyRestrictionType(
++		HistoryItem *item) {
++	return CopyRestrictionType::None;
++}
++
++CopyRestrictionType PlaygroundWidget::listCopyMediaRestrictionType(
++		not_null<HistoryItem*> item) {
++	return CopyRestrictionType::None;
++}
++
++CopyRestrictionType PlaygroundWidget::listSelectRestrictionType() {
++	return CopyRestrictionType::None;
++}
++
++auto PlaygroundWidget::listAllowedReactionsValue()
++-> rpl::producer<Data::AllowedReactions> {
++	return rpl::single(Data::AllowedReactions());
++}
++
++void PlaygroundWidget::listShowPremiumToast(
++	not_null<DocumentData*> document) {
++}
++
++void PlaygroundWidget::listOpenPhoto(
++		not_null<PhotoData*> photo,
++		FullMsgId context) {
++	controller()->openPhoto(photo, { .id = context });
++}
++
++void PlaygroundWidget::listOpenDocument(
++		not_null<DocumentData*> document,
++		FullMsgId context,
++		bool showInMediaView) {
++	controller()->openDocument(document, showInMediaView, { .id = context });
++}
++
++void PlaygroundWidget::listPaintEmpty(
++	Painter &p,
++	const Ui::ChatPaintContext &context) {
++}
++
++QString PlaygroundWidget::listElementAuthorRank(
++		not_null<const Element*> view) {
++	return {};
++}
++
++bool PlaygroundWidget::listElementHideTopicButton(
++		not_null<const Element*> view) {
++	return true;
++}
++
++History *PlaygroundWidget::listTranslateHistory() {
++	return nullptr;
++}
++
++void PlaygroundWidget::listAddTranslatedItems(
++	not_null<TranslateTracker*> tracker) {
++}
++
++Ui::ElasticScroll *PlaygroundWidget::listScrollArea() const {
++	return _scroll.get();
++}
++
++bool PlaygroundWidget::listThanosEffectEnabled() const {
++	return false;
++}
++
++void PlaygroundWidget::confirmDeleteSelected() {
++	ConfirmDeleteSelectedItems(_inner);
++}
++
++void PlaygroundWidget::clearSelected() {
++	_inner->cancelSelection();
++}
++
++} // namespace
++
++PlaygroundMemento::PlaygroundMemento(not_null<History*> history)
++: _history(history) {
++}
++
++object_ptr<Window::SectionWidget> PlaygroundMemento::createWidget(
++		QWidget *parent,
++		not_null<Window::SessionController*> controller,
++		Window::Column column,
++		const QRect &geometry) {
++	if (column == Window::Column::Third) {
++		return nullptr;
++	}
++	auto result = object_ptr<PlaygroundWidget>(parent, controller, _history);
++	result->setInternalState(geometry, this);
++	return result;
++}
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_html_playground_section.h b/Telegram/SourceFiles/tele/tele_html_playground_section.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..263661914c582e9ac3da4782575c52fa336c2d86
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html_playground_section.h
+@@ -0,0 +1,38 @@
++#pragma once
++
++#include "window/section_widget.h"
++#include "window/section_memento.h"
++#include "history/view/history_view_list_widget.h"
++
++class History;
++
++namespace Window {
++class SessionController;
++} // namespace Window
++
++namespace Tele::Html {
++
++class PlaygroundMemento final : public Window::SectionMemento {
++public:
++	explicit PlaygroundMemento(not_null<History*> history);
++
++	object_ptr<Window::SectionWidget> createWidget(
++		QWidget *parent,
++		not_null<Window::SessionController*> controller,
++		Window::Column column,
++		const QRect &geometry) override;
++
++	[[nodiscard]] not_null<History*> history() const {
++		return _history;
++	}
++	[[nodiscard]] not_null<HistoryView::ListMemento*> list() {
++		return &_list;
++	}
++
++private:
++	const not_null<History*> _history;
++	HistoryView::ListMemento _list;
++
++};
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_html_samples.cpp b/Telegram/SourceFiles/tele/tele_html_samples.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..34342619acddbe75d380c7534338143d035aabf7
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html_samples.cpp
+@@ -0,0 +1,282 @@
++#include "tele/tele_html_samples.h"
++
++namespace Tele::Html {
++namespace {
++
++const char kIntro[] = R"html(<div class="widget">
++<p><b>HTML playground</b></p>
++<p>Every message here is its own small HTML page. Send HTML with <code>&lt;style&gt;</code> and <code>&lt;script&gt;</code>: it shows full width, or inside a bubble when wrapped in <code>&lt;div class="widget"&gt;</code>.</p>
++<p class="small muted" style="margin: 0">Right-click a card to send it to a chat as a .tgw file. tele with HTML bubbles on shows it as a card, other apps as a file.</p>
++</div>)html";
++
++const char kCounter[] = R"html(<div class="widget">
++<style>
++.counter { width: 250px; }
++.counter .value { height: 60px; line-height: 60px; text-align: center; font-weight: 700; }
++.counter .buttons { text-align: center; }
++.counter button { width: 60px; margin: 0 3px; }
++</style>
++<div class="counter">
++  <div class="caps">Counter</div>
++  <div class="value" style="font-size: 40px">0</div>
++  <p class="small muted center">The buttons need the script.</p>
++</div>
++<script>
++let count = 0;
++const shown = { value: 0, size: 1 };
++
++function onAction(name) {
++  if (name === 'reset') {
++    if (count === 0) return;
++    count = 0;
++    transition('pop');
++  } else {
++    count += (name === 'up') ? 1 : -1;
++  }
++  console.log('count is', count);
++  shown.size = 1.3;
++  tween(shown, { value: count }, 280, ease.outCubic);
++  tween(shown, { size: 1 }, 420, ease.outBack);
++}
++
++function render() {
++  const tone = count > 0 ? 't-green' : count < 0 ? 't-red' : '';
++  return `<div class="counter">
++    <div class="caps">Counter</div>
++    <div class="value ${tone}" style="font-size: ${Math.round(40 * shown.size)}px">${Math.round(shown.value)}</div>
++    <div class="buttons">
++      <button data-action="down">−</button>
++      <button data-action="reset">↺</button>
++      <button class="primary" data-action="up">+</button>
++    </div>
++  </div>`;
++}
++</script>
++</div>)html";
++
++const char kChart[] = R"html(<div class="widget">
++<style>
++.chart { width: 300px; }
++.chart .bars { display: flex; align-items: flex-end; height: 120px; margin-top: 10px; }
++.chart .bar { width: 24px; margin: 0 8px; border-radius: 5px 5px 0 0; background: linear-gradient(180deg, #5aa9ff, #2f6fd6); }
++.chart .bar.best { background: linear-gradient(180deg, #ffb84d, #f07c1e); }
++.chart .bar.picked { background: linear-gradient(180deg, #5fd38a, #23a356); }
++.chart .days { display: flex; margin-top: 4px; }
++.chart .day { width: 40px; text-align: center; }
++.chart .seg { display: inline-block; padding: 2px 10px; margin-left: 4px; border-radius: 10px; font-size: 12px; font-weight: 600; background-color: rgba(127,127,127,0.14); }
++.chart .seg.on { background-color: #3a8ee6; color: #ffffff; }
++.chart .note { height: 18px; margin-top: 6px; }
++</style>
++<div class="chart">
++  <div class="row between"><b>Messages a day</b><span class="small muted">this week</span></div>
++  <div class="bars">
++    <div class="bar" style="height: 40px"></div>
++    <div class="bar" style="height: 72px"></div>
++    <div class="bar" style="height: 55px"></div>
++    <div class="bar best" style="height: 110px"></div>
++    <div class="bar" style="height: 64px"></div>
++    <div class="bar" style="height: 30px"></div>
++    <div class="bar" style="height: 48px"></div>
++  </div>
++  <div class="days small muted"><div class="day">Mo</div><div class="day">Tu</div><div class="day">We</div><div class="day">Th</div><div class="day">Fr</div><div class="day">Sa</div><div class="day">Su</div></div>
++</div>
++<script>
++const DAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
++const DATA = {
++  'this week': [36, 64, 49, 98, 57, 27, 43],
++  'last week': [52, 41, 70, 45, 88, 61, 22],
++};
++let range = 'this week';
++let picked = -1;
++const heights = {};
++DAYS.forEach((_, i) => heights[i] = 0);
++
++function grow() {
++  const max = Math.max(...DATA[range]);
++  const target = {};
++  DATA[range].forEach((v, i) => target[i] = Math.round(v / max * 110));
++  tween(heights, target, 520, ease.outCubic);
++}
++
++function onAction(name, value) {
++  if (name === 'range' && value !== range) {
++    range = value;
++    picked = -1;
++    grow();
++  } else if (name === 'pick') {
++    picked = (picked === Number(value)) ? -1 : Number(value);
++  }
++}
++
++function render() {
++  const values = DATA[range];
++  const best = values.indexOf(Math.max(...values));
++  const seg = Object.keys(DATA).map(k => `<span class="seg ${k === range ? 'on' : ''}" data-action="range" data-value="${k}">${k}</span>`).join('');
++  const bars = DAYS.map((d, i) => {
++    const kind = i === picked ? 'picked' : i === best ? 'best' : '';
++    return `<div class="bar ${kind}" data-action="pick" data-value="${i}" style="height: ${Math.max(2, heights[i]).toFixed(1)}px"></div>`;
++  }).join('');
++  const note = picked >= 0
++    ? `${DAYS[picked]}: <b>${values[picked]}</b> messages`
++    : `Busiest day: <b>${DAYS[best]}</b>`;
++  return `<div class="chart">
++    <div class="row between"><b>Messages a day</b><span>${seg}</span></div>
++    <div class="bars">${bars}</div>
++    <div class="days small muted">${DAYS.map(d => `<div class="day">${d}</div>`).join('')}</div>
++    <div class="note small">${note}</div>
++  </div>`;
++}
++
++grow();
++</script>
++</div>)html";
++
++const char kTodo[] = R"html(<style>
++.todo { width: 290px; }
++.todo .item { display: flex; align-items: center; padding: 6px 0; }
++.todo .box { width: 16px; height: 16px; margin-right: 10px; border-radius: 5px; border: 2px solid #8a8f98; text-align: center; line-height: 16px; font-size: 11px; font-weight: 700; color: #ffffff; }
++.todo .done .box { background-color: #2fa84f; border-color: #2fa84f; }
++.todo .done .label { color: #8a8f98; text-decoration: line-through; }
++.todo .bar { margin-top: 8px; }
++</style>
++<div class="card pad todo">
++  <div class="row between"><b>Before the trip</b><span class="badge">0 of 4</span></div>
++  <div class="item"><div class="box"></div><div class="label">Charge the power bank</div></div>
++  <div class="item"><div class="box"></div><div class="label">Download offline maps</div></div>
++  <div class="item"><div class="box"></div><div class="label">Print the tickets</div></div>
++  <div class="item"><div class="box"></div><div class="label">Water the plants</div></div>
++</div>
++<script>
++const items = [
++  { text: 'Charge the power bank', done: false },
++  { text: 'Download offline maps', done: false },
++  { text: 'Print the tickets', done: false },
++  { text: 'Water the plants', done: false },
++];
++const progress = { value: 0 };
++
++function finished() {
++  return items.filter(item => item.done).length;
++}
++
++function onAction(name, value) {
++  if (name === 'toggle') {
++    const item = items[Number(value)];
++    item.done = !item.done;
++    tween(progress, { value: finished() / items.length }, 360, ease.outCubic);
++    if (finished() === items.length) {
++      transition('pop');
++      console.log('all done');
++    }
++  } else if (name === 'clear') {
++    items.forEach(item => item.done = false);
++    tween(progress, { value: 0 }, 300);
++    transition('slide-down');
++  }
++}
++
++function render() {
++  const all = finished() === items.length;
++  const list = items.map((item, i) => `<div class="item ${item.done ? 'done' : ''}" data-action="toggle" data-value="${i}">
++      <div class="box">${item.done ? '✓' : ''}</div><div class="label">${esc(item.text)}</div></div>`).join('');
++  const color = mix('#3a8ee6', '#2fa84f', progress.value);
++  return `<div class="card pad todo">
++    <div class="row between"><b>Before the trip</b><span class="badge ${all ? 'green' : ''}">${finished()} of ${items.length}</span></div>
++    ${list}
++    <div class="bar"><div style="width: ${(progress.value * 100).toFixed(1)}%; background-color: ${color}"></div></div>
++    ${all ? '<p class="small muted" style="margin: 8px 0 0 0">All set. <a href="#" data-action="clear">Start over</a></p>' : ''}
++  </div>`;
++}
++</script>)html";
++
++const char kPoll[] = R"html(<style>
++.vote { width: 290px; }
++.vote .option { padding: 7px 10px; margin-top: 6px; border-radius: 9px; background-color: rgba(127,127,127,0.12); }
++.vote .result { margin-top: 8px; }
++.vote .track { height: 6px; margin-top: 3px; border-radius: 3px; background-color: rgba(127,127,127,0.18); }
++.vote .fill { height: 6px; border-radius: 3px; background-color: #3a8ee6; }
++.vote .mine .fill { background-color: #2fa84f; }
++</style>
++<div class="card pad vote">
++  <div class="caps">Quick vote</div>
++  <p style="margin: 6px 0 0 0"><b>Where do we eat on Friday?</b></p>
++  <div class="option">Ramen place</div>
++  <div class="option">Pizza by the river</div>
++  <div class="option">Cook at home</div>
++</div>
++<script>
++const OPTIONS = ['Ramen place', 'Pizza by the river', 'Cook at home'];
++const votes = [4, 6, 2];
++let mine = -1;
++const shares = { 0: 0, 1: 0, 2: 0 };
++
++function onAction(name, value) {
++  if (name === 'vote') {
++    mine = Number(value);
++    votes[mine] += 1;
++    transition('slide-left');
++    const total = votes.reduce((a, b) => a + b, 0);
++    setTimeout(() => tween(shares, Object.fromEntries(votes.map((v, i) => [i, v / total])), 600, ease.outCubic), 120);
++  } else if (name === 'back') {
++    votes[mine] -= 1;
++    mine = -1;
++    Object.keys(shares).forEach(k => shares[k] = 0);
++    transition('slide-right');
++  }
++}
++
++function render() {
++  const head = `<div class="caps">Quick vote</div><p style="margin: 6px 0 0 0"><b>Where do we eat on Friday?</b></p>`;
++  if (mine < 0) {
++    return `<div class="card pad vote">${head}
++      ${OPTIONS.map((o, i) => `<div class="option" data-action="vote" data-value="${i}">${o}</div>`).join('')}
++    </div>`;
++  }
++  const total = votes.reduce((a, b) => a + b, 0);
++  return `<div class="card pad vote">${head}
++    ${OPTIONS.map((o, i) => `<div class="result ${i === mine ? 'mine' : ''}">
++      <div class="row between small"><span>${o}${i === mine ? ' ✓' : ''}</span><span class="muted">${Math.round(shares[i] * 100)}%</span></div>
++      <div class="track"><div class="fill" style="width: ${(shares[i] * 100).toFixed(1)}%"></div></div></div>`).join('')}
++    <p class="small muted" style="margin: 8px 0 0 0">${total} votes · <a href="#" data-action="back">change my vote</a></p>
++  </div>`;
++}
++</script>)html";
++
++const char kStatic[] = R"html(<style>
++.ticket { width: 300px; overflow: hidden; }
++.ticket .top { padding: 12px 14px; background: linear-gradient(135deg, #3a8ee6, #7b5cf0); color: #ffffff; border-radius: 11px 11px 0 0; }
++.ticket .route { font-size: 22px; font-weight: 700; }
++.ticket table { width: 100%; margin-top: 4px; }
++.ticket td { padding: 4px 0; }
++.ticket td.k { color: #8a8f98; width: 40%; }
++</style>
++<div class="card ticket">
++  <div class="top">
++    <div class="small">Train · coach 7</div>
++    <div class="route">Lisbon → Porto</div>
++  </div>
++  <div class="pad">
++    <table>
++      <tr><td class="k">Departs</td><td><b>09:12</b> · Santa Apolónia</td></tr>
++      <tr><td class="k">Arrives</td><td><b>12:05</b> · Campanhã</td></tr>
++      <tr><td class="k">Seat</td><td>42 <span class="badge green">window</span></td></tr>
++    </table>
++    <div class="sep" style="margin: 8px 0"></div>
++    <p class="small muted" style="margin: 0">No script in this one, just HTML and CSS. <a href="https://github.com/nitreojs/tele">tele on GitHub</a></p>
++  </div>
++</div>)html";
++
++} // namespace
++
++std::vector<QString> PlaygroundSamples() {
++	return {
++		QString::fromUtf8(kIntro),
++		QString::fromUtf8(kCounter),
++		QString::fromUtf8(kChart),
++		QString::fromUtf8(kTodo),
++		QString::fromUtf8(kPoll),
++		QString::fromUtf8(kStatic),
++	};
++}
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_html_samples.h b/Telegram/SourceFiles/tele/tele_html_samples.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..90b9b7763361c5668ba3be47a0b155dfabc9dec2
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html_samples.h
+@@ -0,0 +1,7 @@
++#pragma once
++
++namespace Tele::Html {
++
++[[nodiscard]] std::vector<QString> PlaygroundSamples();
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_menu_registry.cpp b/Telegram/SourceFiles/tele/tele_menu_registry.cpp
+index b9aecdc2db677e1f5f51f8b16d93a95d840b3f09..7106d645e4a8e881349779810e6286b241622fe6 100644
+--- a/Telegram/SourceFiles/tele/tele_menu_registry.cpp
++++ b/Telegram/SourceFiles/tele/tele_menu_registry.cpp
+@@ -706,6 +706,13 @@ constexpr auto kFieldText = uint32(1 << 0);
+ 		{ .key = u"shot"_q, .phrases = {
+ 			P([](int) { return Lower(u"Shot"_q); }, st::menuIconPhoto),
+ 		}, .contexts = kMessage | kSelection, .gate = kOptionShot },
++		{ .key = u"html_send_tgw"_q, .phrases = {
++			P([](int) { return Lower(u"Send as .tgw to…"_q); },
++				st::menuIconForward),
++		}, .contexts = kMessage, .gate = kOptionHtmlBubbles },
++		{ .key = u"html_script_log"_q, .phrases = {
++			P([](int) { return Lower(u"Script log"_q); }, st::menuIconInfo),
++		}, .contexts = kMessage, .gate = kOptionHtmlBubbles },
+ 		{ .key = u"report"_q, .phrases = {
+ 			P([](int) { return tr::lng_context_report_msg(tr::now); },
+ 				st::menuIconReport),
+@@ -806,7 +813,7 @@ constexpr auto kFieldText = uint32(1 << 0);
+ 		"translate_selected,"
+ 		"translate,open_uncleaned,open_username,alias_open,alias_delete,|,"
+ 		"[tele#tele:[Bookmark#bookmark:bookmark,rename_bookmark],mark_read,"
+-		"edit_history,shot,mark_viewed],|,"
++		"edit_history,shot,mark_viewed,html_send_tgw,html_script_log],|,"
+ 		"select,select_up_to,clear_selection,|,"
+ 		"delete,report,block_user,|,"
+ 		"[Tools#tools:view_as_tl,mtp_inspector],|,"
+@@ -830,7 +837,7 @@ constexpr auto kFieldText = uint32(1 << 0);
+ 		"download_selected,save_html,report,block_user,select,"
+ 		"select_up_to,clear_selection,reschedule,|,"
+ 		"info.packs,info.restriction,info.read,info.forwarded,info.edited,"
+-		"info.author,shot,send_as_gif,|,"
++		"info.author,shot,send_as_gif,html_send_tgw,html_script_log,|,"
+ 		"view_as_tl,mtp_inspector,copy_emoji_id,copy_id,|,"
+ 		"info.id"_q;
+ 	result.minimal = u""
+@@ -856,7 +863,8 @@ constexpr auto kFieldText = uint32(1 << 0);
+ 		"copy_button_data,copy_filename,copy_file_path,copy_phone,"
+ 		"translate_selected,"
+ 		"translate,open_uncleaned,open_username,alias_open,alias_delete,|,"
+-		"bookmark,rename_bookmark,mark_read,edit_history,shot,mark_viewed,|,"
++		"bookmark,rename_bookmark,mark_read,edit_history,shot,mark_viewed,"
++		"html_send_tgw,html_script_log,|,"
+ 		"select,select_up_to,clear_selection,|,"
+ 		"delete,report,block_user,|,"
+ 		"view_as_tl,mtp_inspector,|,"
+diff --git a/Telegram/SourceFiles/tele/tele_message_menu.cpp b/Telegram/SourceFiles/tele/tele_message_menu.cpp
+index 323a0226169e4e791eceb134f4ce72b6d7cff131..3888ed63c70549eaa7617d77a369cf9994a8ede4 100644
+--- a/Telegram/SourceFiles/tele/tele_message_menu.cpp
++++ b/Telegram/SourceFiles/tele/tele_message_menu.cpp
+@@ -15,6 +15,7 @@
+ #include "tele/tele_lowercase.h"
+ #include "tele/tele_menu_apply.h"
+ #include "tele/tele_mtp_inspector.h"
++#include "tele/tele_html_card.h"
+ #include "tele/tele_notices.h"
+ #include "tele/tele_options.h"
+ #include "tele/tele_view_tl.h"
+@@ -187,6 +188,7 @@ void InsertMessageTools(
+ 	}
+ 	if (item) {
+ 		AppendTools(menu, show, item, view, point);
++		Html::AppendMenuActions(menu, show, item);
+ 		Scripting::AppendScriptActions(
+ 			menu,
+ 			MenuKind::Message,
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 16b72bfb017bd8af1c86836020f589ceb9574d65..f00c1e1c3efff3e99223b288342d7daf7acf1153 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -43,6 +43,7 @@ const char kOptionWalletKeepOld[] = "tele-wallet-keep-old";
+ const char kOptionWalletPrivateKeys[] = "tele-wallet-private-keys";
+ const char kOptionWalletCopyWords[] = "tele-wallet-copy-words";
+ const char kOptionSecretChats[] = "tele-secret-chats";
++const char kOptionHtmlBubbles[] = "tele-html-bubbles";
+ const char kOptionHideSponsored[] = "tele-hide-sponsored";
+ const char kOptionHideProxySponsor[] = "tele-hide-proxy-sponsor";
+ const char kOptionNoLinkWarning[] = "tele-no-link-warning";
+@@ -467,6 +468,13 @@ base::options::toggle WalletCopyWordsOption({
+ 	.defaultValue = true,
+ });
+ 
++base::options::toggle HtmlBubblesOption({
++	.id = kOptionHtmlBubbles,
++	.name = "HTML bubbles β",
++	.description = "Shows .tgw files as cards and adds an HTML playground "
++		"chat.",
++});
++
+ base::options::toggle SecretChatsOption({
+ 	.id = kOptionSecretChats,
+ 	.name = "Secret chats β",
+@@ -2079,6 +2087,20 @@ rpl::producer<bool> WalletCopyWordsValue() {
+ 	});
+ }
+ 
++bool HtmlBubbles() {
++	return HtmlBubblesOption.value();
++}
++
++rpl::producer<bool> HtmlBubblesValue() {
++	return rpl::single(
++		rpl::empty
++	) | rpl::then(
++		HtmlBubblesOption.changes()
++	) | rpl::map([] {
++		return HtmlBubblesOption.value();
++	});
++}
++
+ bool SecretChats() {
+ 	return SecretChatsOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index b7d6e709f12af76f76c338337c14b1da212be9c1..9a4068724bc17b9436b4c956017b0eaf517bc4c6 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -38,6 +38,7 @@ extern const char kOptionWalletKeepOld[];
+ extern const char kOptionWalletPrivateKeys[];
+ extern const char kOptionWalletCopyWords[];
+ extern const char kOptionSecretChats[];
++extern const char kOptionHtmlBubbles[];
+ extern const char kOptionHideSponsored[];
+ extern const char kOptionHideProxySponsor[];
+ extern const char kOptionNoLinkWarning[];
+@@ -304,6 +305,8 @@ void SetKnownSettings(const QString &value);
+ [[nodiscard]] bool WalletCopyWords();
+ [[nodiscard]] rpl::producer<bool> WalletCopyWordsValue();
+ [[nodiscard]] bool SecretChats();
++[[nodiscard]] bool HtmlBubbles();
++[[nodiscard]] rpl::producer<bool> HtmlBubblesValue();
+ [[nodiscard]] QString CallButton();
+ void SetCallButton(const QString &value);
+ [[nodiscard]] rpl::producer<QString> CallButtonValue();
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index e324d9651ab155d9c5e56766d1c8373f1855d781..8a802611c7765bafc26fc74a708c889646a6c5a2 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -131,6 +131,7 @@ struct Spec {
+ 		Toggle(kOptionWalletPrivateKeys),
+ 		Toggle(kOptionWalletCopyWords),
+ 		Toggle(kOptionSecretChats),
++		Toggle(kOptionHtmlBubbles),
+ 		Toggle(kOptionHideSponsored),
+ 		Toggle(kOptionHideProxySponsor),
+ 		Toggle(kOptionNoLinkWarning),

@@ -1,0 +1,2495 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Wed, 14 Oct 2026 20:47:35 +0300
+Subject: [PATCH] feat: put gifts on the money card as stickers
+
+---
+ Telegram/CMakeLists.txt                       |    2 +
+ Telegram/SourceFiles/tele/tele_money_card.cpp |  293 +++-
+ Telegram/SourceFiles/tele/tele_money_card.h   |   30 +
+ .../SourceFiles/tele/tele_money_card_box.cpp  |  117 +-
+ .../SourceFiles/tele/tele_money_card_box.h    |    4 +-
+ .../SourceFiles/tele/tele_money_stickers.cpp  | 1349 +++++++++++++++++
+ .../SourceFiles/tele/tele_money_stickers.h    |   96 ++
+ .../wallet/wallet_collectible_media.cpp       |    9 +
+ .../wallet/wallet_collectible_media.h         |    2 +
+ .../wallet/wallet_collectibles.cpp            |   49 +-
+ .../SourceFiles/wallet/wallet_collectibles.h  |    7 +-
+ .../SourceFiles/wallet/wallet_content.cpp     |   38 +-
+ 12 files changed, 1927 insertions(+), 69 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_money_stickers.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_money_stickers.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index df97c9ec83593f28c96effb5a4b669864c4b4fbf..1b9bcea546b068987f6525280644f6e41a42e740 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2680,6 +2680,8 @@ PRIVATE
+     tele/tele_money_card.h
+     tele/tele_money_card_box.cpp
+     tele/tele_money_card_box.h
++    tele/tele_money_stickers.cpp
++    tele/tele_money_stickers.h
+     tele/tele_mtp_console.cpp
+     tele/tele_mtp_console.h
+     tele/tele_mtp_console_requests.cpp
+diff --git a/Telegram/SourceFiles/tele/tele_money_card.cpp b/Telegram/SourceFiles/tele/tele_money_card.cpp
+index a6db93d17cd44f2c3565beee79f747ccc8f494c9..00314652bd237ddc65776a24e6d421c8131712aa 100644
+--- a/Telegram/SourceFiles/tele/tele_money_card.cpp
++++ b/Telegram/SourceFiles/tele/tele_money_card.cpp
+@@ -22,9 +22,11 @@
+ #include "ui/widgets/popup_menu.h"
+ #include "ui/painter.h"
+ #include "ui/top_background_gradient.h"
++#include "wallet/wallet_session.h"
+ #include "styles/style_menu_icons.h"
+ #include "styles/style_widgets.h"
+ 
++#include <QtCore/QJsonArray>
+ #include <QtCore/QJsonDocument>
+ #include <QtCore/QJsonObject>
+ #include <QtGui/QCursor>
+@@ -43,8 +45,18 @@ constexpr auto kPillFgProperty = "teleMoneyCardFg";
+ 
+ struct SessionState {
+ 	rpl::variable<MoneyCardChoice> choice;
++	rpl::variable<std::vector<MoneyCardSticker>> stickers;
++	std::optional<base::flat_set<QString>> telegramSlugs;
++	std::optional<base::flat_set<QString>> chainSlugs;
+ 	rpl::lifetime validation;
+ 	bool validated = false;
++	bool telegramLoading = false;
++	bool needChain = false;
++};
++
++struct Stored {
++	MoneyCardChoice choice;
++	std::vector<MoneyCardSticker> stickers;
+ };
+ 
+ [[nodiscard]] QString ColorValue(const QColor &color) {
+@@ -57,11 +69,31 @@ struct SessionState {
+ 	return ok ? QColor::fromRgba(rgba) : QColor();
+ }
+ 
+-[[nodiscard]] QString Serialize(const MoneyCardChoice &choice) {
++[[nodiscard]] QString Serialize(
++		const MoneyCardChoice &choice,
++		const std::vector<MoneyCardSticker> &stickers) {
+ 	auto object = QJsonObject();
+ 	if (choice.sync) {
+ 		object.insert(u"sync"_q, true);
+ 	}
++	if (choice.chain && choice.gift) {
++		object.insert(u"chain"_q, true);
++	}
++	if (!stickers.empty()) {
++		auto list = QJsonArray();
++		for (const auto &sticker : stickers) {
++			auto entry = QJsonObject();
++			entry.insert(u"key"_q, sticker.key);
++			entry.insert(u"model"_q, QString::number(sticker.modelId));
++			entry.insert(u"x"_q, sticker.center.x());
++			entry.insert(u"y"_q, sticker.center.y());
++			if (sticker.chain) {
++				entry.insert(u"chain"_q, true);
++			}
++			list.push_back(entry);
++		}
++		object.insert(u"stickers"_q, list);
++	}
+ 	if (const auto &gift = choice.gift) {
+ 		object.insert(u"id"_q, QString::number(gift.giftId));
+ 		object.insert(u"slug"_q, gift.slug);
+@@ -78,7 +110,35 @@ struct SessionState {
+ 			QJsonDocument(object).toJson(QJsonDocument::Compact));
+ }
+ 
+-[[nodiscard]] MoneyCardChoice Deserialize(const QString &value) {
++[[nodiscard]] float64 Fraction(const QJsonValue &value) {
++	const auto result = value.toDouble(0.5);
++	return std::isfinite(result) ? std::clamp(result, 0., 1.) : 0.5;
++}
++
++[[nodiscard]] std::vector<MoneyCardSticker> DeserializeStickers(
++		const QJsonValue &value) {
++	auto result = std::vector<MoneyCardSticker>();
++	auto keys = base::flat_set<QString>();
++	for (const auto &item : value.toArray()) {
++		const auto entry = item.toObject();
++		auto sticker = MoneyCardSticker{
++			.key = entry.value(u"key"_q).toString(),
++			.modelId = entry.value(u"model"_q).toString().toULongLong(),
++			.center = QPointF(
++				Fraction(entry.value(u"x"_q)),
++				Fraction(entry.value(u"y"_q))),
++			.chain = entry.value(u"chain"_q).toBool(),
++		};
++		if (!sticker.key.isEmpty()
++			&& sticker.modelId
++			&& keys.emplace(sticker.key).second) {
++			result.push_back(std::move(sticker));
++		}
++	}
++	return result;
++}
++
++[[nodiscard]] Stored Deserialize(const QString &value) {
+ 	if (value.isEmpty()) {
+ 		return {};
+ 	}
+@@ -87,9 +147,14 @@ struct SessionState {
+ 		return {};
+ 	}
+ 	const auto object = document.object();
+-	auto result = MoneyCardChoice{
+-		.sync = object.value(u"sync"_q).toBool(),
++	auto stored = Stored{
++		.choice = MoneyCardChoice{
++			.sync = object.value(u"sync"_q).toBool(),
++			.chain = object.value(u"chain"_q).toBool(),
++		},
++		.stickers = DeserializeStickers(object.value(u"stickers"_q)),
+ 	};
++	auto &result = stored.choice;
+ 	const auto id = object.value(u"id"_q).toString().toULongLong();
+ 	if (id) {
+ 		result.gift = MoneyCardLook{
+@@ -109,7 +174,10 @@ struct SessionState {
+ 			result.gift = MoneyCardLook();
+ 		}
+ 	}
+-	return result;
++	if (!result.gift) {
++		result.chain = false;
++	}
++	return stored;
+ }
+ 
+ [[nodiscard]] SessionState &StateFor(not_null<Main::Session*> session) {
+@@ -119,8 +187,10 @@ struct SessionState {
+ 	auto i = states.find(session);
+ 	if (i == end(states)) {
+ 		auto state = std::make_unique<SessionState>();
+-		state->choice = Deserialize(
++		auto stored = Deserialize(
+ 			session->local().readPref<QString>(kChoicePref));
++		state->choice = std::move(stored.choice);
++		state->stickers = std::move(stored.stickers);
+ 		i = states.emplace(session, std::move(state)).first;
+ 		session->lifetime().add([=] {
+ 			states.remove(session);
+@@ -129,24 +199,97 @@ struct SessionState {
+ 	return *i->second;
+ }
+ 
+-void CheckOwned(
+-		not_null<Main::Session*> session,
+-		const std::vector<Data::SavedStarGift> &owned) {
+-	auto choice = StateFor(session).choice.current();
+-	if (!choice.gift) {
++void Write(not_null<Main::Session*> session, const SessionState &state) {
++	const auto value = Serialize(
++		state.choice.current(),
++		state.stickers.current());
++	if (value.isEmpty()) {
++		session->local().clearPref(kChoicePref);
++	} else {
++		session->local().writePref<QString>(kChoicePref, value);
++	}
++}
++
++void RequestTelegramOwned(not_null<Main::Session*> session) {
++	auto &state = StateFor(session);
++	if (state.telegramLoading) {
+ 		return;
+ 	}
+-	const auto id = choice.gift.giftId;
+-	const auto has = ranges::any_of(owned, [&](
+-			const Data::SavedStarGift &gift) {
+-		return gift.info.unique && (gift.info.unique->id == id);
++	state.telegramLoading = true;
++	state.validated = true;
++	state.validation = MoneyCardOwnedGifts(
++		session
++	) | rpl::on_next([=](const std::vector<Data::SavedStarGift> &) {
++		StateFor(session).telegramLoading = false;
+ 	});
+-	if (!has) {
++}
++
++struct Needs {
++	bool telegram = false;
++	bool chain = false;
++};
++
++[[nodiscard]] bool Lost(
++		const SessionState &state,
++		const QString &slug,
++		bool chain,
++		Needs &needs) {
++	const auto &own = chain ? state.chainSlugs : state.telegramSlugs;
++	const auto &other = chain ? state.telegramSlugs : state.chainSlugs;
++	if (own && other) {
++		return !own->contains(slug) && !other->contains(slug);
++	} else if (own && !own->contains(slug)) {
++		(chain ? needs.telegram : needs.chain) = true;
++	}
++	return false;
++}
++
++void PruneOwned(not_null<Main::Session*> session) {
++	auto &state = StateFor(session);
++	auto needs = Needs();
++	auto changed = false;
++	auto choice = state.choice.current();
++	if (choice.gift && Lost(state, choice.gift.slug, choice.chain, needs)) {
+ 		choice.gift = MoneyCardLook();
+-		SetMoneyCardChoice(session, choice);
++		choice.chain = false;
++		state.choice = choice;
++		changed = true;
++	}
++	auto stickers = state.stickers.current();
++	const auto removed = ranges::remove_if(stickers, [&](
++			const MoneyCardSticker &sticker) {
++		return Lost(state, sticker.key, sticker.chain, needs);
++	});
++	if (removed != end(stickers)) {
++		stickers.erase(removed, end(stickers));
++		state.stickers = std::move(stickers);
++		changed = true;
++	}
++	if (changed) {
++		Write(session, state);
++	}
++	state.needChain = needs.chain && !state.chainSlugs;
++	if (needs.telegram) {
++		RequestTelegramOwned(session);
++	}
++	if (state.needChain) {
++		session->wallet().loadMoreCollectibles();
+ 	}
+ }
+ 
++void CheckOwned(
++		not_null<Main::Session*> session,
++		const std::vector<Data::SavedStarGift> &owned) {
++	auto slugs = base::flat_set<QString>();
++	for (const auto &gift : owned) {
++		if (const auto &unique = gift.info.unique) {
++			slugs.emplace(unique->slug);
++		}
++	}
++	StateFor(session).telegramSlugs = std::move(slugs);
++	PruneOwned(session);
++}
++
+ [[nodiscard]] const std::vector<Ui::PatternPoint> &PatternPoints() {
+ 	static const auto result = [] {
+ 		auto list = Ui::PatternBgPoints();
+@@ -202,16 +345,49 @@ void SetMoneyCardChoice(
+ 		not_null<Main::Session*> session,
+ 		MoneyCardChoice choice) {
+ 	auto &state = StateFor(session);
++	if (!choice.gift) {
++		choice.chain = false;
++	}
+ 	if (state.choice.current() == choice) {
+ 		return;
+ 	}
+-	const auto value = Serialize(choice);
+-	if (value.isEmpty()) {
+-		session->local().clearPref(kChoicePref);
+-	} else {
+-		session->local().writePref<QString>(kChoicePref, value);
+-	}
+ 	state.choice = std::move(choice);
++	Write(session, state);
++}
++
++std::vector<MoneyCardSticker> MoneyCardStickersFor(
++		not_null<Main::Session*> session) {
++	return StateFor(session).stickers.current();
++}
++
++rpl::producer<std::vector<MoneyCardSticker>> MoneyCardStickersValue(
++		not_null<Main::Session*> session) {
++	return rpl::combine(
++		MoneyCardDesignsValue(),
++		StateFor(session).stickers.value()
++	) | rpl::map([](bool on, const std::vector<MoneyCardSticker> &list) {
++		return on ? list : std::vector<MoneyCardSticker>();
++	});
++}
++
++void SetMoneyCardStickers(
++		not_null<Main::Session*> session,
++		std::vector<MoneyCardSticker> stickers) {
++	auto &state = StateFor(session);
++	if (state.stickers.current() == stickers) {
++		return;
++	}
++	state.stickers = std::move(stickers);
++	Write(session, state);
++}
++
++void SetMoneyCardChainSlugs(
++		not_null<Main::Session*> session,
++		base::flat_set<QString> slugs) {
++	auto &state = StateFor(session);
++	state.chainSlugs = std::move(slugs);
++	state.needChain = false;
++	PruneOwned(session);
+ }
+ 
+ MoneyCardLook MoneyCardStatusLook(not_null<Main::Session*> session) {
+@@ -320,17 +496,19 @@ rpl::producer<std::vector<Data::SavedStarGift>> MoneyCardOwnedGifts(
+ void ValidateMoneyCardChoice(not_null<Main::Session*> session) {
+ 	auto &state = StateFor(session);
+ 	const auto &choice = state.choice.current();
+-	if (state.validated
+-		|| !MoneyCardDesigns()
+-		|| choice.sync
+-		|| !choice.gift) {
++	const auto needed = (!choice.sync && choice.gift && !choice.chain)
++		|| ranges::any_of(state.stickers.current(), [](
++				const MoneyCardSticker &sticker) {
++			return !sticker.chain;
++		});
++	if (state.validated || !MoneyCardDesigns() || !needed) {
+ 		return;
+ 	}
+-	state.validated = true;
+-	state.validation = MoneyCardOwnedGifts(
+-		session
+-	) | rpl::on_next([](const std::vector<Data::SavedStarGift> &) {
+-	});
++	RequestTelegramOwned(session);
++}
++
++bool MoneyCardNeedsChainList(not_null<Main::Session*> session) {
++	return StateFor(session).needChain;
+ }
+ 
+ rpl::producer<bool> MoneyBalanceRowShown(rpl::producer<bool> shown) {
+@@ -360,6 +538,32 @@ void AddHideBalancesMenu(not_null<Ui::RpWidget*> row) {
+ 	});
+ }
+ 
++std::unique_ptr<HistoryView::StickerPlayer> MakeMoneyCardModelPlayer(
++		not_null<DocumentData*> document,
++		not_null<Data::DocumentMedia*> media,
++		QSize size) {
++	const auto sticker = document->sticker();
++	if (!sticker) {
++		return nullptr;
++	} else if (sticker->isLottie()) {
++		return std::make_unique<HistoryView::LottiePlayer>(
++			ChatHelpers::LottiePlayerFromDocument(
++				media,
++				ChatHelpers::StickerLottieSize::InlineResults,
++				size,
++				Lottie::Quality::High));
++	} else if (sticker->isWebm()) {
++		return std::make_unique<HistoryView::WebmPlayer>(
++			media->owner()->location(),
++			media->bytes(),
++			size);
++	}
++	return std::make_unique<HistoryView::StaticStickerPlayer>(
++		media->owner()->location(),
++		media->bytes(),
++		size);
++}
++
+ QSize MoneyCardModelSize(int chipSide) {
+ 	const auto side = int(base::SafeRound(chipSide * kModelScale));
+ 	return QSize(side, side);
+@@ -475,27 +679,12 @@ void MoneyCardArt::resolveModel() {
+ 		) | rpl::filter([=] {
+ 			return media->loaded();
+ 		}) | rpl::take(1) | rpl::on_next([=] {
+-			auto result = std::unique_ptr<HistoryView::StickerPlayer>();
+-			const auto sticker = document->sticker();
+-			if (!sticker) {
++			auto result = MakeMoneyCardModelPlayer(
++				document,
++				media.get(),
++				_modelSize);
++			if (!result) {
+ 				return;
+-			} else if (sticker->isLottie()) {
+-				result = std::make_unique<HistoryView::LottiePlayer>(
+-					ChatHelpers::LottiePlayerFromDocument(
+-						media.get(),
+-						ChatHelpers::StickerLottieSize::InlineResults,
+-						_modelSize,
+-						Lottie::Quality::High));
+-			} else if (sticker->isWebm()) {
+-				result = std::make_unique<HistoryView::WebmPlayer>(
+-					media->owner()->location(),
+-					media->bytes(),
+-					_modelSize);
+-			} else {
+-				result = std::make_unique<HistoryView::StaticStickerPlayer>(
+-					media->owner()->location(),
+-					media->bytes(),
+-					_modelSize);
+ 			}
+ 			result->setRepaintCallback(_frame);
+ 			_player = std::move(result);
+diff --git a/Telegram/SourceFiles/tele/tele_money_card.h b/Telegram/SourceFiles/tele/tele_money_card.h
+index c91b5a46205eb077eef2021e1d78c33596ab104b..0e68e43092f0395156ca7afe3d3cf6b46b784434 100644
+--- a/Telegram/SourceFiles/tele/tele_money_card.h
++++ b/Telegram/SourceFiles/tele/tele_money_card.h
+@@ -47,12 +47,24 @@ struct MoneyCardLook {
+ struct MoneyCardChoice {
+ 	MoneyCardLook gift;
+ 	bool sync = false;
++	bool chain = false;
+ 
+ 	friend inline bool operator==(
+ 		const MoneyCardChoice &,
+ 		const MoneyCardChoice &) = default;
+ };
+ 
++struct MoneyCardSticker {
++	QString key;
++	DocumentId modelId = 0;
++	QPointF center;
++	bool chain = false;
++
++	friend inline bool operator==(
++		const MoneyCardSticker &,
++		const MoneyCardSticker &) = default;
++};
++
+ [[nodiscard]] MoneyCardLook MoneyCardLookFrom(const Data::UniqueGift &gift);
+ [[nodiscard]] MoneyCardLook MoneyCardLookFrom(
+ 	const Data::EmojiStatusCollectible &status);
+@@ -79,14 +91,32 @@ void SetMoneyCardChoice(
+ [[nodiscard]] rpl::producer<MoneyCardLook> MoneyCardValue(
+ 	not_null<Main::Session*> session);
+ 
++[[nodiscard]] std::vector<MoneyCardSticker> MoneyCardStickersFor(
++	not_null<Main::Session*> session);
++[[nodiscard]] rpl::producer<std::vector<MoneyCardSticker>> MoneyCardStickersValue(
++	not_null<Main::Session*> session);
++void SetMoneyCardStickers(
++	not_null<Main::Session*> session,
++	std::vector<MoneyCardSticker> stickers);
++void SetMoneyCardChainSlugs(
++	not_null<Main::Session*> session,
++	base::flat_set<QString> slugs);
++
+ [[nodiscard]] rpl::producer<std::vector<Data::SavedStarGift>> MoneyCardOwnedGifts(
+ 	not_null<Main::Session*> session);
+ void ValidateMoneyCardChoice(not_null<Main::Session*> session);
++[[nodiscard]] bool MoneyCardNeedsChainList(
++	not_null<Main::Session*> session);
+ 
+ [[nodiscard]] rpl::producer<bool> MoneyBalanceRowShown(
+ 	rpl::producer<bool> shown);
+ void AddHideBalancesMenu(not_null<Ui::RpWidget*> row);
+ 
++[[nodiscard]] std::unique_ptr<HistoryView::StickerPlayer> MakeMoneyCardModelPlayer(
++	not_null<DocumentData*> document,
++	not_null<Data::DocumentMedia*> media,
++	QSize size);
++
+ [[nodiscard]] QSize MoneyCardModelSize(int chipSide);
+ [[nodiscard]] QRect MoneyCardModelRect(const QRect &box);
+ 
+diff --git a/Telegram/SourceFiles/tele/tele_money_card_box.cpp b/Telegram/SourceFiles/tele/tele_money_card_box.cpp
+index a22bf45fd5ce0f8bd0556e1331ef52ee3dd2ae59..704d2d1032c28c66ccbc71f75c3befbca528211f 100644
+--- a/Telegram/SourceFiles/tele/tele_money_card_box.cpp
++++ b/Telegram/SourceFiles/tele/tele_money_card_box.cpp
+@@ -6,9 +6,11 @@
+ #include "main/main_session.h"
+ #include "tele/tele_lowercase.h"
+ #include "tele/tele_money_card.h"
++#include "tele/tele_money_stickers.h"
+ #include "ui/layers/generic_box.h"
+ #include "ui/widgets/buttons.h"
+ #include "ui/widgets/labels.h"
++#include "ui/widgets/popup_menu.h"
+ #include "ui/wrap/slide_wrap.h"
+ #include "ui/wrap/vertical_layout.h"
+ #include "ui/painter.h"
+@@ -73,6 +75,49 @@ void DefaultTile::paintEvent(QPaintEvent *e) {
+ 	}
+ }
+ 
++void AddOnCardBadge(
++		not_null<Info::PeerGifts::GiftButton*> button,
++		not_null<Main::Session*> session,
++		QString slug,
++		QMargins extend) {
++	const auto badge = Ui::CreateChild<Ui::RpWidget>(button.get());
++	badge->setAttribute(Qt::WA_TransparentForMouseEvents);
++	button->sizeValue(
++	) | rpl::on_next([=](QSize size) {
++		badge->setGeometry(QRect(QPoint(), size).marginsRemoved(extend));
++	}, badge->lifetime());
++	badge->paintRequest(
++	) | rpl::on_next([=] {
++		if (!MoneyCardStickerOn(session, slug)) {
++			return;
++		}
++		auto p = QPainter(badge);
++		auto hq = PainterHighQualityEnabler(p);
++		const auto &font = st::semiboldFont;
++		const auto text = Lower(u"on card"_q);
++		const auto padding = font->height / 2;
++		const auto width = font->width(text) + 2 * padding;
++		const auto height = font->height + padding / 2;
++		const auto rect = QRect(
++			(badge->width() - width) / 2,
++			badge->height() - height - padding,
++			width,
++			height);
++		p.setPen(Qt::NoPen);
++		p.setBrush(QColor(0, 0, 0, 96));
++		p.drawRoundedRect(rect, height / 2., height / 2.);
++		p.setPen(QColor(255, 255, 255));
++		p.setFont(font);
++		p.drawText(rect, text, style::al_center);
++	}, badge->lifetime());
++	MoneyCardStickersUpdates(
++		session
++	) | rpl::on_next([=] {
++		badge->update();
++	}, badge->lifetime());
++	badge->show();
++}
++
+ } // namespace
+ 
+ void MoneyCardDesignBox(
+@@ -89,6 +134,8 @@ void MoneyCardDesignBox(
+ 		std::vector<Data::SavedStarGift> gifts;
+ 		std::vector<std::unique_ptr<GiftButton>> buttons;
+ 		DefaultTile *defaultTile = nullptr;
++		QPointer<Ui::RpWidget> preview;
++		base::unique_qptr<Ui::PopupMenu> menu;
+ 	};
+ 	const auto state = box->lifetime().make_state<State>();
+ 	state->choice = MoneyCardChoiceFor(session);
+@@ -98,7 +145,34 @@ void MoneyCardDesignBox(
+ 	box->setTitle(rpl::single(Lower(u"Card design"_q)));
+ 	box->setWidth(st::boxWideWidth);
+ 
+-	box->addRow(
++	const auto drop = std::make_shared<MoneyCardDropTarget>(
++		MoneyCardDropTarget{
++			.overlay = box.get(),
++			.card = [=] {
++				const auto widget = state->preview.data();
++				return widget
++					? QRect(widget->mapTo(box.get(), QPoint()), widget->size())
++					: QRect();
++			},
++			.visible = [=] {
++				const auto widget = state->preview.data();
++				if (!widget) {
++					return QRect();
++				}
++				auto result = QRect(
++					widget->mapTo(box.get(), QPoint()),
++					widget->size());
++				for (auto parent = widget->parentWidget()
++					; parent && parent != box.get()
++					; parent = parent->parentWidget()) {
++					result &= QRect(
++						parent->mapTo(box.get(), QPoint()),
++						parent->size());
++				}
++				return result;
++			},
++		});
++	state->preview = box->addRow(
+ 		preview(
+ 			box,
+ 			rpl::combine(
+@@ -108,7 +182,8 @@ void MoneyCardDesignBox(
+ 					const MoneyCardChoice &choice,
+ 					const MoneyCardLook &status) {
+ 				return ResolveMoneyCardLook(choice, status);
+-			})),
++			}),
++			drop),
+ 		style::margins(0, 0, 0, st::boxRowPadding.left()),
+ 		style::al_top);
+ 
+@@ -178,6 +253,7 @@ void MoneyCardDesignBox(
+ 	const auto choose = [=](MoneyCardLook look) {
+ 		auto choice = state->choice.current();
+ 		choice.gift = std::move(look);
++		choice.chain = false;
+ 		state->choice = std::move(choice);
+ 	};
+ 
+@@ -226,6 +302,43 @@ void MoneyCardDesignBox(
+ 			button->setClickedCallback([=] {
+ 				choose(MoneyCardLookFrom(*unique));
+ 			});
++			const auto raw = button.get();
++			raw->contextMenuRequests(
++			) | rpl::on_next([=](QPoint position) {
++				state->menu = base::make_unique_q<Ui::PopupMenu>(
++					raw,
++					st::popupMenuWithIcons);
++				FillMoneyCardGiftMenu(
++					state->menu.get(),
++					session,
++					unique,
++					false,
++					drop,
++					choose);
++				if (state->menu->empty()) {
++					state->menu = nullptr;
++				} else {
++					state->menu->popup(position);
++				}
++			}, raw->lifetime());
++			AddOnCardBadge(raw, session, unique->slug, extend);
++			RegisterMoneyCardGiftSource(raw, session, [=] {
++				return unique->slug;
++			}, [=] {
++				const auto inner = raw->rect().marginsRemoved(extend);
++				const auto size = st::giftBoxStickerSize;
++				return QRect(
++					inner.x() + (inner.width() - size.width()) / 2,
++					inner.y() + (inner.height() - size.height()) / 2,
++					size.width(),
++					size.height());
++			});
++			SetupMoneyCardGiftDrag(
++				raw,
++				session,
++				[=] { return unique; },
++				false,
++				drop);
+ 			button->setGeometry(tileRect(index), extend);
+ 			button->toggleSelected(
+ 				(unique->id == selected),
+diff --git a/Telegram/SourceFiles/tele/tele_money_card_box.h b/Telegram/SourceFiles/tele/tele_money_card_box.h
+index 0cc1872bc460bdbc229a82460fab7bd35c7a69f7..a92442aa67c3a89962edd6c6b1a393537420888e 100644
+--- a/Telegram/SourceFiles/tele/tele_money_card_box.h
++++ b/Telegram/SourceFiles/tele/tele_money_card_box.h
+@@ -13,11 +13,13 @@ class RpWidget;
+ 
+ namespace Tele {
+ 
++struct MoneyCardDropTarget;
+ struct MoneyCardLook;
+ 
+ using MoneyCardPreview = Fn<object_ptr<Ui::RpWidget>(
+ 	not_null<QWidget*> parent,
+-	rpl::producer<MoneyCardLook> look)>;
++	rpl::producer<MoneyCardLook> look,
++	std::shared_ptr<MoneyCardDropTarget> drop)>;
+ 
+ void MoneyCardDesignBox(
+ 	not_null<Ui::GenericBox*> box,
+diff --git a/Telegram/SourceFiles/tele/tele_money_stickers.cpp b/Telegram/SourceFiles/tele/tele_money_stickers.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..eefb77d4ae266c3604840ad2486295b4322a037d
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_money_stickers.cpp
+@@ -0,0 +1,1349 @@
++#include "tele/tele_money_stickers.h"
++
++#include "base/event_filter.h"
++#include "base/random.h"
++#include "data/stickers/data_custom_emoji.h"
++#include "data/data_document.h"
++#include "data/data_document_media.h"
++#include "data/data_session.h"
++#include "data/data_star_gift.h"
++#include "gram/api/gram_api_nft.h"
++#include "history/view/media/history_view_sticker_player_abstract.h"
++#include "main/main_session.h"
++#include "tele/tele_lowercase.h"
++#include "ui/abstract_button.h"
++#include "ui/effects/animations.h"
++#include "ui/image/image_prepare.h"
++#include "ui/text/text_utilities.h"
++#include "ui/widgets/popup_menu.h"
++#include "ui/painter.h"
++#include "ui/rp_widget.h"
++#include "wallet/wallet_session.h"
++#include "styles/style_menu_icons.h"
++#include "styles/style_wallet.h"
++#include "styles/style_widgets.h"
++
++#include <QtGui/QCursor>
++#include <QtGui/QRadialGradient>
++#include <QtWidgets/QApplication>
++
++namespace Tele {
++namespace {
++
++constexpr auto kModelSide = 60;
++constexpr auto kOutline = 2;
++constexpr auto kShadowBlur = 4;
++constexpr auto kShadowShift = 2;
++constexpr auto kShadowAlpha = 80;
++constexpr auto kOutlineSteps = 24;
++constexpr auto kHitAlpha = 128;
++constexpr auto kSilhouetteDarken = 0.3;
++constexpr auto kOutsideOpacity = 0.5;
++constexpr auto kFlyDuration = crl::time(300);
++constexpr auto kPopDuration = crl::time(280);
++constexpr auto kOutDuration = crl::time(250);
++constexpr auto kArc = 0.2;
++constexpr auto kPop = 0.08;
++constexpr auto kOutScale = 0.6;
++constexpr auto kRippleAlpha = 0.55;
++
++struct FrameLoader {
++	std::shared_ptr<Data::DocumentMedia> media;
++	std::unique_ptr<HistoryView::StickerPlayer> player;
++	rpl::lifetime lifetime;
++	bool done = false;
++};
++
++struct Frames {
++	base::flat_map<DocumentId, QImage> raw;
++	base::flat_map<DocumentId, std::unique_ptr<FrameLoader>> loading;
++	base::flat_set<DocumentId> failed;
++	base::flat_map<std::pair<DocumentId, int>, QImage> stickers;
++	base::flat_map<std::tuple<DocumentId, QRgb, int>, QImage> silhouettes;
++	rpl::event_stream<> ready;
++	base::flat_map<QString, int> hidden;
++	rpl::event_stream<> hiddenChanges;
++	struct Source {
++		uint64 id = 0;
++		QPointer<QWidget> widget;
++		Fn<QString()> slug;
++		Fn<QRect()> model;
++	};
++	std::vector<Source> sources;
++	uint64 sourceId = 0;
++};
++
++[[nodiscard]] Frames &FramesFor(not_null<Main::Session*> session) {
++	static auto map = base::flat_map<
++		not_null<Main::Session*>,
++		std::unique_ptr<Frames>>();
++	auto i = map.find(session);
++	if (i == end(map)) {
++		i = map.emplace(session, std::make_unique<Frames>()).first;
++		session->lifetime().add([=] {
++			map.remove(session);
++		});
++	}
++	return *i->second;
++}
++
++void RequestFrame(not_null<Main::Session*> session, DocumentId id) {
++	auto &frames = FramesFor(session);
++	if (!id
++		|| frames.raw.contains(id)
++		|| frames.loading.contains(id)
++		|| frames.failed.contains(id)) {
++		return;
++	}
++	const auto loader = frames.loading.emplace(
++		id,
++		std::make_unique<FrameLoader>()).first->second.get();
++	const auto raw = session.get();
++	const auto finish = [=](QImage image) {
++		crl::on_main(raw, [=] {
++			auto &frames = FramesFor(raw);
++			frames.loading.remove(id);
++			if (image.isNull()) {
++				frames.failed.emplace(id);
++			} else {
++				frames.raw[id] = image;
++				frames.ready.fire({});
++			}
++		});
++	};
++	const auto side = style::ConvertScale(kModelSide);
++	const auto size = QSize(side, side);
++	session->data().customEmojiManager().resolve(
++		id
++	) | rpl::take(
++		1
++	) | rpl::on_next_error([=](not_null<DocumentData*> document) {
++		const auto media = document->createMediaView();
++		media->checkStickerLarge();
++		loader->media = media;
++		rpl::single(rpl::empty) | rpl::then(
++			raw->downloaderTaskFinished()
++		) | rpl::filter([=] {
++			return media->loaded();
++		}) | rpl::take(1) | rpl::on_next([=] {
++			loader->player = MakeMoneyCardModelPlayer(
++				document,
++				media.get(),
++				size);
++			if (!loader->player) {
++				loader->done = true;
++				finish(QImage());
++				return;
++			}
++			const auto grab = [=] {
++				if (loader->done
++					|| !loader->player
++					|| !loader->player->ready()) {
++					return;
++				}
++				auto info = loader->player->frame(
++					size,
++					QColor(0, 0, 0, 0),
++					false,
++					crl::now(),
++					true);
++				if (info.image.isNull()) {
++					return;
++				}
++				loader->done = true;
++				auto image = info.image.copy();
++				image.setDevicePixelRatio(1.);
++				finish(std::move(image));
++			};
++			loader->player->setRepaintCallback(grab);
++			grab();
++		}, loader->lifetime);
++	}, [=] {
++		loader->done = true;
++		finish(QImage());
++	}, loader->lifetime);
++}
++
++[[nodiscard]] QImage TintedCopy(const QImage &image, QColor color) {
++	auto result = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
++	auto q = QPainter(&result);
++	q.setCompositionMode(QPainter::CompositionMode_SourceIn);
++	q.fillRect(result.rect(), color);
++	q.end();
++	return result;
++}
++
++[[nodiscard]] QImage ComposeSticker(const QImage &frame, int ratio) {
++	const auto model = style::ConvertScale(kModelSide) * ratio;
++	const auto outline = std::max(style::ConvertScale(kOutline) * ratio, 1);
++	const auto blur = std::max(style::ConvertScale(kShadowBlur) * ratio, 1);
++	const auto shift = style::ConvertScale(kShadowShift) * ratio;
++	const auto side = model + 2 * (outline + blur + shift);
++	const auto scaled = frame.scaled(
++		model,
++		model,
++		Qt::KeepAspectRatio,
++		Qt::SmoothTransformation
++	).convertToFormat(QImage::Format_ARGB32_Premultiplied);
++	const auto origin = QPoint(
++		(side - scaled.width()) / 2,
++		(side - scaled.height()) / 2);
++	const auto white = TintedCopy(scaled, Qt::white);
++	auto outlined = QImage(
++		side,
++		side,
++		QImage::Format_ARGB32_Premultiplied);
++	outlined.fill(Qt::transparent);
++	{
++		auto q = QPainter(&outlined);
++		for (const auto radius : { outline, outline / 2 }) {
++			if (!radius) {
++				continue;
++			}
++			for (auto i = 0; i != kOutlineSteps; ++i) {
++				const auto angle = 2. * M_PI * i / kOutlineSteps;
++				q.drawImage(
++					origin + QPoint(
++						int(std::round(std::cos(angle) * radius)),
++						int(std::round(std::sin(angle) * radius))),
++					white);
++			}
++		}
++		q.drawImage(origin, white);
++	}
++	auto shadow = Images::BlurLargeImage(
++		TintedCopy(outlined, QColor(0, 0, 0, kShadowAlpha)),
++		blur);
++	auto result = QImage(side, side, QImage::Format_ARGB32_Premultiplied);
++	result.fill(Qt::transparent);
++	{
++		auto q = QPainter(&result);
++		q.drawImage(QPoint(0, shift), shadow);
++		q.drawImage(0, 0, outlined);
++		q.drawImage(origin, scaled);
++	}
++	result.setDevicePixelRatio(ratio);
++	return result;
++}
++
++[[nodiscard]] QImage StickerImage(
++		not_null<Main::Session*> session,
++		DocumentId modelId) {
++	auto &frames = FramesFor(session);
++	const auto ratio = style::DevicePixelRatio();
++	const auto key = std::make_pair(modelId, ratio);
++	if (const auto i = frames.stickers.find(key); i != end(frames.stickers)) {
++		return i->second;
++	}
++	const auto raw = frames.raw.find(modelId);
++	if (raw == end(frames.raw)) {
++		RequestFrame(session, modelId);
++		return QImage();
++	}
++	return frames.stickers.emplace(
++		key,
++		ComposeSticker(raw->second, ratio)).first->second;
++}
++
++[[nodiscard]] QImage Silhouette(
++		not_null<Main::Session*> session,
++		DocumentId modelId,
++		QColor color,
++		int side) {
++	auto &frames = FramesFor(session);
++	const auto ratio = style::DevicePixelRatio();
++	const auto key = std::make_tuple(modelId, color.rgba(), side * ratio);
++	const auto i = frames.silhouettes.find(key);
++	if (i != end(frames.silhouettes)) {
++		return i->second;
++	}
++	const auto raw = frames.raw.find(modelId);
++	if (raw == end(frames.raw)) {
++		RequestFrame(session, modelId);
++		return QImage();
++	}
++	auto result = TintedCopy(
++		raw->second.scaled(
++			side * ratio,
++			side * ratio,
++			Qt::KeepAspectRatio,
++			Qt::SmoothTransformation),
++		color);
++	result.setDevicePixelRatio(ratio);
++	return frames.silhouettes.emplace(key, std::move(result)).first->second;
++}
++
++[[nodiscard]] int HitSide() {
++	return style::ConvertScale(kModelSide) + 2 * style::ConvertScale(kOutline);
++}
++
++[[nodiscard]] QSizeF ReferenceCard() {
++	return QSizeF(
++		st::walletPanelSize.width()
++			- st::walletCardMargin.left()
++			- st::walletCardMargin.right(),
++		st::walletCardHeight);
++}
++
++[[nodiscard]] bool Hidden(not_null<Main::Session*> session, const QString &key) {
++	return FramesFor(session).hidden.contains(key);
++}
++
++void Hide(not_null<Main::Session*> session, const QString &key) {
++	if (key.isEmpty()) {
++		return;
++	}
++	auto &frames = FramesFor(session);
++	if (++frames.hidden[key] == 1) {
++		frames.hiddenChanges.fire({});
++	}
++}
++
++void Unhide(not_null<Main::Session*> session, const QString &key) {
++	auto &frames = FramesFor(session);
++	const auto i = frames.hidden.find(key);
++	if (i == end(frames.hidden)) {
++		return;
++	} else if (--i->second <= 0) {
++		frames.hidden.erase(i);
++		frames.hiddenChanges.fire({});
++	}
++}
++
++[[nodiscard]] QRect ClippedIn(
++		not_null<QWidget*> widget,
++		QRect local,
++		not_null<QWidget*> ancestor) {
++	if (!widget->isVisible()) {
++		return QRect();
++	}
++	auto result = QRect(widget->mapTo(ancestor, local.topLeft()), local.size());
++	for (auto parent = widget.get(); parent; parent = parent->parentWidget()) {
++		result &= QRect(parent->mapTo(ancestor, QPoint()), parent->size());
++		if (parent == ancestor) {
++			break;
++		}
++	}
++	return result;
++}
++
++[[nodiscard]] std::optional<QRect> FindSource(
++		not_null<Main::Session*> session,
++		const QString &key,
++		not_null<QWidget*> overlay) {
++	const auto &sources = FramesFor(session).sources;
++	for (auto i = sources.rbegin(); i != sources.rend(); ++i) {
++		const auto widget = i->widget.data();
++		if (!widget
++			|| !overlay->isAncestorOf(widget)
++			|| i->slug() != key) {
++			continue;
++		}
++		const auto model = i->model();
++		if (model.isEmpty()
++			|| ClippedIn(widget, model, overlay).isEmpty()) {
++			continue;
++		}
++		return QRect(widget->mapTo(overlay, model.topLeft()), model.size());
++	}
++	return std::nullopt;
++}
++
++[[nodiscard]] QPointF CenterIn(const MoneyCardSticker &sticker, QSizeF card) {
++	return QPointF(
++		sticker.center.x() * card.width(),
++		sticker.center.y() * card.height());
++}
++
++[[nodiscard]] QPointF Clamped(QPointF center, QSizeF card) {
++	const auto half = HitSide() / 2.;
++	const auto clamp = [=](float64 value, float64 full) {
++		return (full > 2 * half)
++			? std::clamp(value, half, full - half) / full
++			: 0.5;
++	};
++	return QPointF(
++		clamp(center.x(), card.width()),
++		clamp(center.y(), card.height()));
++}
++
++[[nodiscard]] QPointF FreeSpot(const std::vector<MoneyCardSticker> &list) {
++	static constexpr auto kSlots = std::array<std::pair<float64, float64>, 6>{ {
++		{ 0.15, 0.21 },
++		{ 0.39, 0.19 },
++		{ 0.62, 0.21 },
++		{ 0.82, 0.22 },
++		{ 0.58, 0.78 },
++		{ 0.80, 0.80 },
++	} };
++	const auto card = ReferenceCard();
++	const auto distance = HitSide() * 0.8;
++	const auto free = [&](QPointF center) {
++		const auto at = QPointF(
++			center.x() * card.width(),
++			center.y() * card.height());
++		return ranges::none_of(list, [&](const MoneyCardSticker &sticker) {
++			const auto other = CenterIn(sticker, card);
++			return std::hypot(at.x() - other.x(), at.y() - other.y())
++				< distance;
++		});
++	};
++	for (const auto &[x, y] : kSlots) {
++		if (free(QPointF(x, y))) {
++			return QPointF(x, y);
++		}
++	}
++	const auto half = HitSide() / 2;
++	const auto width = std::max(int(card.width()) - 2 * half, 1);
++	const auto height = std::max(int(card.height()) - 2 * half, 1);
++	return Clamped(
++		QPointF(
++			half + base::RandomIndex(width),
++			half + base::RandomIndex(height)),
++		card);
++}
++
++void RaiseSticker(
++		not_null<Main::Session*> session,
++		const QString &key,
++		std::optional<QPointF> center) {
++	auto list = MoneyCardStickersFor(session);
++	const auto i = ranges::find(list, key, &MoneyCardSticker::key);
++	if (i == end(list)) {
++		return;
++	}
++	auto sticker = *i;
++	list.erase(i);
++	if (center) {
++		sticker.center = *center;
++	}
++	list.push_back(std::move(sticker));
++	SetMoneyCardStickers(session, std::move(list));
++}
++
++[[nodiscard]] std::optional<MoneyCardSticker> FindSticker(
++		not_null<Main::Session*> session,
++		const QString &key) {
++	const auto list = MoneyCardStickersFor(session);
++	const auto i = ranges::find(list, key, &MoneyCardSticker::key);
++	return (i != end(list)) ? std::make_optional(*i) : std::nullopt;
++}
++
++[[nodiscard]] base::unique_qptr<Ui::RpWidget> CreateFloating(
++		not_null<QWidget*> parent,
++		not_null<Main::Session*> session,
++		DocumentId modelId,
++		Fn<QPointF()> center,
++		Fn<bool(QPointF)> inside) {
++	auto result = base::make_unique_q<Ui::RpWidget>(parent.get());
++	const auto raw = result.get();
++	raw->setAttribute(Qt::WA_TransparentForMouseEvents);
++	raw->setGeometry(parent->rect());
++	raw->show();
++	raw->raise();
++	raw->paintRequest(
++	) | rpl::on_next([=] {
++		const auto image = StickerImage(session, modelId);
++		if (image.isNull()) {
++			return;
++		}
++		const auto at = center();
++		auto p = QPainter(raw);
++		auto hq = PainterHighQualityEnabler(p);
++		if (!inside(at)) {
++			p.setOpacity(kOutsideOpacity);
++		}
++		const auto size = QSizeF(image.size()) / image.devicePixelRatio();
++		p.drawImage(
++			QRectF(at - QPointF(size.width() / 2., size.height() / 2.), size),
++			image);
++	}, raw->lifetime());
++	FramesFor(session).ready.events(
++	) | rpl::on_next([=] {
++		raw->update();
++	}, raw->lifetime());
++	return result;
++}
++
++enum class Ending : uchar {
++	Land,
++	Out,
++	Arrive,
++};
++
++struct Flight {
++	QPointF from;
++	QPointF to;
++	float64 fromScale = 1.;
++	float64 toScale = 1.;
++};
++
++[[nodiscard]] float64 ModelScale(QRect model) {
++	return model.width() / float64(style::ConvertScale(kModelSide));
++}
++
++[[nodiscard]] QPointF FlightPoint(const Flight &flight, float64 progress) {
++	const auto delta = flight.to - flight.from;
++	const auto length = std::hypot(delta.x(), delta.y());
++	const auto middle = (flight.from + flight.to) / 2.;
++	auto normal = (length > 0.)
++		? QPointF(delta.y(), -delta.x()) / length
++		: QPointF();
++	if (normal.y() > 0.) {
++		normal = -normal;
++	}
++	const auto control = middle + normal * (length * kArc);
++	const auto rest = 1. - progress;
++	return flight.from * (rest * rest)
++		+ control * (2. * rest * progress)
++		+ flight.to * (progress * progress);
++}
++
++void Animate(
++		not_null<Main::Session*> session,
++		not_null<QWidget*> overlay,
++		DocumentId modelId,
++		std::optional<Flight> flight,
++		QPointF position,
++		Ending ending,
++		QString hide,
++		Fn<void()> done) {
++	if (anim::Disabled()) {
++		if (done) {
++			done();
++		}
++		return;
++	}
++	Hide(session, hide);
++	const auto raw = Ui::CreateChild<Ui::RpWidget>(overlay.get());
++	raw->setAttribute(Qt::WA_TransparentForMouseEvents);
++	raw->setGeometry(overlay->rect());
++	raw->show();
++	raw->raise();
++
++	struct State {
++		Ui::Animations::Basic animation;
++		crl::time started = 0;
++		bool finished = false;
++	};
++	const auto state = raw->lifetime().make_state<State>();
++	const auto weak = base::make_weak(session);
++	const auto fly = flight ? kFlyDuration : crl::time(0);
++	const auto tail = (ending == Ending::Land)
++		? kPopDuration
++		: (ending == Ending::Out)
++		? kOutDuration
++		: crl::time(0);
++	const auto total = std::max(fly + tail, crl::time(1));
++	const auto finish = [=] {
++		if (state->finished) {
++			return;
++		}
++		state->finished = true;
++		if (const auto strong = weak.get()) {
++			if (done) {
++				done();
++			}
++			Unhide(strong, hide);
++		}
++	};
++	raw->lifetime().add(finish);
++
++	raw->paintRequest(
++	) | rpl::on_next([=] {
++		const auto strong = weak.get();
++		if (!strong || state->finished) {
++			return;
++		}
++		const auto image = StickerImage(strong, modelId);
++		if (image.isNull()) {
++			return;
++		}
++		const auto elapsed = std::clamp(
++			crl::now() - state->started,
++			crl::time(0),
++			total);
++		auto center = position;
++		auto scale = 1.;
++		auto opacity = 1.;
++		auto ripple = -1.;
++		if (flight && elapsed < fly) {
++			const auto progress = anim::easeOutCubic(
++				1.,
++				elapsed / float64(fly));
++			center = FlightPoint(*flight, progress);
++			scale = flight->fromScale
++				+ (flight->toScale - flight->fromScale) * progress;
++		} else if (ending == Ending::Land) {
++			const auto local = (elapsed - fly)
++				/ float64(std::max(tail, crl::time(1)));
++			scale = 1. + kPop * std::sin(M_PI * local);
++			ripple = local;
++		} else if (ending == Ending::Out) {
++			const auto local = anim::easeOutCubic(
++				1.,
++				(elapsed - fly) / float64(std::max(tail, crl::time(1))));
++			scale = 1. - (1. - kOutScale) * local;
++			opacity = 1. - local;
++		} else {
++			return;
++		}
++		auto p = QPainter(raw);
++		auto hq = PainterHighQualityEnabler(p);
++		if (ripple >= 0.) {
++			const auto progress = anim::easeOutCubic(1., ripple);
++			const auto side = style::ConvertScale(kModelSide);
++			const auto radius = side * (0.45 + 0.5 * progress);
++			auto color = QColor(255, 255, 255);
++			color.setAlphaF(kRippleAlpha * (1. - ripple));
++			auto pen = QPen(color);
++			pen.setWidthF(style::ConvertScaleExact(2.));
++			p.setPen(pen);
++			p.setBrush(Qt::NoBrush);
++			p.drawEllipse(center, radius, radius);
++		}
++		p.setOpacity(opacity);
++		const auto size = QSizeF(image.size()) / image.devicePixelRatio()
++			* scale;
++		p.drawImage(
++			QRectF(
++				center - QPointF(size.width() / 2., size.height() / 2.),
++				size),
++			image);
++	}, raw->lifetime());
++
++	state->started = crl::now();
++	state->animation.init([=](crl::time now) {
++		raw->update();
++		if (now - state->started < total) {
++			return true;
++		}
++		finish();
++		crl::on_main(raw, [=] {
++			delete raw;
++		});
++		return false;
++	});
++	state->animation.start();
++}
++
++[[nodiscard]] QRect DropCard(
++		const std::shared_ptr<MoneyCardDropTarget> &target) {
++	return (target && target->overlay && target->card)
++		? target->card()
++		: QRect();
++}
++
++void AnimateLanding(
++		not_null<Main::Session*> session,
++		const QString &key,
++		const std::shared_ptr<MoneyCardDropTarget> &target,
++		bool fromSource) {
++	const auto sticker = FindSticker(session, key);
++	const auto card = DropCard(target);
++	if (!sticker || card.isEmpty()) {
++		return;
++	}
++	const auto overlay = target->overlay.data();
++	const auto to = QPointF(card.topLeft())
++		+ CenterIn(*sticker, QSizeF(card.size()));
++	auto flight = std::optional<Flight>();
++	if (fromSource) {
++		if (const auto source = FindSource(session, key, overlay)) {
++			flight = Flight{
++				.from = QRectF(*source).center(),
++				.to = to,
++				.fromScale = ModelScale(*source),
++				.toScale = 1.,
++			};
++		}
++	}
++	Animate(
++		session,
++		overlay,
++		sticker->modelId,
++		flight,
++		to,
++		Ending::Land,
++		key,
++		nullptr);
++}
++
++void RemoveAnimated(
++		not_null<Main::Session*> session,
++		const QString &key,
++		const std::shared_ptr<MoneyCardDropTarget> &target,
++		std::optional<QPointF> from) {
++	const auto sticker = FindSticker(session, key);
++	if (!sticker) {
++		return;
++	}
++	const auto remove = [=] {
++		RemoveMoneyCardSticker(session, key);
++	};
++	const auto card = DropCard(target);
++	if (!from && !card.isEmpty()) {
++		from = QPointF(card.topLeft())
++			+ CenterIn(*sticker, QSizeF(card.size()));
++	}
++	const auto overlay = target ? target->overlay.data() : nullptr;
++	if (!from || !overlay) {
++		remove();
++		return;
++	}
++	if (const auto source = FindSource(session, key, overlay)) {
++		Animate(
++			session,
++			overlay,
++			sticker->modelId,
++			Flight{
++				.from = *from,
++				.to = QRectF(*source).center(),
++				.fromScale = 1.,
++				.toScale = ModelScale(*source),
++			},
++			*from,
++			Ending::Arrive,
++			key,
++			remove);
++	} else {
++		Animate(
++			session,
++			overlay,
++			sticker->modelId,
++			std::nullopt,
++			*from,
++			Ending::Out,
++			key,
++			remove);
++	}
++}
++
++} // namespace
++
++bool MoneyCardStickerOn(
++		not_null<Main::Session*> session,
++		const QString &key) {
++	if (key.isEmpty() || !MoneyCardDesigns()) {
++		return false;
++	}
++	return FindSticker(session, key).has_value();
++}
++
++rpl::producer<> MoneyCardStickersUpdates(not_null<Main::Session*> session) {
++	return MoneyCardStickersValue(session) | rpl::to_empty;
++}
++
++void AddMoneyCardSticker(
++		not_null<Main::Session*> session,
++		const Data::UniqueGift &gift,
++		bool chain,
++		std::shared_ptr<MoneyCardDropTarget> target) {
++	auto list = MoneyCardStickersFor(session);
++	if (gift.slug.isEmpty()
++		|| (ranges::find(list, gift.slug, &MoneyCardSticker::key)
++			!= end(list))) {
++		return;
++	}
++	const auto center = FreeSpot(list);
++	list.push_back({
++		.key = gift.slug,
++		.modelId = gift.model.document->id,
++		.center = center,
++		.chain = chain,
++	});
++	SetMoneyCardStickers(session, std::move(list));
++	ValidateMoneyCardChoice(session);
++	AnimateLanding(session, gift.slug, target, true);
++}
++
++void PlaceMoneyCardSticker(
++		not_null<Main::Session*> session,
++		const Data::UniqueGift &gift,
++		bool chain,
++		QPointF center) {
++	const auto list = MoneyCardStickersFor(session);
++	if (ranges::find(list, gift.slug, &MoneyCardSticker::key) != end(list)) {
++		RaiseSticker(session, gift.slug, center);
++		return;
++	} else if (gift.slug.isEmpty()) {
++		return;
++	}
++	auto updated = list;
++	updated.push_back({
++		.key = gift.slug,
++		.modelId = gift.model.document->id,
++		.center = center,
++		.chain = chain,
++	});
++	SetMoneyCardStickers(session, std::move(updated));
++	ValidateMoneyCardChoice(session);
++}
++
++void RemoveMoneyCardSticker(
++		not_null<Main::Session*> session,
++		const QString &key) {
++	auto list = MoneyCardStickersFor(session);
++	const auto removed = ranges::remove(list, key, &MoneyCardSticker::key);
++	if (removed == end(list)) {
++		return;
++	}
++	list.erase(removed, end(list));
++	SetMoneyCardStickers(session, std::move(list));
++}
++
++void RegisterMoneyCardGiftSource(
++		not_null<Ui::RpWidget*> widget,
++		not_null<Main::Session*> session,
++		Fn<QString()> slug,
++		Fn<QRect()> model) {
++	auto &frames = FramesFor(session);
++	const auto id = ++frames.sourceId;
++	frames.sources.push_back({
++		.id = id,
++		.widget = widget.get(),
++		.slug = std::move(slug),
++		.model = std::move(model),
++	});
++	const auto weak = base::make_weak(session);
++	widget->lifetime().add([=] {
++		if (const auto strong = weak.get()) {
++			auto &sources = FramesFor(strong).sources;
++			sources.erase(
++				ranges::remove(sources, id, &Frames::Source::id),
++				end(sources));
++		}
++	});
++}
++
++void FillMoneyCardGiftMenu(
++		not_null<Ui::PopupMenu*> menu,
++		not_null<Main::Session*> session,
++		std::shared_ptr<Data::UniqueGift> gift,
++		bool chain,
++		std::shared_ptr<MoneyCardDropTarget> target,
++		Fn<void(MoneyCardLook)> applyColor) {
++	if (!gift || !MoneyCardDesigns()) {
++		return;
++	}
++	menu->addAction(Lower(u"Apply color"_q), [=] {
++		const auto look = MoneyCardLookFrom(*gift);
++		if (applyColor) {
++			applyColor(look);
++		} else {
++			SetMoneyCardChoice(session, {
++				.gift = look,
++				.sync = false,
++				.chain = chain,
++			});
++		}
++	}, &st::menuIconPalette);
++	if (MoneyCardStickerOn(session, gift->slug)) {
++		menu->addAction(Lower(u"Remove from card"_q), [=] {
++			if (!Hidden(session, gift->slug)) {
++				RemoveAnimated(session, gift->slug, target, std::nullopt);
++			}
++		}, &st::menuIconRemove);
++	} else {
++		menu->addAction(Lower(u"Add to card"_q), [=] {
++			AddMoneyCardSticker(session, *gift, chain, target);
++		}, &st::menuIconStickerAdd);
++	}
++}
++
++TextWithEntities MoneyCardOnCardTitle(const QString &name) {
++	auto result = Ui::Text::Semibold(name);
++	result.append(' ').append(Ui::Text::Colorized(Lower(u"on card"_q)));
++	return result;
++}
++
++bool PaintMoneyCardStickerThumb(
++		QPainter &p,
++		not_null<Main::Session*> session,
++		const std::shared_ptr<Data::UniqueGift> &gift,
++		QRect rect,
++		int radius) {
++	if (!gift || !MoneyCardStickerOn(session, gift->slug)) {
++		return false;
++	}
++	auto hq = PainterHighQualityEnabler(p);
++	auto gradient = QRadialGradient(
++		QRectF(rect).center(),
++		rect.width() / 2.);
++	gradient.setStops({
++		{ 0., gift->backdrop.centerColor },
++		{ 1., gift->backdrop.edgeColor },
++	});
++	p.setPen(Qt::NoPen);
++	p.setBrush(gradient);
++	p.drawRoundedRect(rect, radius, radius);
++	const auto model = MoneyCardModelRect(rect);
++	const auto image = Silhouette(
++		session,
++		gift->model.document->id,
++		anim::color(
++			gift->backdrop.edgeColor,
++			QColor(0, 0, 0),
++			kSilhouetteDarken),
++		model.width());
++	if (!image.isNull()) {
++		p.drawImage(model, image);
++	}
++	return true;
++}
++
++void SetupMoneyCardCollectible(
++		not_null<Ui::RpWidget*> row,
++		not_null<Main::Session*> session,
++		Fn<std::shared_ptr<Data::UniqueGift>()> gift,
++		Fn<void()> refresh,
++		Fn<QRect()> model,
++		std::shared_ptr<MoneyCardDropTarget> target) {
++	if (target) {
++		SetupMoneyCardGiftDrag(row, session, gift, true, target);
++	}
++	RegisterMoneyCardGiftSource(row, session, [=] {
++		const auto unique = gift();
++		return unique ? unique->slug : QString();
++	}, std::move(model));
++	MoneyCardStickersUpdates(
++		session
++	) | rpl::on_next([=] {
++		refresh();
++		row->update();
++	}, row->lifetime());
++	FramesFor(session).ready.events(
++	) | rpl::on_next([=] {
++		row->update();
++	}, row->lifetime());
++
++	const auto menu = row->lifetime().make_state<
++		base::unique_qptr<Ui::PopupMenu>>();
++	base::install_event_filter(row, [=](not_null<QEvent*> e) {
++		if (e->type() != QEvent::ContextMenu || !MoneyCardDesigns()) {
++			return base::EventFilterResult::Continue;
++		}
++		const auto unique = gift();
++		if (!unique) {
++			return base::EventFilterResult::Continue;
++		}
++		*menu = base::make_unique_q<Ui::PopupMenu>(
++			row,
++			st::popupMenuWithIcons);
++		FillMoneyCardGiftMenu(menu->get(), session, unique, true, target);
++		(*menu)->popup(QCursor::pos());
++		return base::EventFilterResult::Cancel;
++	});
++}
++
++void SetupMoneyCardGiftDrag(
++		not_null<Ui::RpWidget*> source,
++		not_null<Main::Session*> session,
++		Fn<std::shared_ptr<Data::UniqueGift>()> gift,
++		bool chain,
++		std::shared_ptr<MoneyCardDropTarget> target) {
++	struct Drag {
++		std::shared_ptr<Data::UniqueGift> gift;
++		QString hidden;
++		QPoint pressed;
++		QPoint global;
++		bool active = false;
++		base::unique_qptr<Ui::RpWidget> overlay;
++	};
++	const auto drag = source->lifetime().make_state<Drag>();
++	const auto weak = base::make_weak(session);
++	const auto reset = [=] {
++		drag->active = false;
++		drag->gift = nullptr;
++		drag->overlay = nullptr;
++		if (const auto key = base::take(drag->hidden); !key.isEmpty()) {
++			if (const auto strong = weak.get()) {
++				Unhide(strong, key);
++			}
++		}
++	};
++	source->lifetime().add(reset);
++	const auto point = [=](QPoint global) -> std::optional<QPointF> {
++		const auto overlay = target->overlay.data();
++		if (!overlay) {
++			return std::nullopt;
++		}
++		return QPointF(overlay->mapFromGlobal(global));
++	};
++	const auto dropRect = [=](QPointF at) -> QRect {
++		const auto card = DropCard(target);
++		if (card.isEmpty() || !QRectF(card).contains(at)) {
++			return QRect();
++		} else if (target->visible
++			&& !QRectF(target->visible()).contains(at)) {
++			return QRect();
++		}
++		return card;
++	};
++	base::install_event_filter(source, [=](not_null<QEvent*> e) {
++		const auto type = e->type();
++		if (type != QEvent::MouseButtonPress
++			&& type != QEvent::MouseButtonDblClick
++			&& type != QEvent::MouseMove
++			&& type != QEvent::MouseButtonRelease) {
++			return base::EventFilterResult::Continue;
++		}
++		const auto mouse = static_cast<QMouseEvent*>(e.get());
++		const auto global = mouse->globalPos();
++		if (type == QEvent::MouseButtonPress
++			|| type == QEvent::MouseButtonDblClick) {
++			reset();
++			if (mouse->button() == Qt::LeftButton && MoneyCardDesigns()) {
++				drag->gift = gift();
++				drag->pressed = global;
++			}
++			return base::EventFilterResult::Continue;
++		} else if (!drag->gift) {
++			return base::EventFilterResult::Continue;
++		} else if (type == QEvent::MouseMove) {
++			const auto active = drag->active;
++			if (!(mouse->buttons() & Qt::LeftButton)) {
++				reset();
++				return active
++					? base::EventFilterResult::Cancel
++					: base::EventFilterResult::Continue;
++			}
++			drag->global = global;
++			if (!active) {
++				const auto distance = (global - drag->pressed).manhattanLength();
++				const auto overlay = target->overlay.data();
++				if (distance < QApplication::startDragDistance()) {
++					return base::EventFilterResult::Continue;
++				} else if (!overlay) {
++					reset();
++					return base::EventFilterResult::Continue;
++				}
++				drag->active = true;
++				if (const auto button = dynamic_cast<Ui::AbstractButton*>(
++						source.get())) {
++					button->clearState();
++				}
++				if (MoneyCardStickerOn(session, drag->gift->slug)) {
++					drag->hidden = drag->gift->slug;
++					Hide(session, drag->hidden);
++				}
++				drag->overlay = CreateFloating(
++					overlay,
++					session,
++					drag->gift->model.document->id,
++					[=] { return point(drag->global).value_or(QPointF()); },
++					[=](QPointF at) { return !dropRect(at).isEmpty(); });
++			}
++			if (drag->overlay) {
++				drag->overlay->update();
++			}
++			return base::EventFilterResult::Cancel;
++		} else if (mouse->button() != Qt::LeftButton) {
++			return drag->active
++				? base::EventFilterResult::Cancel
++				: base::EventFilterResult::Continue;
++		} else if (!drag->active) {
++			reset();
++			return base::EventFilterResult::Continue;
++		}
++		const auto unique = drag->gift;
++		const auto at = point(global);
++		const auto card = at ? dropRect(*at) : QRect();
++		if (unique && !card.isEmpty()) {
++			PlaceMoneyCardSticker(
++				session,
++				*unique,
++				chain,
++				Clamped(*at - QPointF(card.topLeft()), QSizeF(card.size())));
++			AnimateLanding(session, unique->slug, target, false);
++		}
++		reset();
++		return base::EventFilterResult::Cancel;
++	});
++}
++
++MoneyCardStickers::MoneyCardStickers(
++	not_null<Main::Session*> session,
++	Fn<void()> repaint)
++: _session(session)
++, _repaint(std::move(repaint)) {
++	MoneyCardStickersValue(
++		session
++	) | rpl::on_next([=](std::vector<MoneyCardSticker> list) {
++		_list = std::move(list);
++		_repaint();
++	}, _lifetime);
++	rpl::merge(
++		FramesFor(session).ready.events(),
++		FramesFor(session).hiddenChanges.events()
++	) | rpl::on_next([=] {
++		if (!_list.empty()) {
++			_repaint();
++		}
++	}, _lifetime);
++
++	const auto wallet = &session->wallet();
++	rpl::single(rpl::empty) | rpl::then(
++		wallet->collectiblesUpdates()
++	) | rpl::on_next([=] {
++		const auto &list = wallet->collectibles();
++		if (list.empty()) {
++			return;
++		} else if (wallet->collectiblesHasNext()) {
++			if (MoneyCardNeedsChainList(session)) {
++				wallet->loadMoreCollectibles();
++			}
++			return;
++		}
++		auto slugs = base::flat_set<QString>();
++		for (const auto &item : list) {
++			if (item.kind == Gram::NftKind::TelegramGift
++				&& !item.key.isEmpty()) {
++				slugs.emplace(item.key);
++			}
++		}
++		SetMoneyCardChainSlugs(session, std::move(slugs));
++	}, _lifetime);
++}
++
++MoneyCardStickers::~MoneyCardStickers() = default;
++
++not_null<Main::Session*> MoneyCardStickers::session() const {
++	return _session;
++}
++
++void MoneyCardStickers::paint(QPainter &p, QSize card) {
++	if (_list.empty() || card.isEmpty()) {
++		return;
++	}
++	auto hq = PainterHighQualityEnabler(p);
++	auto path = QPainterPath();
++	path.addRoundedRect(
++		QRectF(QPointF(), QSizeF(card)),
++		st::walletCardRadius,
++		st::walletCardRadius);
++	p.save();
++	p.setClipPath(path, Qt::IntersectClip);
++	for (const auto &sticker : _list) {
++		if (Hidden(_session, sticker.key)) {
++			continue;
++		}
++		const auto image = StickerImage(_session, sticker.modelId);
++		if (image.isNull()) {
++			continue;
++		}
++		const auto size = QSizeF(image.size()) / image.devicePixelRatio();
++		const auto center = CenterIn(sticker, QSizeF(card));
++		p.drawImage(
++			QRectF(
++				center - QPointF(size.width() / 2., size.height() / 2.),
++				size),
++			image);
++	}
++	p.restore();
++}
++
++const MoneyCardSticker *MoneyCardStickers::hit(QPoint point, QSize card) {
++	const auto half = HitSide() / 2.;
++	for (auto i = _list.rbegin(); i != _list.rend(); ++i) {
++		if (Hidden(_session, i->key)) {
++			continue;
++		}
++		const auto center = CenterIn(*i, QSizeF(card));
++		const auto delta = QPointF(point) - center;
++		if (std::abs(delta.x()) > half || std::abs(delta.y()) > half) {
++			continue;
++		}
++		const auto image = StickerImage(_session, i->modelId);
++		if (image.isNull()) {
++			return &*i;
++		}
++		const auto ratio = image.devicePixelRatio();
++		const auto pixel = QPoint(
++			int(image.width() / 2 + delta.x() * ratio),
++			int(image.height() / 2 + delta.y() * ratio));
++		if (image.rect().contains(pixel)
++			&& qAlpha(image.pixel(pixel)) >= kHitAlpha) {
++			return &*i;
++		}
++	}
++	return nullptr;
++}
++
++void SetupMoneyCardStickerDrag(
++		not_null<Ui::RpWidget*> target,
++		not_null<MoneyCardStickers*> stickers,
++		std::shared_ptr<MoneyCardDropTarget> drop) {
++	struct Drag {
++		QString key;
++		DocumentId modelId = 0;
++		QPoint pressed;
++		QPoint global;
++		QPointF grab;
++		crl::time handled = 0;
++		bool active = false;
++		bool swallow = false;
++		base::unique_qptr<Ui::RpWidget> overlay;
++	};
++	const auto drag = target->lifetime().make_state<Drag>();
++	const auto weak = base::make_weak(stickers);
++	const auto session = stickers->session();
++	const auto sessionWeak = base::make_weak(session);
++	const auto reset = [=] {
++		const auto key = base::take(drag->key);
++		const auto active = std::exchange(drag->active, false);
++		drag->overlay = nullptr;
++		if (active && !key.isEmpty()) {
++			if (const auto strong = sessionWeak.get()) {
++				Unhide(strong, key);
++			}
++		}
++	};
++	target->lifetime().add(reset);
++	const auto card = [=] {
++		return DropCard(drop);
++	};
++	const auto droppable = [=](QPointF at) {
++		const auto rect = card();
++		return !rect.isEmpty()
++			&& QRectF(rect).contains(at)
++			&& (!drop->visible || QRectF(drop->visible()).contains(at));
++	};
++	const auto idleCursor = dynamic_cast<Ui::AbstractButton*>(target.get())
++		? style::cur_pointer
++		: style::cur_default;
++	const auto localFor = [=](QPoint global, QRect rect) -> QPoint {
++		const auto overlay = drop->overlay.data();
++		return overlay
++			? (overlay->mapFromGlobal(global) - rect.topLeft())
++			: QPoint();
++	};
++	const auto updateCursor = [=](QPoint global) {
++		const auto strong = weak.get();
++		const auto rect = card();
++		const auto over = strong
++			&& !rect.isEmpty()
++			&& strong->hit(localFor(global, rect), rect.size());
++		target->setCursor(over ? Qt::OpenHandCursor : idleCursor);
++	};
++	const auto finish = [=](QPoint global) {
++		const auto key = drag->key;
++		const auto active = drag->active;
++		const auto grab = drag->grab;
++		const auto rect = card();
++		const auto overlay = drop->overlay.data();
++		const auto release = overlay
++			? (QPointF(overlay->mapFromGlobal(global)) - grab)
++			: QPointF();
++		reset();
++		if (!active) {
++			drag->handled = crl::now();
++			RemoveAnimated(session, key, drop, std::nullopt);
++		} else if (!rect.isEmpty() && overlay) {
++			const auto center = release - QPointF(rect.topLeft());
++			const auto size = QSizeF(rect.size());
++			if (droppable(release)) {
++				RaiseSticker(session, key, Clamped(center, size));
++			} else {
++				RemoveAnimated(session, key, drop, release);
++			}
++		}
++		updateCursor(global);
++	};
++	base::install_event_filter(target, [=](not_null<QEvent*> e) {
++		const auto type = e->type();
++		if (type != QEvent::MouseButtonPress
++			&& type != QEvent::MouseButtonDblClick
++			&& type != QEvent::MouseMove
++			&& type != QEvent::MouseButtonRelease) {
++			return base::EventFilterResult::Continue;
++		}
++		const auto strong = weak.get();
++		if (!strong) {
++			return base::EventFilterResult::Continue;
++		}
++		const auto mouse = static_cast<QMouseEvent*>(e.get());
++		const auto global = mouse->globalPos();
++		if (type == QEvent::MouseButtonPress
++			|| type == QEvent::MouseButtonDblClick) {
++			reset();
++			drag->swallow = false;
++			if (mouse->button() != Qt::LeftButton) {
++				return base::EventFilterResult::Continue;
++			}
++			if (type == QEvent::MouseButtonDblClick
++				&& drag->handled
++				&& (crl::now() - drag->handled
++					<= QApplication::doubleClickInterval())) {
++				drag->handled = 0;
++				drag->swallow = true;
++				return base::EventFilterResult::Cancel;
++			}
++			const auto rect = card();
++			if (rect.isEmpty()) {
++				return base::EventFilterResult::Continue;
++			}
++			const auto local = localFor(global, rect);
++			const auto sticker = strong->hit(local, rect.size());
++			if (!sticker) {
++				return base::EventFilterResult::Continue;
++			}
++			drag->key = sticker->key;
++			drag->modelId = sticker->modelId;
++			drag->pressed = drag->global = global;
++			drag->grab = QPointF(local) - CenterIn(*sticker, rect.size());
++			target->setCursor(Qt::ClosedHandCursor);
++			return base::EventFilterResult::Cancel;
++		} else if (drag->swallow) {
++			if (type == QEvent::MouseButtonRelease) {
++				drag->swallow = false;
++			}
++			return base::EventFilterResult::Cancel;
++		} else if (drag->key.isEmpty()) {
++			if (type == QEvent::MouseMove) {
++				updateCursor(global);
++			}
++			return base::EventFilterResult::Continue;
++		} else if (type == QEvent::MouseMove) {
++			if (!(mouse->buttons() & Qt::LeftButton)) {
++				reset();
++				updateCursor(global);
++				return base::EventFilterResult::Continue;
++			}
++			drag->global = global;
++			if (!drag->active) {
++				const auto distance = (global - drag->pressed).manhattanLength();
++				const auto overlay = drop->overlay.data();
++				if (distance < QApplication::startDragDistance()) {
++					return base::EventFilterResult::Cancel;
++				} else if (!overlay) {
++					reset();
++					return base::EventFilterResult::Cancel;
++				}
++				drag->active = true;
++				Hide(session, drag->key);
++				drag->overlay = CreateFloating(
++					overlay,
++					session,
++					drag->modelId,
++					[=] {
++						const auto overlay = drop->overlay.data();
++						return overlay
++							? (QPointF(overlay->mapFromGlobal(drag->global))
++								- drag->grab)
++							: QPointF();
++					},
++					droppable);
++			}
++			if (drag->overlay) {
++				drag->overlay->update();
++			}
++			return base::EventFilterResult::Cancel;
++		} else if (mouse->button() == Qt::LeftButton) {
++			finish(global);
++		}
++		return base::EventFilterResult::Cancel;
++	});
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_money_stickers.h b/Telegram/SourceFiles/tele/tele_money_stickers.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..dee2e79a9735fe421458bdfdf188690a04251f63
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_money_stickers.h
+@@ -0,0 +1,96 @@
++#pragma once
++
++#include "base/weak_ptr.h"
++#include "tele/tele_money_card.h"
++
++#include <QtCore/QPointer>
++
++namespace Ui {
++class PopupMenu;
++} // namespace Ui
++
++namespace Tele {
++
++struct MoneyCardDropTarget {
++	QPointer<QWidget> overlay;
++	Fn<QRect()> card;
++	Fn<QRect()> visible;
++};
++
++[[nodiscard]] bool MoneyCardStickerOn(
++	not_null<Main::Session*> session,
++	const QString &key);
++[[nodiscard]] rpl::producer<> MoneyCardStickersUpdates(
++	not_null<Main::Session*> session);
++void AddMoneyCardSticker(
++	not_null<Main::Session*> session,
++	const Data::UniqueGift &gift,
++	bool chain,
++	std::shared_ptr<MoneyCardDropTarget> target = nullptr);
++void PlaceMoneyCardSticker(
++	not_null<Main::Session*> session,
++	const Data::UniqueGift &gift,
++	bool chain,
++	QPointF center);
++void RemoveMoneyCardSticker(
++	not_null<Main::Session*> session,
++	const QString &key);
++
++void RegisterMoneyCardGiftSource(
++	not_null<Ui::RpWidget*> widget,
++	not_null<Main::Session*> session,
++	Fn<QString()> slug,
++	Fn<QRect()> model);
++
++void FillMoneyCardGiftMenu(
++	not_null<Ui::PopupMenu*> menu,
++	not_null<Main::Session*> session,
++	std::shared_ptr<Data::UniqueGift> gift,
++	bool chain,
++	std::shared_ptr<MoneyCardDropTarget> target,
++	Fn<void(MoneyCardLook)> applyColor = nullptr);
++
++[[nodiscard]] TextWithEntities MoneyCardOnCardTitle(const QString &name);
++[[nodiscard]] bool PaintMoneyCardStickerThumb(
++	QPainter &p,
++	not_null<Main::Session*> session,
++	const std::shared_ptr<Data::UniqueGift> &gift,
++	QRect rect,
++	int radius);
++void SetupMoneyCardCollectible(
++	not_null<Ui::RpWidget*> row,
++	not_null<Main::Session*> session,
++	Fn<std::shared_ptr<Data::UniqueGift>()> gift,
++	Fn<void()> refresh,
++	Fn<QRect()> model,
++	std::shared_ptr<MoneyCardDropTarget> target);
++void SetupMoneyCardGiftDrag(
++	not_null<Ui::RpWidget*> source,
++	not_null<Main::Session*> session,
++	Fn<std::shared_ptr<Data::UniqueGift>()> gift,
++	bool chain,
++	std::shared_ptr<MoneyCardDropTarget> target);
++
++class MoneyCardStickers final : public base::has_weak_ptr {
++public:
++	MoneyCardStickers(not_null<Main::Session*> session, Fn<void()> repaint);
++	~MoneyCardStickers();
++
++	[[nodiscard]] not_null<Main::Session*> session() const;
++	void paint(QPainter &p, QSize card);
++	[[nodiscard]] const MoneyCardSticker *hit(QPoint point, QSize card);
++
++private:
++	const not_null<Main::Session*> _session;
++	const Fn<void()> _repaint;
++	std::vector<MoneyCardSticker> _list;
++	rpl::lifetime _lifetime;
++
++};
++
++void SetupMoneyCardStickerDrag(
++	not_null<Ui::RpWidget*> target,
++	not_null<MoneyCardStickers*> stickers,
++	std::shared_ptr<MoneyCardDropTarget> drop);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/wallet/wallet_collectible_media.cpp b/Telegram/SourceFiles/wallet/wallet_collectible_media.cpp
+index cb8448b86326c4e3cb3dfc8e1c5962c80cfb4f08..051fe2e8251c88b4352e9a2cf3dbbccd9856f353 100644
+--- a/Telegram/SourceFiles/wallet/wallet_collectible_media.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_collectible_media.cpp
+@@ -195,6 +195,7 @@ struct CollectibleMedia::Entry {
+ 	int artworkGeneration = 0;
+ 	base::flat_map<int, QImage> prepared;
+ 	PaintRoundImageCallback giftPaint;
++	std::shared_ptr<Data::UniqueGift> unique;
+ 	std::unique_ptr<FileLoader> loader;
+ 	crl::time deadline = 0;
+ 	State state = State::None;
+@@ -493,6 +494,7 @@ void CollectibleMedia::clearArtwork(not_null<Entry*> entry) {
+ 	entry->backdrop.clear();
+ 	entry->authenticGift = false;
+ 	entry->giftPaint = nullptr;
++	entry->unique = nullptr;
+ 	entry->imageBytes.clear();
+ 	entry->prepared.clear();
+ }
+@@ -507,6 +509,7 @@ void CollectibleMedia::requestGift(
+ 			session,
+ 			unique,
+ 			[=] { _repaint.fire_copy(entry->address); });
++		entry->unique = unique;
+ 		entry->name = unique->title;
+ 		if (unique->number > 0) {
+ 			entry->number = u" #"_q
+@@ -639,6 +642,12 @@ CollectibleView CollectibleMedia::view(const QString &item) const {
+ 	};
+ }
+ 
++std::shared_ptr<Data::UniqueGift> CollectibleMedia::uniqueGift(
++		const QString &item) const {
++	const auto entry = find(item);
++	return entry ? entry->unique : nullptr;
++}
++
+ QString CollectibleMedia::collection(const QString &item) const {
+ 	const auto entry = find(item);
+ 	return entry ? entry->record.collection : QString();
+diff --git a/Telegram/SourceFiles/wallet/wallet_collectible_media.h b/Telegram/SourceFiles/wallet/wallet_collectible_media.h
+index c1c5a94f5573e73020b1a6a8f5a097e6f27b7a9b..1b342b83f8647b2ad4bd05164742c52e2801e43b 100644
+--- a/Telegram/SourceFiles/wallet/wallet_collectible_media.h
++++ b/Telegram/SourceFiles/wallet/wallet_collectible_media.h
+@@ -59,6 +59,8 @@ public:
+ 	void setListWindow(std::vector<QString> ordered);
+ 
+ 	[[nodiscard]] CollectibleView view(const QString &item) const;
++	[[nodiscard]] std::shared_ptr<Data::UniqueGift> uniqueGift(
++		const QString &item) const;
+ 	[[nodiscard]] QString collection(const QString &item) const;
+ 	void paint(
+ 		Painter &p,
+diff --git a/Telegram/SourceFiles/wallet/wallet_collectibles.cpp b/Telegram/SourceFiles/wallet/wallet_collectibles.cpp
+index 99c6fadb89d77ef1b0a96b768fee282882e20205..9e77ea9d4d8f98a2e7e88d1fa38904d7206019d0 100644
+--- a/Telegram/SourceFiles/wallet/wallet_collectibles.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_collectibles.cpp
+@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "main/session/session_show.h"
+ #include "main/main_session.h"
+ #include "settings/settings_credits_graphics.h"
++#include "tele/tele_money_stickers.h"
+ #include "ui/effects/ripple_animation.h"
+ #include "ui/layers/generic_box.h"
+ #include "ui/text/format_values.h"
+@@ -71,7 +72,8 @@ public:
+ 	CollectiblesList(
+ 		QWidget *parent,
+ 		std::shared_ptr<Main::SessionShow> show,
+-		std::shared_ptr<CollectibleMedia> media);
++		std::shared_ptr<CollectibleMedia> media,
++		std::shared_ptr<Tele::MoneyCardDropTarget> drop);
+ 
+ 	void rebuild();
+ 
+@@ -85,6 +87,7 @@ private:
+ 
+ 	const std::shared_ptr<Main::SessionShow> _show;
+ 	const std::shared_ptr<CollectibleMedia> _media;
++	const std::shared_ptr<Tele::MoneyCardDropTarget> _drop;
+ 	std::vector<QString> _addresses;
+ 	int _visibleTop = 0;
+ 	int _visibleBottom = 0;
+@@ -433,11 +436,21 @@ void AddRow(
+ 		not_null<Ui::VerticalLayout*> container,
+ 		std::shared_ptr<CollectibleMedia> media,
+ 		std::shared_ptr<Main::SessionShow> show,
+-		const Gram::NftItem &item) {
++		const Gram::NftItem &item,
++		std::shared_ptr<Tele::MoneyCardDropTarget> drop) {
+ 	const auto address = item.address;
++	const auto session = &show->session();
+ 	const auto row = container->add(
+ 		object_ptr<CollectibleRow>(container));
+ 	row->setPaintThumb([=](Painter &p, QRect rect) {
++		if (Tele::PaintMoneyCardStickerThumb(
++				p,
++				session,
++				media->uniqueGift(address),
++				rect,
++				st::walletCollectibleThumbRadius)) {
++			return;
++		}
+ 		media->paint(
+ 			p,
+ 			address,
+@@ -447,10 +460,26 @@ void AddRow(
+ 	});
+ 	const auto apply = [=] {
+ 		const auto view = media->view(address);
+-		row->setTitle(CollectibleTitleText(view));
++		const auto unique = media->uniqueGift(address);
++		row->setTitle((unique && Tele::MoneyCardStickerOn(session, unique->slug))
++			? Tele::MoneyCardOnCardTitle(view.name)
++			: CollectibleTitleText(view));
+ 		row->setSubtitle(CollectibleSubtitleText(view));
+ 	};
+ 	apply();
++	Tele::SetupMoneyCardCollectible(
++		row,
++		session,
++		[=] { return media->uniqueGift(address); },
++		apply,
++		[] {
++			return Tele::MoneyCardModelRect(QRect(
++				st::walletRowIconLeft,
++				(st::walletCollectibleRowHeight - st::walletRowIconSize) / 2,
++				st::walletRowIconSize,
++				st::walletRowIconSize));
++		},
++		drop);
+ 
+ 	const auto mine = [=](const QString &changed) {
+ 		return (changed == address);
+@@ -470,10 +499,12 @@ void AddRow(
+ CollectiblesList::CollectiblesList(
+ 	QWidget *parent,
+ 	std::shared_ptr<Main::SessionShow> show,
+-	std::shared_ptr<CollectibleMedia> media)
++	std::shared_ptr<CollectibleMedia> media,
++	std::shared_ptr<Tele::MoneyCardDropTarget> drop)
+ : VerticalLayout(parent)
+ , _show(std::move(show))
+-, _media(std::move(media)) {
++, _media(std::move(media))
++, _drop(std::move(drop)) {
+ }
+ 
+ void CollectiblesList::rebuild() {
+@@ -481,7 +512,7 @@ void CollectiblesList::rebuild() {
+ 	_addresses.clear();
+ 	const auto wallet = &_show->session().wallet();
+ 	for (const auto &item : wallet->collectibles()) {
+-		AddRow(this, _media, _show, item);
++		AddRow(this, _media, _show, item, _drop);
+ 		_addresses.push_back(item.address);
+ 	}
+ 	Ui::AddSkip(this, st::walletRowsTopSkip);
+@@ -526,12 +557,14 @@ void CollectiblesList::refreshWindow() {
+ void AddCollectiblesList(
+ 		not_null<Ui::VerticalLayout*> container,
+ 		std::shared_ptr<Main::SessionShow> show,
+-		std::shared_ptr<CollectibleMedia> media) {
++		std::shared_ptr<CollectibleMedia> media,
++		std::shared_ptr<Tele::MoneyCardDropTarget> drop) {
+ 	const auto wallet = &show->session().wallet();
+ 	const auto list = container->add(object_ptr<CollectiblesList>(
+ 		container,
+ 		std::move(show),
+-		std::move(media)));
++		std::move(media),
++		std::move(drop)));
+ 	list->rebuild();
+ 	wallet->collectiblesUpdates(
+ 	) | rpl::on_next([=] {
+diff --git a/Telegram/SourceFiles/wallet/wallet_collectibles.h b/Telegram/SourceFiles/wallet/wallet_collectibles.h
+index eda99f389f1e42fc23a6a31d1fdbbe0c6145c5a5..7fce6994977f6734e7692d164b82a28cf8eb855e 100644
+--- a/Telegram/SourceFiles/wallet/wallet_collectibles.h
++++ b/Telegram/SourceFiles/wallet/wallet_collectibles.h
+@@ -15,6 +15,10 @@ namespace Ui {
+ class VerticalLayout;
+ } // namespace Ui
+ 
++namespace Tele {
++struct MoneyCardDropTarget;
++} // namespace Tele
++
+ namespace Wallet {
+ 
+ class CollectibleMedia;
+@@ -22,6 +26,7 @@ class CollectibleMedia;
+ void AddCollectiblesList(
+ 	not_null<Ui::VerticalLayout*> container,
+ 	std::shared_ptr<Main::SessionShow> show,
+-	std::shared_ptr<CollectibleMedia> media);
++	std::shared_ptr<CollectibleMedia> media,
++	std::shared_ptr<Tele::MoneyCardDropTarget> drop = nullptr);
+ 
+ } // namespace Wallet
+diff --git a/Telegram/SourceFiles/wallet/wallet_content.cpp b/Telegram/SourceFiles/wallet/wallet_content.cpp
+index ef301e4554ed44a82708cbeabdc995b62a2fae14..755fe319b663b57b2bd8e0ee9143b08031828742 100644
+--- a/Telegram/SourceFiles/wallet/wallet_content.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_content.cpp
+@@ -60,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_lowercase.h"
+ #include "tele/tele_money_card.h"
+ #include "tele/tele_money_card_box.h"
++#include "tele/tele_money_stickers.h"
+ #include "tele/tele_options.h"
+ #include "tele/tele_wallet_address.h"
+ #include "tele/tele_wallet_keys.h"
+@@ -393,6 +394,7 @@ private:
+ 	Ui::FixedHeightWidget *_cardPlaceholder = nullptr;
+ 	Card *_card = nullptr;
+ 	Ui::AbstractButton *_cardButton = nullptr;
++	std::shared_ptr<Tele::MoneyCardDropTarget> _cardDrop;
+ 	std::unique_ptr<SendingRow> _sendingRow;
+ 	std::unique_ptr<DiamondFlight> _diamondFlight;
+ 	QRect _paintedInk;
+@@ -437,6 +439,7 @@ public:
+ 	[[nodiscard]] QPolygonF paintedOutline() const;
+ 	void invalidateCache();
+ 	void followCursor();
++	[[nodiscard]] not_null<Tele::MoneyCardStickers*> stickers() const;
+ 
+ protected:
+ 	void paintEvent(QPaintEvent *e) override;
+@@ -460,6 +463,7 @@ private:
+ 	float64 _cacheAngle = 0.;
+ 	std::unique_ptr<CardAngle> _angle;
+ 	std::unique_ptr<Tele::MoneyCardArt> _art;
++	std::unique_ptr<Tele::MoneyCardStickers> _stickers;
+ 
+ };
+ 
+@@ -14480,6 +14484,9 @@ Card::Card(
+ 		invalidateCache();
+ 		update();
+ 	}, lifetime());
++	_stickers = std::make_unique<Tele::MoneyCardStickers>(
++		&_show->session(),
++		crl::guard(this, [=] { update(); }));
+ 	Tele::ValidateMoneyCardChoice(&_show->session());
+ 	_show->session().wallet().presenceValue(
+ 	) | rpl::on_next([=](Presence) {
+@@ -14536,6 +14543,10 @@ void Card::followCursor() {
+ 	}
+ }
+ 
++not_null<Tele::MoneyCardStickers*> Card::stickers() const {
++	return _stickers.get();
++}
++
+ QRectF Card::paintedRect() const {
+ 	return _fold.quad.boundingRect().translated(-QPointF(pos()));
+ }
+@@ -14595,6 +14606,7 @@ void Card::paintEvent(QPaintEvent *e) {
+ 		auto hq = PainterHighQualityEnabler(p);
+ 		p.translate(restRect().topLeft());
+ 		paintContent(p, angle);
++		_stickers->paint(p, restRect().size());
+ 		return;
+ 	}
+ 	validateCache(angle);
+@@ -14603,13 +14615,14 @@ void Card::paintEvent(QPaintEvent *e) {
+ 	p.translate(-x(), -y());
+ 	p.setTransform(_fold.transform, true);
+ 	p.drawImage(QRectF(_fold.rest), _cache);
++	p.translate(_fold.rest.topLeft());
+ 	if (_art) {
+-		p.translate(_fold.rest.topLeft());
+ 		_art->paintModel(
+ 			p,
+ 			CardModelRect(CardQrRect(_fold.rest.width())),
+ 			CardModelPaused());
+ 	}
++	_stickers->paint(p, _fold.rest.size());
+ }
+ 
+ void Card::paintContent(Painter &p, float64 angle, bool model) {
+@@ -15272,7 +15285,7 @@ void Content::setupContent() {
+ 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+ 			column,
+ 			object_ptr<Ui::VerticalLayout>(column)));
+-	AddCollectiblesList(collectiblesWrap->entity(), _show, media);
++	AddCollectiblesList(collectiblesWrap->entity(), _show, media, _cardDrop);
+ 	collectiblesWrap->toggleOn(wallet->collectiblesTabValue());
+ 	collectiblesWrap->finishAnimating();
+ 
+@@ -15387,6 +15400,14 @@ void Content::setupPinned() {
+ 		ShowWalletReceiveBox(&_show->session(), _show);
+ 	});
+ 	_cardButton->show();
++	_cardDrop = std::make_shared<Tele::MoneyCardDropTarget>(
++		Tele::MoneyCardDropTarget{
++			.overlay = this,
++			.card = [=] {
++				return (foldProgress() > 0.) ? QRect() : cardRest();
++			},
++		});
++	Tele::SetupMoneyCardStickerDrag(_cardButton, _card->stickers(), _cardDrop);
+ 
+ 	auto ownedButtons = object_ptr<Ui::FixedHeightWidget>(
+ 		_pinnedInner,
+@@ -16953,7 +16974,8 @@ namespace {
+ 		QWidget *parent,
+ 		std::shared_ptr<Main::SessionShow> show,
+ 		std::shared_ptr<bool> markPlayed,
+-		rpl::producer<Tele::MoneyCardLook> look) {
++		rpl::producer<Tele::MoneyCardLook> look,
++		std::shared_ptr<Tele::MoneyCardDropTarget> drop = nullptr) {
+ 	auto result = object_ptr<Ui::FixedHeightWidget>(
+ 		parent,
+ 		st::walletCardHeight);
+@@ -16967,6 +16989,10 @@ namespace {
+ 		CardNameValue(&show->session()),
+ 		std::move(shared));
+ 	card->setAttribute(Qt::WA_TransparentForMouseEvents);
++	if (drop) {
++		raw->setMouseTracking(true);
++		Tele::SetupMoneyCardStickerDrag(raw, card->stickers(), drop);
++	}
+ 
+ 	const auto overlay = Ui::CreateChild<Ui::RpWidget>(raw);
+ 	overlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+@@ -17152,12 +17178,14 @@ void FillMenu(
+ 					&show->session(),
+ 					[=](
+ 							not_null<QWidget*> parent,
+-							rpl::producer<Tele::MoneyCardLook> look) {
++							rpl::producer<Tele::MoneyCardLook> look,
++							std::shared_ptr<Tele::MoneyCardDropTarget> drop) {
+ 						return MakeWalletCardWith(
+ 							parent,
+ 							show,
+ 							std::make_shared<bool>(),
+-							std::move(look));
++							std::move(look),
++							std::move(drop));
+ 					}));
+ 			},
+ 			&st::menuIconPalette);

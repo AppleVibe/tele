@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Thu, 15 Oct 2026 19:12:16 +0300
+Subject: [PATCH] fix: confirm stickers sent from sticker set boxes
+
+---
+ Telegram/SourceFiles/boxes/sticker_set_box.cpp | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/Telegram/SourceFiles/boxes/sticker_set_box.cpp b/Telegram/SourceFiles/boxes/sticker_set_box.cpp
+index 9d6779ac7e11cf3540e48c06276038407330a837..1b43e161e937624f98e673dfdf3c01a4c7b26555 100644
+--- a/Telegram/SourceFiles/boxes/sticker_set_box.cpp
++++ b/Telegram/SourceFiles/boxes/sticker_set_box.cpp
+@@ -68,6 +68,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "ui/rect.h"
+ #include "ui/vertical_list.h"
+ #include "window/window_session_controller.h"
++#include "tele/tele_confirm_send.h"
+ #include "tele/tele_peer_id.h"
+ #include "tele/tele_view_tl.h"
+ #include "styles/style_chat.h"
+@@ -1712,6 +1713,9 @@ void StickerSetBox::Inner::mouseReleaseEvent(QMouseEvent *e) {
+ 	const auto document = elementDocument(index);
+ 	if (!document) {
+ 		return;
++	} else if (_show->sendMenuDetails().type != SendMenu::Type::Disabled
++		&& !Tele::SuggestionClickConfirmed(this, document)) {
++		return;
+ 	}
+ 	chosen(index, document, {});
+ }
+@@ -2390,6 +2394,11 @@ void StickerSetBox::Inner::paintSticker(
+ 				Ui::StickerHoverCorners);
+ 			p.setOpacity(1);
+ 		}
++		Tele::PaintSendSelection(
++			p,
++			this,
++			_elements[index].document.get(),
++			style::rtlrect(QRect(position, _singleSize), width()));
+ 	}
+ 
+ 	const auto hasShake = _shakeAnimation.animating();

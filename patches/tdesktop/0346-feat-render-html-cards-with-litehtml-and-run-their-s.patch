@@ -1,0 +1,2226 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Tue, 13 Oct 2026 21:26:55 +0300
+Subject: [PATCH] feat: render html cards with litehtml and run their scripts
+ in quickjs
+
+---
+ Telegram/CMakeLists.txt                       |    4 +
+ Telegram/SourceFiles/tele/tele_html.cpp       | 1310 +++++++++++++++++
+ Telegram/SourceFiles/tele/tele_html.h         |   77 +
+ .../SourceFiles/tele/tele_html_script.cpp     |  698 +++++++++
+ Telegram/SourceFiles/tele/tele_html_script.h  |   84 ++
+ 5 files changed, 2173 insertions(+)
+ create mode 100644 Telegram/SourceFiles/tele/tele_html.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_html.h
+ create mode 100644 Telegram/SourceFiles/tele/tele_html_script.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_html_script.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index ecae7e469c39a83cc87dce256377470f48120631..0fb1be1065ad0d7f7bedcd9e07999245c64d0142 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2622,6 +2622,10 @@ PRIVATE
+     tele/tele_ghost_pending.h
+     tele/tele_hidden_words.cpp
+     tele/tele_hidden_words.h
++    tele/tele_html.cpp
++    tele/tele_html.h
++    tele/tele_html_script.cpp
++    tele/tele_html_script.h
+     tele/tele_ignored.cpp
+     tele/tele_ignored.h
+     tele/tele_inline_text.cpp
+diff --git a/Telegram/SourceFiles/tele/tele_html.cpp b/Telegram/SourceFiles/tele/tele_html.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..555ee07beafc72b27cfc26c1bd202783f5b0bacd
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html.cpp
+@@ -0,0 +1,1310 @@
++#include "tele/tele_html.h"
++
++#include "base/flat_map.h"
++#include "base/flat_set.h"
++#include "ui/style/style_core.h"
++
++#include <litehtml.h>
++#include <litehtml/render_item.h>
++
++#include <deque>
++
++#include <QtCore/QBuffer>
++#include <QtCore/QRegularExpression>
++#include <QtGui/QImageReader>
++#include <QtGui/QPainterPath>
++#include <QtSvg/QSvgRenderer>
++
++namespace Tele::Html {
++namespace {
++
++constexpr auto kDefaultFontSize = 14;
++constexpr auto kMaxImages = 64;
++constexpr auto kMaxImageBytes = 4 * 1024 * 1024;
++constexpr auto kMaxImageSide = 4096;
++constexpr auto kMaxImagePixels = int64(4096) * 4096;
++constexpr auto kMaxDocumentPixels = int64(48) * 1024 * 1024;
++constexpr auto kMaxDepth = 256;
++constexpr auto kMaxElements = 5000;
++
++using litehtml::pixel_t;
++
++[[nodiscard]] float F(pixel_t value) {
++	return value.value();
++}
++
++[[nodiscard]] QColor ToColor(const litehtml::web_color &color) {
++	return QColor(color.red, color.green, color.blue, color.alpha);
++}
++
++[[nodiscard]] QRectF ToRect(const litehtml::position &position) {
++	return QRectF(
++		F(position.x),
++		F(position.y),
++		F(position.width),
++		F(position.height));
++}
++
++[[nodiscard]] QString Utf8(const char *text) {
++	return text ? QString::fromUtf8(text) : QString();
++}
++
++[[nodiscard]] QString CssColor(const QColor &color) {
++	return u"rgba(%1,%2,%3,%4)"_q
++		.arg(color.red())
++		.arg(color.green())
++		.arg(color.blue())
++		.arg(QString::number(color.alphaF(), 'f', 3));
++}
++
++[[nodiscard]] QColor WithAlpha(QColor color, float64 alpha) {
++	color.setAlphaF(alpha);
++	return color;
++}
++
++[[nodiscard]] QPainterPath RoundedPath(
++		const QRectF &rect,
++		const litehtml::border_radiuses &radius) {
++	auto path = QPainterPath();
++	const auto tlx = std::min(double(F(radius.top_left_x)), rect.width() / 2);
++	const auto tly = std::min(double(F(radius.top_left_y)), rect.height() / 2);
++	const auto trx = std::min(double(F(radius.top_right_x)), rect.width() / 2);
++	const auto try_ = std::min(double(F(radius.top_right_y)), rect.height() / 2);
++	const auto brx = std::min(double(F(radius.bottom_right_x)), rect.width() / 2);
++	const auto bry = std::min(double(F(radius.bottom_right_y)), rect.height() / 2);
++	const auto blx = std::min(double(F(radius.bottom_left_x)), rect.width() / 2);
++	const auto bly = std::min(double(F(radius.bottom_left_y)), rect.height() / 2);
++	if (tlx <= 0 && tly <= 0 && trx <= 0 && try_ <= 0
++		&& brx <= 0 && bry <= 0 && blx <= 0 && bly <= 0) {
++		path.addRect(rect);
++		return path;
++	}
++	const auto l = rect.left();
++	const auto t = rect.top();
++	const auto r = rect.right();
++	const auto b = rect.bottom();
++	path.moveTo(l + tlx, t);
++	path.lineTo(r - trx, t);
++	if (trx > 0 && try_ > 0) {
++		path.arcTo(QRectF(r - 2 * trx, t, 2 * trx, 2 * try_), 90, -90);
++	}
++	path.lineTo(r, b - bry);
++	if (brx > 0 && bry > 0) {
++		path.arcTo(QRectF(r - 2 * brx, b - 2 * bry, 2 * brx, 2 * bry), 0, -90);
++	}
++	path.lineTo(l + blx, b);
++	if (blx > 0 && bly > 0) {
++		path.arcTo(QRectF(l, b - 2 * bly, 2 * blx, 2 * bly), 270, -90);
++	}
++	path.lineTo(l, t + tly);
++	if (tlx > 0 && tly > 0) {
++		path.arcTo(QRectF(l, t, 2 * tlx, 2 * tly), 180, -90);
++	}
++	path.closeSubpath();
++	return path;
++}
++
++[[nodiscard]] bool Square(const litehtml::border_radiuses &radius) {
++	return (F(radius.top_left_x) <= 0.f || F(radius.top_left_y) <= 0.f)
++		&& (F(radius.top_right_x) <= 0.f || F(radius.top_right_y) <= 0.f)
++		&& (F(radius.bottom_right_x) <= 0.f
++			|| F(radius.bottom_right_y) <= 0.f)
++		&& (F(radius.bottom_left_x) <= 0.f
++			|| F(radius.bottom_left_y) <= 0.f);
++}
++
++[[nodiscard]] litehtml::border_radiuses Shrink(
++		litehtml::border_radiuses radius,
++		const litehtml::borders &borders) {
++	const auto sub = [](pixel_t &value, pixel_t by) {
++		value = std::max(0.f, F(value) - F(by));
++	};
++	sub(radius.top_left_x, borders.left.width);
++	sub(radius.top_left_y, borders.top.width);
++	sub(radius.top_right_x, borders.right.width);
++	sub(radius.top_right_y, borders.top.width);
++	sub(radius.bottom_right_x, borders.right.width);
++	sub(radius.bottom_right_y, borders.bottom.width);
++	sub(radius.bottom_left_x, borders.left.width);
++	sub(radius.bottom_left_y, borders.bottom.width);
++	return radius;
++}
++
++[[nodiscard]] QString ReplaceLightDark(const QString &css, bool dark) {
++	static const auto open = u"light-dark("_q;
++	auto result = QString();
++	result.reserve(css.size());
++	auto from = 0;
++	while (true) {
++		const auto index = css.indexOf(open, from, Qt::CaseInsensitive);
++		if (index < 0) {
++			result.append(QStringView(css).mid(from));
++			break;
++		}
++		result.append(QStringView(css).mid(from, index - from));
++		auto depth = 1;
++		auto comma = -1;
++		auto i = index + open.size();
++		for (; i < css.size() && depth > 0; ++i) {
++			const auto ch = css[i];
++			if (ch == '(') {
++				++depth;
++			} else if (ch == ')') {
++				--depth;
++			} else if (ch == ',' && depth == 1 && comma < 0) {
++				comma = i;
++			}
++		}
++		const auto end = i - 1;
++		const auto start = index + open.size();
++		if (depth != 0 || comma < 0) {
++			result.append(QStringView(css).mid(index));
++			break;
++		}
++		const auto value = dark
++			? css.mid(comma + 1, end - comma - 1)
++			: css.mid(start, comma - start);
++		result.append(ReplaceLightDark(value.trimmed(), dark));
++		from = i;
++	}
++	return result;
++}
++
++struct FontBase {
++	QFont font;
++	QFontMetricsF metrics;
++};
++
++struct FontHandle {
++	not_null<const FontBase*> base;
++	int decoration = 0;
++	QColor decorationColor;
++	bool currentDecorationColor = true;
++};
++
++struct Image {
++	QImage raster;
++	std::unique_ptr<QSvgRenderer> svg;
++	QSize size;
++};
++
++[[nodiscard]] std::optional<QByteArray> DecodeData(const QString &url) {
++	if (!url.startsWith(u"data:"_q, Qt::CaseInsensitive)) {
++		return std::nullopt;
++	}
++	const auto comma = url.indexOf(',');
++	if (comma < 0) {
++		return std::nullopt;
++	}
++	const auto header = url.mid(5, comma - 5);
++	const auto payload = url.mid(comma + 1).toUtf8();
++	if (payload.size() > kMaxImageBytes * 2) {
++		return std::nullopt;
++	}
++	if (header.endsWith(u";base64"_q, Qt::CaseInsensitive)) {
++		return QByteArray::fromBase64(QByteArray::fromPercentEncoding(payload));
++	}
++	return QByteArray::fromPercentEncoding(payload);
++}
++
++[[nodiscard]] QString AppAsset(const QString &name) {
++	if (name == u"logo"_q) {
++		return u":/gui/art/logo_256_no_margin.png"_q;
++	} else if (name == u"tele"_q) {
++		return u":/gui/art/tele_userpic.jpg"_q;
++	}
++	return QString();
++}
++
++[[nodiscard]] Image LoadImage(const QString &url) {
++	auto result = Image();
++	auto bytes = QByteArray();
++	if (url.startsWith(u"app:"_q, Qt::CaseInsensitive)) {
++		const auto path = AppAsset(url.mid(4).trimmed().toLower());
++		if (!path.isEmpty()) {
++			result.raster = QImage(path);
++		}
++	} else if (const auto data = DecodeData(url)) {
++		bytes = *data;
++		const auto svg = url.mid(5, 16).startsWith(
++			u"image/svg"_q,
++			Qt::CaseInsensitive)
++			|| bytes.trimmed().startsWith("<svg")
++			|| bytes.trimmed().startsWith("<?xml");
++		static const auto external = QRegularExpression(
++			u"<image\\b[^>]*\\bhref\\s*=\\s*[\"'](?!data:)"_q,
++			QRegularExpression::CaseInsensitiveOption);
++		if (svg && QString::fromUtf8(bytes).contains(external)) {
++			return result;
++		} else if (svg) {
++			auto renderer = std::make_unique<QSvgRenderer>(bytes);
++			if (renderer->isValid()) {
++				result.size = renderer->defaultSize();
++				result.svg = std::move(renderer);
++			}
++		} else if (bytes.size() <= kMaxImageBytes) {
++			auto buffer = QBuffer(&bytes);
++			buffer.open(QIODevice::ReadOnly);
++			auto reader = QImageReader(&buffer);
++			const auto size = reader.size();
++			if (size.isValid()
++				&& (int64(size.width()) * size.height() <= kMaxImagePixels)) {
++				if (size.width() > kMaxImageSide
++					|| size.height() > kMaxImageSide) {
++					reader.setScaledSize(size.scaled(
++						kMaxImageSide,
++						kMaxImageSide,
++						Qt::KeepAspectRatio));
++				}
++				result.raster = reader.read();
++			}
++		}
++	}
++	if (!result.raster.isNull()) {
++		if (result.raster.width() > kMaxImageSide
++			|| result.raster.height() > kMaxImageSide) {
++			result.raster = result.raster.scaled(
++				kMaxImageSide,
++				kMaxImageSide,
++				Qt::KeepAspectRatio,
++				Qt::SmoothTransformation);
++		}
++		result.raster = result.raster.convertToFormat(
++			QImage::Format_ARGB32_Premultiplied);
++		result.size = result.raster.size();
++	}
++	return result;
++}
++
++} // namespace
++
++class Container final : public litehtml::document_container {
++public:
++	explicit Container(const Scheme &scheme) : _scheme(scheme) {
++	}
++
++	void setWidth(int width) {
++		_width = width;
++	}
++	void setPainter(QPainter *p) {
++		_painter = p;
++	}
++
++	litehtml::uint_ptr create_font(
++			const litehtml::font_description &descr,
++			const litehtml::document *doc,
++			litehtml::font_metrics *fm) override {
++		const auto family = Utf8(descr.family.c_str()).toLower();
++		const auto mono = family.contains(u"mono"_q)
++			|| family.contains(u"courier"_q)
++			|| family.contains(u"consol"_q)
++			|| family.contains(u"menlo"_q);
++		const auto bold = (descr.weight >= 600);
++		const auto italic = (descr.style == litehtml::font_style_italic);
++		auto flags = style::FontFlags();
++		if (mono) {
++			flags = style::FontFlag::Monospace;
++		} else {
++			if (bold) {
++				flags |= style::FontFlag::Bold;
++			}
++			if (italic) {
++				flags |= style::FontFlag::Italic;
++			}
++		}
++		const auto size = std::clamp(
++			int(std::round(F(descr.size))),
++			1,
++			512);
++		static auto bases = std::map<uint32, std::unique_ptr<FontBase>>();
++		const auto key = (uint32(size) << 8)
++			| (uint32(flags.value()) << 2)
++			| (bold ? 2U : 0U)
++			| (italic ? 1U : 0U);
++		auto &base = bases[key];
++		if (!base) {
++			auto font = style::font(size, flags, 0)->f;
++			if (mono) {
++				font.setBold(bold);
++				font.setItalic(italic);
++			}
++			font.setHintingPreference(QFont::PreferNoHinting);
++			base = std::make_unique<FontBase>(FontBase{
++				.font = font,
++				.metrics = QFontMetricsF(font),
++			});
++		}
++		auto handle = new FontHandle{
++			.base = base.get(),
++			.decoration = descr.decoration_line,
++			.decorationColor = ToColor(descr.decoration_color),
++			.currentDecorationColor = descr.decoration_color.is_current_color,
++		};
++		if (fm) {
++			const auto &m = handle->base->metrics;
++			fm->font_size = float(size);
++			fm->ascent = float(m.ascent());
++			fm->descent = float(m.descent());
++			fm->height = float(m.height());
++			fm->x_height = float(m.xHeight());
++			fm->ch_width = float(m.horizontalAdvance(QChar('0')));
++			fm->draw_spaces = (handle->decoration != 0);
++			fm->sub_shift = float(size / 5.);
++			fm->super_shift = float(size / 3.);
++		}
++		_fonts.emplace(handle);
++		return reinterpret_cast<litehtml::uint_ptr>(handle);
++	}
++
++	void delete_font(litehtml::uint_ptr hFont) override {
++		const auto handle = reinterpret_cast<FontHandle*>(hFont);
++		if (_fonts.remove(handle)) {
++			delete handle;
++		}
++	}
++
++	~Container() {
++		for (const auto handle : base::take(_fonts)) {
++			delete handle;
++		}
++	}
++
++	pixel_t text_width(const char *text, litehtml::uint_ptr hFont) override {
++		const auto handle = reinterpret_cast<FontHandle*>(hFont);
++		return float(handle->base->metrics.horizontalAdvance(Utf8(text)));
++	}
++
++	void draw_text(
++			litehtml::uint_ptr hdc,
++			const char *text,
++			litehtml::uint_ptr hFont,
++			litehtml::web_color color,
++			const litehtml::position &pos) override {
++		const auto p = reinterpret_cast<QPainter*>(hdc);
++		const auto handle = reinterpret_cast<FontHandle*>(hFont);
++		const auto string = Utf8(text);
++		withClips(p, [&] {
++			const auto fg = ToColor(color);
++			p->setFont(handle->base->font);
++			p->setPen(fg);
++			const auto baseline = F(pos.y) + handle->base->metrics.ascent();
++			p->drawText(QPointF(F(pos.x), baseline), string);
++			if (handle->decoration) {
++				const auto line = handle->currentDecorationColor
++					? fg
++					: handle->decorationColor;
++				const auto width = handle->base->metrics.horizontalAdvance(string);
++				const auto thickness = std::max(
++					1.,
++					handle->base->metrics.lineWidth());
++				const auto draw = [&](qreal y) {
++					p->fillRect(
++						QRectF(F(pos.x), y, width, thickness),
++						line);
++				};
++				using namespace litehtml;
++				if (handle->decoration & text_decoration_line_underline) {
++					draw(baseline + handle->base->metrics.underlinePos());
++				}
++				if (handle->decoration & text_decoration_line_line_through) {
++					draw(baseline - handle->base->metrics.strikeOutPos());
++				}
++				if (handle->decoration & text_decoration_line_overline) {
++					draw(baseline - handle->base->metrics.overlinePos());
++				}
++			}
++		});
++	}
++
++	pixel_t pt_to_px(float pt) const override {
++		return pt * 96.f / 72.f;
++	}
++	pixel_t get_default_font_size() const override {
++		return float(kDefaultFontSize);
++	}
++	const char *get_default_font_name() const override {
++		return "sans-serif";
++	}
++
++	void draw_list_marker(
++			litehtml::uint_ptr hdc,
++			const litehtml::list_marker &marker) override {
++		const auto p = reinterpret_cast<QPainter*>(hdc);
++		const auto rect = ToRect(marker.pos);
++		const auto color = ToColor(marker.color);
++		withClips(p, [&] {
++			using namespace litehtml;
++			if (!marker.image.empty()) {
++				drawImageAt(p, Utf8(marker.image.c_str()), rect);
++				return;
++			}
++			p->setRenderHint(QPainter::Antialiasing);
++			switch (marker.marker_type) {
++			case list_style_type_circle:
++				p->setPen(QPen(color, 1.));
++				p->setBrush(Qt::NoBrush);
++				p->drawEllipse(rect.adjusted(0.5, 0.5, -0.5, -0.5));
++				break;
++			case list_style_type_disc:
++				p->setPen(Qt::NoPen);
++				p->setBrush(color);
++				p->drawEllipse(rect);
++				break;
++			case list_style_type_square:
++				p->fillRect(rect, color);
++				break;
++			default:
++				if (marker.font) {
++					const auto handle = reinterpret_cast<FontHandle*>(
++						marker.font);
++					const auto text = QString::number(marker.index) + '.';
++					const auto width = handle->base->metrics.horizontalAdvance(
++						text);
++					p->setFont(handle->base->font);
++					p->setPen(color);
++					p->drawText(
++						QPointF(
++							rect.x() + rect.width() - width,
++							rect.y() + handle->base->metrics.ascent()),
++						text);
++				}
++				break;
++			}
++		});
++	}
++
++	void load_image(
++			const char *src,
++			const char *baseurl,
++			bool redraw_on_ready) override {
++		image(Utf8(src));
++	}
++
++	void get_image_size(
++			const char *src,
++			const char *baseurl,
++			litehtml::size &sz) override {
++		const auto found = image(Utf8(src));
++		sz.width = found ? found->size.width() : 0;
++		sz.height = found ? found->size.height() : 0;
++	}
++
++	void draw_image(
++			litehtml::uint_ptr hdc,
++			const litehtml::background_layer &layer,
++			const std::string &url,
++			const std::string &base_url) override {
++		const auto p = reinterpret_cast<QPainter*>(hdc);
++		const auto found = image(Utf8(url.c_str()));
++		if (!found) {
++			return;
++		}
++		withLayer(p, layer, [&] {
++			const auto origin = ToRect(layer.origin_box);
++			if (origin.width() <= 0 || origin.height() <= 0) {
++				return;
++			}
++			using namespace litehtml;
++			if (layer.repeat == background_repeat_no_repeat) {
++				drawImage(p, *found, origin);
++				return;
++			}
++			const auto clip = ToRect(layer.clip_box);
++			const auto repeatX = (layer.repeat != background_repeat_repeat_y);
++			const auto repeatY = (layer.repeat != background_repeat_repeat_x);
++			if (origin.width() < 1. || origin.height() < 1.) {
++				return;
++			}
++			const auto back = [](qreal from, qreal edge, qreal step) {
++				return (from > edge)
++					? (from - std::ceil((from - edge) / step) * step)
++					: from;
++			};
++			const auto startX = repeatX
++				? back(origin.x(), clip.x(), origin.width())
++				: origin.x();
++			const auto startY = repeatY
++				? back(origin.y(), clip.y(), origin.height())
++				: origin.y();
++			auto count = 0;
++			for (auto y = startY
++				; (repeatY ? (y < clip.bottom()) : (y == startY))
++				; y += origin.height()) {
++				for (auto x = startX
++					; (repeatX ? (x < clip.right()) : (x == startX))
++					; x += origin.width()) {
++					drawImage(
++						p,
++						*found,
++						QRectF(x, y, origin.width(), origin.height()));
++					if (++count > 4096) {
++						return;
++					}
++				}
++			}
++		});
++	}
++
++	void draw_solid_fill(
++			litehtml::uint_ptr hdc,
++			const litehtml::background_layer &layer,
++			const litehtml::web_color &color) override {
++		const auto p = reinterpret_cast<QPainter*>(hdc);
++		if (!color.alpha) {
++			return;
++		}
++		withClips(p, [&] {
++			const auto box = ToRect(layer.border_box);
++			const auto clip = ToRect(layer.clip_box);
++			if (Square(layer.border_radius)) {
++				p->fillRect(box.intersected(clip), ToColor(color));
++				return;
++			}
++			p->setRenderHint(QPainter::Antialiasing);
++			p->setClipRect(clip, Qt::IntersectClip);
++			p->fillPath(RoundedPath(box, layer.border_radius), ToColor(color));
++		});
++	}
++
++	void draw_linear_gradient(
++			litehtml::uint_ptr hdc,
++			const litehtml::background_layer &layer,
++			const litehtml::background_layer::linear_gradient &gradient)
++			override {
++		const auto p = reinterpret_cast<QPainter*>(hdc);
++		auto brush = QLinearGradient(
++			QPointF(gradient.start.x, gradient.start.y),
++			QPointF(gradient.end.x, gradient.end.y));
++		for (const auto &point : gradient.color_points) {
++			brush.setColorAt(
++				std::clamp(double(point.offset), 0., 1.),
++				ToColor(point.color));
++		}
++		fillLayer(p, layer, QBrush(brush));
++	}
++
++	void draw_radial_gradient(
++			litehtml::uint_ptr hdc,
++			const litehtml::background_layer &layer,
++			const litehtml::background_layer::radial_gradient &gradient)
++			override {
++		const auto p = reinterpret_cast<QPainter*>(hdc);
++		const auto rx = std::max(0.01f, gradient.radius.x);
++		const auto ry = std::max(0.01f, gradient.radius.y);
++		auto brush = QRadialGradient(QPointF(0, 0), rx);
++		for (const auto &point : gradient.color_points) {
++			brush.setColorAt(
++				std::clamp(double(point.offset), 0., 1.),
++				ToColor(point.color));
++		}
++		auto result = QBrush(brush);
++		auto transform = QTransform();
++		transform.translate(gradient.position.x, gradient.position.y);
++		transform.scale(1., ry / rx);
++		result.setTransform(transform);
++		fillLayer(p, layer, result);
++	}
++
++	void draw_conic_gradient(
++			litehtml::uint_ptr hdc,
++			const litehtml::background_layer &layer,
++			const litehtml::background_layer::conic_gradient &gradient)
++			override {
++		const auto p = reinterpret_cast<QPainter*>(hdc);
++		auto brush = QConicalGradient(
++			QPointF(gradient.position.x, gradient.position.y),
++			90. - gradient.angle);
++		for (const auto &point : gradient.color_points) {
++			brush.setColorAt(
++				std::clamp(1. - double(point.offset), 0., 1.),
++				ToColor(point.color));
++		}
++		fillLayer(p, layer, QBrush(brush));
++	}
++
++	void draw_borders(
++			litehtml::uint_ptr hdc,
++			const litehtml::borders &borders,
++			const litehtml::position &draw_pos,
++			bool root) override {
++		const auto p = reinterpret_cast<QPainter*>(hdc);
++		const auto rect = ToRect(draw_pos);
++		const auto visible = [](const litehtml::border &border) {
++			return (F(border.width) > 0.f)
++				&& (border.style != litehtml::border_style_none)
++				&& (border.style != litehtml::border_style_hidden)
++				&& border.color.alpha;
++		};
++		const auto l = visible(borders.left);
++		const auto t = visible(borders.top);
++		const auto r = visible(borders.right);
++		const auto b = visible(borders.bottom);
++		if (!l && !t && !r && !b) {
++			return;
++		}
++		withClips(p, [&] {
++			p->setRenderHint(QPainter::Antialiasing);
++			const auto same = l && t && r && b
++				&& borders.left.color == borders.top.color
++				&& borders.left.color == borders.right.color
++				&& borders.left.color == borders.bottom.color;
++			const auto inner = rect.adjusted(
++				F(borders.left.width),
++				F(borders.top.width),
++				-F(borders.right.width),
++				-F(borders.bottom.width));
++			auto ring = RoundedPath(rect, borders.radius);
++			if (inner.width() > 0 && inner.height() > 0) {
++				ring.addPath(RoundedPath(inner, Shrink(borders.radius, borders)));
++			}
++			ring.setFillRule(Qt::OddEvenFill);
++			if (same) {
++				p->fillPath(ring, ToColor(borders.top.color));
++				return;
++			}
++			const auto side = [&](
++					bool shown,
++					const litehtml::border &border,
++					QPolygonF polygon) {
++				if (!shown) {
++					return;
++				}
++				auto path = QPainterPath();
++				path.addPolygon(polygon);
++				path.closeSubpath();
++				p->save();
++				p->setClipPath(path, Qt::IntersectClip);
++				p->fillPath(ring, ToColor(border.color));
++				p->restore();
++			};
++			side(t, borders.top, QPolygonF({
++				rect.topLeft(),
++				rect.topRight(),
++				inner.topRight(),
++				inner.topLeft(),
++			}));
++			side(b, borders.bottom, QPolygonF({
++				rect.bottomLeft(),
++				rect.bottomRight(),
++				inner.bottomRight(),
++				inner.bottomLeft(),
++			}));
++			side(l, borders.left, QPolygonF({
++				rect.topLeft(),
++				inner.topLeft(),
++				inner.bottomLeft(),
++				rect.bottomLeft(),
++			}));
++			side(r, borders.right, QPolygonF({
++				rect.topRight(),
++				inner.topRight(),
++				inner.bottomRight(),
++				rect.bottomRight(),
++			}));
++		});
++	}
++
++	void set_caption(const char *caption) override {
++	}
++	void set_base_url(const char *base_url) override {
++	}
++	void link(
++			const std::shared_ptr<litehtml::document> &doc,
++			const litehtml::element::ptr &el) override {
++	}
++	void on_anchor_click(
++			const char *url,
++			const litehtml::element::ptr &el) override {
++	}
++	void on_mouse_event(
++			const litehtml::element::ptr &el,
++			litehtml::mouse_event event) override {
++	}
++	void set_cursor(const char *cursor) override {
++		_cursor = Utf8(cursor);
++	}
++	void transform_text(
++			std::string &text,
++			litehtml::text_transform tt) override {
++		auto string = QString::fromStdString(text);
++		switch (tt) {
++		case litehtml::text_transform_uppercase:
++			string = string.toUpper();
++			break;
++		case litehtml::text_transform_lowercase:
++			string = string.toLower();
++			break;
++		case litehtml::text_transform_capitalize:
++			for (auto i = 0; i < string.size(); ++i) {
++				if (!i || string[i - 1].isSpace()) {
++					string[i] = string[i].toUpper();
++				}
++			}
++			break;
++		default:
++			return;
++		}
++		text = string.toStdString();
++	}
++	void import_css(
++			std::string &text,
++			const std::string &url,
++			std::string &baseurl) override {
++		text.clear();
++	}
++	void set_clip(
++			const litehtml::position &pos,
++			const litehtml::border_radiuses &bdr_radius) override {
++		_clips.push_back(RoundedPath(ToRect(pos), bdr_radius));
++	}
++	void del_clip() override {
++		if (!_clips.empty()) {
++			_clips.pop_back();
++		}
++	}
++	void get_viewport(litehtml::position &viewport) const override {
++		viewport = litehtml::position(0, 0, float(_width), 100000.f);
++	}
++	litehtml::element::ptr create_element(
++			const char *tag_name,
++			const litehtml::string_map &attributes,
++			const std::shared_ptr<litehtml::document> &doc) override {
++		return nullptr;
++	}
++	void get_media_features(litehtml::media_features &media) const override {
++		media.type = litehtml::media_type_screen;
++		media.width = float(_width);
++		media.height = 100000.f;
++		media.device_width = float(_width);
++		media.device_height = 100000.f;
++		media.color = 8;
++		media.color_index = 256;
++		media.monochrome = 0;
++		media.resolution = 96.f;
++	}
++	void get_language(std::string &language, std::string &culture) const override {
++		language = "en";
++		culture.clear();
++	}
++
++	[[nodiscard]] const QString &cursor() const {
++		return _cursor;
++	}
++	void clearClips() {
++		_clips.clear();
++	}
++
++private:
++	template <typename Callback>
++	void withClips(QPainter *p, Callback &&callback) {
++		p->save();
++		for (const auto &clip : _clips) {
++			p->setClipPath(clip, Qt::IntersectClip);
++		}
++		callback();
++		p->restore();
++	}
++
++	template <typename Callback>
++	void withLayer(
++			QPainter *p,
++			const litehtml::background_layer &layer,
++			Callback &&callback) {
++		withClips(p, [&] {
++			p->setRenderHint(QPainter::Antialiasing);
++			p->setRenderHint(QPainter::SmoothPixmapTransform);
++			p->setClipPath(
++				RoundedPath(ToRect(layer.border_box), layer.border_radius),
++				Qt::IntersectClip);
++			p->setClipRect(ToRect(layer.clip_box), Qt::IntersectClip);
++			callback();
++		});
++	}
++
++	void fillLayer(
++			QPainter *p,
++			const litehtml::background_layer &layer,
++			const QBrush &brush) {
++		withLayer(p, layer, [&] {
++			p->fillRect(ToRect(layer.clip_box), brush);
++		});
++	}
++
++	void drawImage(QPainter *p, const Image &image, const QRectF &rect) {
++		if (image.svg) {
++			image.svg->render(p, rect);
++		} else if (!image.raster.isNull()) {
++			p->drawImage(rect, image.raster);
++		}
++	}
++
++	void drawImageAt(QPainter *p, const QString &url, const QRectF &rect) {
++		if (const auto found = image(url)) {
++			drawImage(p, *found, rect);
++		}
++	}
++
++	const Image *image(const QString &url) {
++		const auto i = _images.find(url);
++		if (i != end(_images)) {
++			return (i->second.svg || !i->second.raster.isNull())
++				? &i->second
++				: nullptr;
++		}
++		if (_images.size() >= kMaxImages) {
++			return nullptr;
++		}
++		auto loaded = LoadImage(url);
++		const auto pixels = int64(loaded.raster.width())
++			* loaded.raster.height();
++		if (_pixels + pixels > kMaxDocumentPixels) {
++			loaded = Image();
++		} else {
++			_pixels += pixels;
++		}
++		const auto j = _images.emplace(url, std::move(loaded)).first;
++		return (j->second.svg || !j->second.raster.isNull())
++			? &j->second
++			: nullptr;
++	}
++
++	Scheme _scheme;
++	int _width = 0;
++	QPainter *_painter = nullptr;
++	base::flat_set<FontHandle*> _fonts;
++	std::map<QString, Image> _images;
++	int64 _pixels = 0;
++	std::vector<QPainterPath> _clips;
++	QString _cursor;
++
++};
++
++uint64 Scheme::key() const {
++	auto result = uint64(dark ? 1 : 0);
++	const auto mix = [&](const QColor &color) {
++		result = result * 1000003ULL + uint64(color.rgba());
++	};
++	mix(fg);
++	mix(muted);
++	mix(card);
++	mix(border);
++	mix(link);
++	mix(accent);
++	return result;
++}
++
++ParsedCard ParseCard(const QString &source) {
++	auto result = ParsedCard();
++	static const auto comments = QRegularExpression(
++		u"<!--[\\s\\S]*?-->"_q);
++	static const auto scripts = QRegularExpression(
++		u"<script\\b([^>]*)>([\\s\\S]*?)</script\\s*>"_q,
++		QRegularExpression::CaseInsensitiveOption);
++	static const auto styles = QRegularExpression(
++		u"<style\\b[^>]*>([\\s\\S]*?)</style\\s*>"_q,
++		QRegularExpression::CaseInsensitiveOption);
++	static const auto widget = QRegularExpression(
++		u"^<div\\b[^>]*\\bclass\\s*=\\s*[\"'][^\"']*\\bwidget\\b"_q,
++		QRegularExpression::CaseInsensitiveOption);
++	static const auto src = QRegularExpression(
++		u"\\bsrc\\s*="_q,
++		QRegularExpression::CaseInsensitiveOption);
++	auto text = source;
++	text.remove(comments);
++	auto iterator = scripts.globalMatch(text);
++	while (iterator.hasNext()) {
++		const auto match = iterator.next();
++		if (match.captured(1).contains(src)) {
++			result.external = true;
++		} else if (!match.captured(2).trimmed().isEmpty()) {
++			result.scripts.push_back(match.captured(2));
++		}
++	}
++	text.remove(scripts);
++	auto styleIterator = styles.globalMatch(text);
++	while (styleIterator.hasNext()) {
++		result.styles.append(styleIterator.next().captured(1));
++		result.styles.append('\n');
++	}
++	text.remove(styles);
++	result.body = text.trimmed();
++	result.bubble = widget.match(result.body).hasMatch();
++	return result;
++}
++
++QString CheckMarkup(const QString &html) {
++	static const auto voids = base::flat_set<QString>{
++		u"area"_q, u"base"_q, u"br"_q, u"col"_q, u"embed"_q, u"hr"_q,
++		u"img"_q, u"input"_q, u"link"_q, u"meta"_q, u"param"_q,
++		u"source"_q, u"track"_q, u"wbr"_q,
++	};
++	auto depth = 0;
++	auto count = 0;
++	const auto size = int(html.size());
++	for (auto i = 0; i < size; ++i) {
++		if (html[i] != '<' || i + 1 >= size) {
++			continue;
++		} else if (html[i + 1] == '/') {
++			depth = std::max(depth - 1, 0);
++			continue;
++		} else if (!html[i + 1].isLetter()) {
++			continue;
++		}
++		auto j = i + 1;
++		while (j < size && (html[j].isLetterOrNumber() || html[j] == '-')) {
++			++j;
++		}
++		const auto name = html.mid(i + 1, j - i - 1).toLower();
++		const auto end = html.indexOf('>', j);
++		if (end < 0) {
++			break;
++		} else if (++count > kMaxElements) {
++			return u"more than %1 elements"_q.arg(kMaxElements);
++		} else if (html[end - 1] != '/' && !voids.contains(name)) {
++			if (++depth > kMaxDepth) {
++				return u"elements nested deeper than %1"_q.arg(kMaxDepth);
++			}
++		}
++		i = end;
++	}
++	return QString();
++}
++
++QString PrepareStyles(QString css, bool dark) {
++	static const auto media = QRegularExpression(
++		u"@media\\s*\\(\\s*prefers-color-scheme\\s*:\\s*(dark|light)\\s*\\)"_q,
++		QRegularExpression::CaseInsensitiveOption);
++	css = ReplaceLightDark(css, dark);
++	auto result = QString();
++	auto from = 0;
++	auto iterator = media.globalMatch(css);
++	while (iterator.hasNext()) {
++		const auto match = iterator.next();
++		result.append(QStringView(css).mid(
++			from,
++			match.capturedStart() - from));
++		const auto wantsDark = (match.captured(1).toLower() == u"dark"_q);
++		result.append((wantsDark == dark)
++			? u"@media screen"_q
++			: u"@media print"_q);
++		from = match.capturedEnd();
++	}
++	result.append(QStringView(css).mid(from));
++	return result;
++}
++
++QString KitStyle(const Scheme &scheme) {
++	const auto fg = CssColor(scheme.fg);
++	const auto muted = CssColor(scheme.muted);
++	const auto card = CssColor(scheme.card);
++	const auto border = CssColor(scheme.border);
++	const auto link = CssColor(scheme.link);
++	const auto accent = CssColor(scheme.accent);
++	const auto accentHover = CssColor(scheme.accent.darker(115));
++	const auto sep = CssColor(WithAlpha(scheme.fg, 0.1));
++	const auto soft = CssColor(WithAlpha(scheme.fg, 0.08));
++	const auto softer = CssColor(WithAlpha(scheme.fg, 0.14));
++	const auto pressed = CssColor(WithAlpha(scheme.fg, 0.22));
++	const auto green = scheme.dark ? u"#5ccf7d"_q : u"#2fa84f"_q;
++	const auto red = scheme.dark ? u"#ff6b61"_q : u"#e0453a"_q;
++	const auto orange = scheme.dark ? u"#ffae42"_q : u"#e88a12"_q;
++	const auto purple = scheme.dark ? u"#c38cf2"_q : u"#9b51d8"_q;
++	const auto teal = scheme.dark ? u"#4fd1d9"_q : u"#1aa3b0"_q;
++	const auto blue = accent;
++	auto result = QString();
++	result += u":root { --tele-fg: %1; --tele-muted: %2; --tele-card: %3; "
++		"--tele-border: %4; --tele-link: %5; --tele-accent: %6; "
++		"--tele-green: %7; --tele-red: %8; --tele-orange: %9; }\n"_q
++		.arg(fg, muted, card, border, link, accent, green, red, orange);
++	result += u"html, body { margin: 0; padding: 0; }\n"
++		"body { font-family: sans-serif; font-size: 14px; "
++		"line-height: 1.35; color: %1; }\n"_q.arg(fg);
++	result += u"[hidden] { display: none; }\n"
++		"p { margin: 0 0 8px 0; }\n"
++		"h1 { font-size: 20px; margin: 0 0 8px 0; }\n"
++		"h2 { font-size: 17px; margin: 0 0 6px 0; }\n"
++		"h3 { font-size: 15px; margin: 0 0 4px 0; }\n"
++		"h4, h5, h6 { font-size: 14px; margin: 0 0 4px 0; }\n"
++		"ul, ol { margin: 0 0 8px 0; padding-left: 20px; }\n"
++		"hr { border: 0; border-top: 1px solid %1; margin: 8px 0; }\n"
++		"img { max-width: 100%; }\n"
++		"table { border-collapse: collapse; }\n"
++		"td, th { padding: 3px 6px; }\n"
++		"button { box-sizing: border-box; }\n"
++		"th { text-align: left; }\n"_q.arg(sep);
++	result += u"a { color: %1; text-decoration: none; }\n"
++		"a:hover { text-decoration: underline; }\n"
++		"code, pre, kbd { font-family: monospace; font-size: 12.5px; }\n"
++		"code { padding: 0 3px; border-radius: 4px; background-color: %2; }\n"
++		"pre { margin: 0 0 8px 0; padding: 6px 8px; border-radius: 8px; "
++		"background-color: %2; white-space: pre-wrap; }\n"
++		"pre code { padding: 0; background-color: transparent; }\n"
++		"blockquote { margin: 0 0 8px 0; padding: 2px 0 2px 10px; "
++		"border-left: 3px solid %3; }\n"_q.arg(link, soft, accent);
++	result += u".widget { display: block; }\n"
++		".card { background-color: %1; border: 1px solid %2; "
++		"border-radius: 12px; color: %3; }\n"
++		".pad { padding: 12px 14px; }\n"
++		".panel { background-color: %4; border-radius: 9px; "
++		"padding: 8px 10px; }\n"
++		".fg { color: %3; } .muted { color: %5; }\n"
++		".small { font-size: 12px; } .tiny { font-size: 11px; }\n"
++		".caps { font-size: 11px; font-weight: 700; "
++		"text-transform: uppercase; color: %5; }\n"
++		".row { display: flex; align-items: center; }\n"
++		".between { justify-content: space-between; }\n"
++		".grow { flex-grow: 1; } .center { text-align: center; }\n"
++		".right { text-align: right; }\n"
++		".sep { border-top: 1px solid %6; } .nowrap { white-space: nowrap; }\n"_q
++		.arg(card, border, fg, soft, muted, sep);
++	result += u".t-blue { color: %1; } .t-green { color: %2; } "
++		".t-red { color: %3; } .t-orange { color: %4; } "
++		".t-purple { color: %5; } .t-teal { color: %6; }\n"_q
++		.arg(blue, green, red, orange, purple, teal);
++	result += u".badge { display: inline-block; padding: 1px 8px; "
++		"border-radius: 9px; font-size: 11px; font-weight: 700; "
++		"background-color: %1; }\n"
++		".badge.blue { color: %2; } .badge.green { color: %3; } "
++		".badge.red { color: %4; } .badge.orange { color: %5; } "
++		".badge.purple { color: %6; }\n"_q
++		.arg(softer, blue, green, red, orange, purple);
++	result += u".btn, button { display: inline-block; padding: 5px 13px; "
++		"border: 0; border-radius: 9px; font-size: 14px; font-weight: 600; "
++		"text-align: center; text-decoration: none; background-color: %1; "
++		"color: %2; }\n"
++		".btn:hover, button:hover { background-color: %3; "
++		"text-decoration: none; }\n"
++		".btn.primary, button.primary { background-color: %4; "
++		"color: #ffffff; }\n"
++		".btn.primary:hover, button.primary:hover { background-color: %5; }\n"
++		".btn.success { background-color: %6; color: #ffffff; }\n"
++		".btn.danger { color: %7; }\n"_q
++		.arg(soft, fg, pressed, accent, accentHover, green, red);
++	result += u".chip { display: inline-block; padding: 3px 12px; "
++		"border-radius: 14px; border: 1px solid %1; color: %1; "
++		"margin: 2px 4px 2px 0; text-decoration: none; }\n"
++		".chip:hover { background-color: %2; text-decoration: none; }\n"
++		".av { display: inline-block; width: 24px; height: 24px; "
++		"border-radius: 12px; text-align: center; line-height: 24px; "
++		"color: #ffffff; font-size: 10px; font-weight: 700; "
++		"background-color: %3; }\n"
++		".bar { height: 8px; border-radius: 4px; background-color: %4; }\n"
++		".bar > div { height: 8px; border-radius: 4px; "
++		"background-color: %1; }\n"
++		"kbd { padding: 0 6px; border-radius: 5px; border: 1px solid %5; "
++		"border-bottom-width: 2px; }\n"
++		"[data-action] { cursor: pointer; }\n"_q
++		.arg(accent, soft, muted, softer, border);
++	return result;
++}
++
++namespace {
++
++constexpr auto kMaxMasterSheets = 8;
++constexpr auto kMaxAuthorSheets = 64;
++
++using Sheet = std::shared_ptr<const litehtml::css>;
++
++[[nodiscard]] Sheet ParseSheet(const std::string &text, const Scheme &scheme) {
++	auto container = Container(scheme);
++	try {
++		return litehtml::document::parse_stylesheet(
++			text,
++			&container,
++			litehtml::quirks_mode);
++	} catch (...) {
++		return nullptr;
++	}
++}
++
++[[nodiscard]] Sheet MasterSheet(const Scheme &scheme) {
++	static auto cache = base::flat_map<uint64, Sheet>();
++	const auto key = scheme.key();
++	if (const auto i = cache.find(key); i != end(cache)) {
++		return i->second;
++	} else if (cache.size() >= kMaxMasterSheets) {
++		cache.clear();
++	}
++	const auto kit = PrepareStyles(KitStyle(scheme), scheme.dark);
++	auto result = ParseSheet(
++		std::string(litehtml::master_css) + kit.toStdString(),
++		scheme);
++	cache.emplace(key, result);
++	return result;
++}
++
++[[nodiscard]] Sheet AuthorSheet(const QString &styles, const Scheme &scheme) {
++	struct Entry {
++		QString styles;
++		bool dark = false;
++		Sheet sheet;
++	};
++	static auto cache = std::deque<Entry>();
++	const auto i = ranges::find_if(cache, [&](const Entry &entry) {
++		return (entry.dark == scheme.dark) && (entry.styles == styles);
++	});
++	if (i != end(cache)) {
++		return i->sheet;
++	} else if (cache.size() >= kMaxAuthorSheets) {
++		cache.pop_front();
++	}
++	auto result = ParseSheet(
++		PrepareStyles(styles, scheme.dark).toStdString(),
++		scheme);
++	cache.push_back({ styles, scheme.dark, result });
++	return result;
++}
++
++} // namespace
++
++Document::Document(
++	const QString &styles,
++	const QString &body,
++	const Scheme &scheme,
++	int width)
++: _container(std::make_unique<Container>(scheme)) {
++	if (!CheckMarkup(body).isEmpty()) {
++		return;
++	}
++	const auto master = MasterSheet(scheme);
++	const auto author = AuthorSheet(styles, scheme);
++	if (!master || !author) {
++		return;
++	}
++	const auto root = scheme.dark ? u"lc-dark"_q : u"lc-light"_q;
++	const auto html = u"<html class=\"%1\"><body>"_q.arg(root)
++		+ body
++		+ u"</body></html>"_q;
++	_width = std::max(width, 0);
++	_container->setWidth(_width);
++	try {
++		_document = litehtml::document::createFromStringParsed(
++			litehtml::estring(html.toStdString()),
++			_container.get(),
++			master,
++			author);
++	} catch (...) {
++		_document = nullptr;
++	}
++}
++
++Document::~Document() {
++	_document = nullptr;
++}
++
++bool Document::valid() const {
++	return _document != nullptr;
++}
++
++void Document::layout(int width) {
++	_width = std::max(width, 1);
++	if (!_document) {
++		return;
++	}
++	_container->setWidth(_width);
++	_document->media_changed();
++	_natural = int(std::ceil(F(_document->render(float(_width)))));
++}
++
++int Document::layoutWidth() const {
++	return _width;
++}
++
++int Document::contentWidth() const {
++	return std::clamp(_natural, 1, std::max(_width, 1));
++}
++
++int Document::height() const {
++	return _document
++		? std::max(int(std::ceil(F(_document->height()))), 1)
++		: 1;
++}
++
++void Document::paint(QPainter &p, QRect clip) const {
++	if (!_document) {
++		return;
++	}
++	_container->clearClips();
++	auto position = litehtml::position(
++		float(clip.x()),
++		float(clip.y()),
++		float(clip.width()),
++		float(clip.height()));
++	p.save();
++	p.setRenderHint(QPainter::TextAntialiasing);
++	_document->draw(
++		reinterpret_cast<litehtml::uint_ptr>(&p),
++		0.f,
++		0.f,
++		&position);
++	p.restore();
++}
++
++Hit Document::hitTest(QPoint point) const {
++	auto result = Hit();
++	if (!_document || !_document->root_render()) {
++		return result;
++	}
++	auto element = _document->root_render()->get_element_by_point(
++		float(point.x()),
++		float(point.y()),
++		float(point.x()),
++		float(point.y()),
++		nullptr);
++	for (; element; element = element->parent()) {
++		const auto tag = Utf8(element->get_tagName()).toLower();
++		if (const auto action = element->get_attr("data-action")) {
++			result.action = Utf8(action);
++			result.value = Utf8(element->get_attr("data-value", ""));
++			result.pointer = true;
++			return result;
++		} else if (tag == u"a"_q) {
++			const auto href = Utf8(element->get_attr("href", "")).trimmed();
++			if (!href.isEmpty() && !href.startsWith('#')) {
++				result.link = href;
++				result.pointer = true;
++				return result;
++			}
++		}
++	}
++	return result;
++}
++
++bool Document::hover(QPoint point) {
++	if (!_document) {
++		return false;
++	}
++	const auto changed = _document->on_mouse_over(
++		float(point.x()),
++		float(point.y()),
++		float(point.x()),
++		float(point.y()),
++		[](const litehtml::position &) {});
++	if (changed) {
++		_document->render(float(_width));
++	}
++	return changed;
++}
++
++bool Document::leave() {
++	if (!_document) {
++		return false;
++	}
++	const auto changed = _document->on_mouse_leave(
++		[](const litehtml::position &) {});
++	if (changed) {
++		_document->render(float(_width));
++	}
++	return changed;
++}
++
++QString Document::plainText() const {
++	if (!_document || !_document->root()) {
++		return QString();
++	}
++	auto text = std::string();
++	_document->root()->get_text(text);
++	return QString::fromStdString(text).simplified();
++}
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_html.h b/Telegram/SourceFiles/tele/tele_html.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..340740b73c23d66faa8c418eecf9a7bb64ddcf1b
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html.h
+@@ -0,0 +1,77 @@
++#pragma once
++
++namespace litehtml {
++class document;
++} // namespace litehtml
++
++namespace Tele::Html {
++
++struct ParsedCard {
++	QString styles;
++	QString body;
++	std::vector<QString> scripts;
++	bool bubble = false;
++	bool external = false;
++};
++
++[[nodiscard]] ParsedCard ParseCard(const QString &source);
++
++struct Scheme {
++	QColor fg;
++	QColor muted;
++	QColor card;
++	QColor border;
++	QColor link;
++	QColor accent;
++	bool dark = false;
++
++	[[nodiscard]] uint64 key() const;
++};
++
++[[nodiscard]] QString KitStyle(const Scheme &scheme);
++[[nodiscard]] QString PrepareStyles(QString css, bool dark);
++[[nodiscard]] QString CheckMarkup(const QString &html);
++
++struct Hit {
++	QString action;
++	QString value;
++	QString link;
++	bool pointer = false;
++
++	[[nodiscard]] bool actionable() const {
++		return !action.isEmpty() || !link.isEmpty();
++	}
++};
++
++class Container;
++
++class Document final {
++public:
++	Document(
++		const QString &styles,
++		const QString &body,
++		const Scheme &scheme,
++		int width = 0);
++	~Document();
++
++	[[nodiscard]] bool valid() const;
++	void layout(int width);
++	[[nodiscard]] int layoutWidth() const;
++	[[nodiscard]] int contentWidth() const;
++	[[nodiscard]] int height() const;
++
++	void paint(QPainter &p, QRect clip) const;
++	[[nodiscard]] Hit hitTest(QPoint point) const;
++	[[nodiscard]] bool hover(QPoint point);
++	[[nodiscard]] bool leave();
++	[[nodiscard]] QString plainText() const;
++
++private:
++	std::unique_ptr<Container> _container;
++	std::shared_ptr<litehtml::document> _document;
++	int _width = 0;
++	int _natural = 0;
++
++};
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_html_script.cpp b/Telegram/SourceFiles/tele/tele_html_script.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..7b3b1e93ad262ef43d0dfb72551ce1677bfaa957
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html_script.cpp
+@@ -0,0 +1,698 @@
++#include "tele/tele_html_script.h"
++
++#include <QtCore/QTime>
++#include <QtGui/QClipboard>
++#include <QtGui/QGuiApplication>
++
++namespace Tele::Html {
++namespace {
++
++constexpr auto kMemoryLimit = size_t(32 * 1024 * 1024);
++constexpr auto kStackLimit = size_t(256 * 1024);
++constexpr auto kStartBudget = crl::time(500);
++constexpr auto kCallBudget = crl::time(120);
++constexpr auto kMaxTimers = 32;
++constexpr auto kMaxHtml = 512 * 1024;
++constexpr auto kMaxLog = 300;
++constexpr auto kMaxJobs = 100000;
++constexpr auto kWindow = crl::time(1000);
++constexpr auto kWindowBudget = crl::time(200);
++constexpr auto kMaxOverruns = 5;
++
++enum Native {
++	kLog,
++	kSchedule,
++	kCancel,
++	kFrame,
++	kTransition,
++	kCopy,
++	kUpdate,
++};
++
++const char kPrelude[] = R"js((function (native, maxTimers, maxHtml, kinds) {
++'use strict';
++const timers = new Map();
++const frames = new Map();
++let timerId = 0;
++let frameId = 0;
++const origin = Date.now();
++const now = () => Date.now() - origin;
++const show = v => {
++	if (typeof v === 'string') return v;
++	if (v instanceof Error) return v.name + ': ' + v.message;
++	if (v !== null && typeof v === 'object') {
++		try { const s = JSON.stringify(v); if (s !== undefined) return s; } catch (e) {}
++	}
++	return String(v);
++};
++const logger = level => (...args) => native.log(level, args.map(show).join(' ').slice(0, 2000));
++const addTimer = (fn, ms, args, repeat) => {
++	if (typeof fn !== 'function') throw new TypeError('setTimeout and setInterval take a function');
++	if (timers.size >= maxTimers) throw new RangeError('too many timers, the limit is ' + maxTimers);
++	const id = ++timerId;
++	timers.set(id, { fn, args, repeat });
++	native.schedule(id, Math.max(0, Math.min(Number(ms) || 0, 86400000)), repeat);
++	return id;
++};
++const clearTimer = id => { if (timers.delete(id)) native.cancel(id); };
++const requestFrame = fn => {
++	if (typeof fn !== 'function') throw new TypeError('requestAnimationFrame takes a function');
++	const id = ++frameId;
++	frames.set(id, fn);
++	native.frame();
++	return id;
++};
++const ease = Object.freeze({
++	linear: t => t,
++	inQuad: t => t * t,
++	outQuad: t => t * (2 - t),
++	inOutQuad: t => (t < 0.5) ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
++	inCubic: t => t * t * t,
++	outCubic: t => 1 - Math.pow(1 - t, 3),
++	inOutCubic: t => (t < 0.5) ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
++	outQuint: t => 1 - Math.pow(1 - t, 5),
++	outExpo: t => (t >= 1) ? 1 : 1 - Math.pow(2, -10 * t),
++	inOutSine: t => (1 - Math.cos(Math.PI * t)) / 2,
++	outBack: t => { const s = 1.70158; const u = t - 1; return 1 + (s + 1) * u * u * u + s * u * u; },
++	inOutBack: t => {
++		const s = 1.70158 * 1.525;
++		return (t < 0.5)
++			? (Math.pow(2 * t, 2) * ((s + 1) * 2 * t - s)) / 2
++			: (Math.pow(2 * t - 2, 2) * ((s + 1) * (2 * t - 2) + s) + 2) / 2;
++	},
++	outElastic: t => (t <= 0 || t >= 1) ? t : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * (2 * Math.PI) / 3) + 1,
++	outBounce: t => {
++		const k = 7.5625, d = 2.75;
++		if (t < 1 / d) return k * t * t;
++		if (t < 2 / d) { t -= 1.5 / d; return k * t * t + 0.75; }
++		if (t < 2.5 / d) { t -= 2.25 / d; return k * t * t + 0.9375; }
++		t -= 2.625 / d;
++		return k * t * t + 0.984375;
++	},
++	spring: t => (t <= 0 || t >= 1) ? t : 1 - Math.exp(-7 * t) * Math.cos(9.5 * t),
++});
++const animate = (duration, onFrame, easing = ease.inOutCubic) => new Promise(resolve => {
++	const start = now();
++	const total = Math.max(1, Number(duration) || 0);
++	const step = () => {
++		const t = Math.min(1, (now() - start) / total);
++		onFrame(easing(t), t);
++		if (t < 1) requestFrame(step); else resolve();
++	};
++	step();
++});
++const owners = new WeakMap();
++const tween = (target, props, duration = 300, easing = ease.outCubic) => {
++	if (target === null || typeof target !== 'object') throw new TypeError('tween() animates the fields of an object');
++	let keys = owners.get(target);
++	if (!keys) { keys = new Map(); owners.set(target, keys); }
++	const token = {}, from = {}, to = {};
++	for (const key of Object.keys(props)) {
++		from[key] = Number(target[key]) || 0;
++		to[key] = Number(props[key]);
++		keys.set(key, token);
++	}
++	return animate(duration, p => {
++		for (const key in to) if (keys.get(key) === token) target[key] = from[key] + (to[key] - from[key]) * p;
++	}, easing).then(() => {
++		for (const key in to) if (keys.get(key) === token) { target[key] = to[key]; keys.delete(key); }
++	});
++};
++const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
++const rgba = c => {
++	if (Array.isArray(c)) return [c[0] || 0, c[1] || 0, c[2] || 0, (c.length > 3) ? c[3] : 1];
++	const s = String(c).trim();
++	let m = /^#([0-9a-f]{3,8})$/i.exec(s);
++	if (m) {
++		let h = m[1];
++		if (h.length <= 4) h = h.split('').map(x => x + x).join('');
++		const n = parseInt(h.slice(0, 6), 16);
++		return [(n >> 16) & 255, (n >> 8) & 255, n & 255, (h.length === 8) ? parseInt(h.slice(6), 16) / 255 : 1];
++	}
++	m = /^rgba?\(([^)]*)\)$/i.exec(s);
++	if (m) {
++		const p = m[1].split(',').map(Number);
++		return [p[0] || 0, p[1] || 0, p[2] || 0, (p.length > 3) ? p[3] : 1];
++	}
++	return [0, 0, 0, 1];
++};
++const css = v => 'rgba(' + Math.round(clamp(v[0], 0, 255)) + ',' + Math.round(clamp(v[1], 0, 255)) + ','
++	+ Math.round(clamp(v[2], 0, 255)) + ',' + clamp(v[3], 0, 1).toFixed(3) + ')';
++const mix = (a, b, t) => { const x = rgba(a), y = rgba(b); return css(x.map((q, i) => q + (y[i] - q) * t)); };
++const alpha = (c, a) => { const v = rgba(c); return css([v[0], v[1], v[2], a * v[3]]); };
++const esc = v => String((v === undefined || v === null) ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
++	.replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
++const transition = (kind = 'fade') => {
++	if (!kinds.includes(kind)) throw new RangeError('transition() takes one of: ' + kinds.join(', '));
++	native.transition(kind);
++};
++Object.assign(globalThis, {
++	setTimeout: (fn, ms, ...args) => addTimer(fn, ms, args, false),
++	setInterval: (fn, ms, ...args) => addTimer(fn, ms, args, true),
++	clearTimeout: clearTimer,
++	clearInterval: clearTimer,
++	requestAnimationFrame: requestFrame,
++	cancelAnimationFrame: id => { frames.delete(id); },
++	performance: Object.freeze({ now }),
++	animate,
++	tween,
++	ease,
++	sleep: ms => new Promise(resolve => addTimer(resolve, ms, [], false)),
++	lerp: (a, b, t) => a + (b - a) * t,
++	clamp,
++	mix,
++	alpha,
++	esc,
++	transition,
++	copyText: text => native.copy(String(text).slice(0, 10000)),
++	update: () => native.update(),
++	console: Object.freeze({
++		log: logger(0), info: logger(0), debug: logger(0), warn: logger(1), error: logger(2),
++	}),
++});
++delete globalThis.WebAssembly;
++return {
++	fire(id) {
++		const t = timers.get(id);
++		if (!t) return;
++		if (!t.repeat) timers.delete(id);
++		t.fn(...t.args);
++	},
++	frame() {
++		const due = [...frames.values()];
++		frames.clear();
++		let error = null;
++		for (const fn of due) { try { fn(now()); } catch (e) { if (!error) error = e; } }
++		if (error) throw error;
++		return frames.size > 0;
++	},
++	render() {
++		if (typeof render !== 'function') return null;
++		const html = render();
++		if (typeof html !== 'string') throw new TypeError('render() must return a string, not ' + ((html === null) ? 'null' : typeof html));
++		if (html.length > maxHtml) throw new RangeError('render() returned ' + html.length + ' characters, the limit is ' + maxHtml);
++		return html;
++	},
++	action(name, value) {
++		if (typeof onAction === 'function') onAction(name, value);
++	},
++	describe(e) {
++		let s = (e instanceof Error) ? (e.name + ': ' + e.message) : ('Uncaught ' + show(e));
++		const m = (e && typeof e.stack === 'string') ? /card\.js:(\d+)/.exec(e.stack) : null;
++		if (m) s += ' (line ' + m[1] + ')';
++		return s.slice(0, 500);
++	},
++};
++}))js";
++
++const char *Kinds[] = {
++	"fade",
++	"slide-left",
++	"slide-right",
++	"slide-up",
++	"slide-down",
++	"pop",
++	"none",
++};
++
++[[nodiscard]] Script *ScriptOf(JSContext *ctx) {
++	return static_cast<Script*>(JS_GetContextOpaque(ctx));
++}
++
++JSValue NativeCall(
++		JSContext *ctx,
++		JSValueConst thisValue,
++		int argc,
++		JSValueConst *argv,
++		int magic) {
++	return ScriptOf(ctx)->native(magic, argc, argv);
++}
++
++int Interrupt(JSRuntime *rt, void *opaque) {
++	return static_cast<Script*>(opaque)->interrupt() ? 1 : 0;
++}
++
++} // namespace
++
++std::unique_ptr<Script> Script::Create(QString source, Fn<void()> changed) {
++	return std::make_unique<Script>(std::move(source), std::move(changed));
++}
++
++Script::Script(QString source, Fn<void()> changed)
++: _changed(std::move(changed))
++, _resume([=] { resumeDeferred(); })
++, _rt(JS_NewRuntime()) {
++	if (!_rt) {
++		_failed = true;
++		return;
++	}
++	JS_SetMemoryLimit(_rt, kMemoryLimit);
++	JS_SetMaxStackSize(_rt, kStackLimit);
++	JS_SetInterruptHandler(_rt, Interrupt, this);
++	_ctx = JS_NewContext(_rt);
++	if (!_ctx) {
++		_failed = true;
++		return;
++	}
++	JS_SetContextOpaque(_ctx, this);
++	start(source);
++}
++
++Script::~Script() {
++	_timers.clear();
++	if (_ctx) {
++		JS_FreeValue(_ctx, _hooks);
++		JS_FreeContext(_ctx);
++	}
++	if (_rt) {
++		JS_FreeRuntime(_rt);
++	}
++}
++
++bool Script::interrupt() {
++	if ((_deadline > 0) && (crl::now() > _deadline)) {
++		_interrupted = true;
++	}
++	return _interrupted;
++}
++
++JSValue Script::native(int magic, int argc, JSValueConst *argv) {
++	const auto number = [&](int index) {
++		auto result = 0.;
++		if (index < argc) {
++			JS_ToFloat64(_ctx, &result, argv[index]);
++		}
++		return result;
++	};
++	const auto text = [&](int index) {
++		return (index < argc) ? string(argv[index]) : QString();
++	};
++	switch (magic) {
++	case kLog: {
++		const auto level = int(number(0));
++		addLog(
++			(level == 2) ? Level::Error : (level == 1) ? Level::Warn : Level::Log,
++			text(1));
++	} break;
++	case kSchedule:
++		schedule(
++			int(number(0)),
++			crl::time(number(1)),
++			(argc > 2) && (JS_ToBool(_ctx, argv[2]) > 0));
++		break;
++	case kCancel:
++		cancel(int(number(0)));
++		break;
++	case kFrame:
++		_frames = true;
++		break;
++	case kTransition:
++		_transition = text(0);
++		break;
++	case kCopy:
++		if (_inAction) {
++			QGuiApplication::clipboard()->setText(text(0));
++		} else {
++			addLog(Level::Warn, u"copyText() works only from onAction()"_q);
++		}
++		break;
++	case kUpdate:
++		notify();
++		break;
++	}
++	return JS_UNDEFINED;
++}
++
++QString Script::string(JSValueConst value) {
++	auto size = size_t();
++	const auto data = JS_ToCStringLen(_ctx, &size, value);
++	if (!data) {
++		JS_FreeValue(_ctx, JS_GetException(_ctx));
++		return QString();
++	}
++	auto result = QString::fromUtf8(data, int(size));
++	JS_FreeCString(_ctx, data);
++	return result;
++}
++
++void Script::start(const QString &source) {
++	if (!enter(kStartBudget)) {
++		return;
++	}
++	const auto prelude = JS_Eval(
++		_ctx,
++		kPrelude,
++		sizeof(kPrelude) - 1,
++		"prelude.js",
++		JS_EVAL_TYPE_GLOBAL);
++	if (!check(prelude, u"prelude"_q)) {
++		leave();
++		return;
++	}
++	auto object = JS_NewObject(_ctx);
++	const auto add = [&](const char *name, int magic, int length) {
++		JS_SetPropertyStr(
++			_ctx,
++			object,
++			name,
++			JS_NewCFunctionMagic(
++				_ctx,
++				NativeCall,
++				name,
++				length,
++				JS_CFUNC_generic_magic,
++				magic));
++	};
++	add("log", kLog, 2);
++	add("schedule", kSchedule, 3);
++	add("cancel", kCancel, 1);
++	add("frame", kFrame, 0);
++	add("transition", kTransition, 1);
++	add("copy", kCopy, 1);
++	add("update", kUpdate, 0);
++	auto kinds = JS_NewArray(_ctx);
++	for (auto i = 0; i != int(std::size(Kinds)); ++i) {
++		JS_SetPropertyUint32(_ctx, kinds, i, JS_NewString(_ctx, Kinds[i]));
++	}
++	JSValue args[] = {
++		object,
++		JS_NewInt32(_ctx, kMaxTimers),
++		JS_NewInt32(_ctx, kMaxHtml),
++		kinds,
++	};
++	const auto hooks = JS_Call(_ctx, prelude, JS_UNDEFINED, 4, args);
++	for (auto &arg : args) {
++		JS_FreeValue(_ctx, arg);
++	}
++	JS_FreeValue(_ctx, prelude);
++	if (!check(hooks, u"prelude"_q)) {
++		leave();
++		return;
++	}
++	_hooks = hooks;
++	const auto utf8 = source.toUtf8();
++	const auto result = JS_Eval(
++		_ctx,
++		utf8.constData(),
++		utf8.size(),
++		"card.js",
++		JS_EVAL_TYPE_GLOBAL);
++	if (check(result, u"script"_q)) {
++		JS_FreeValue(_ctx, result);
++		runJobs();
++	}
++	leave();
++}
++
++JSValue Script::hook(const char *name) {
++	return JS_GetPropertyStr(_ctx, _hooks, name);
++}
++
++bool Script::enter(crl::time budget) {
++	if (_failed || !_ctx) {
++		return false;
++	}
++	if (!_depth++) {
++		JS_UpdateStackTop(_rt);
++		_entered = crl::now();
++		_deadline = _entered + budget;
++		_interrupted = false;
++	}
++	return true;
++}
++
++void Script::leave() {
++	if (!--_depth) {
++		_deadline = 0;
++		account(crl::now() - _entered);
++	}
++}
++
++bool Script::overloaded() const {
++	return _overloaded && (crl::now() - _windowStart < kWindow);
++}
++
++void Script::account(crl::time spent) {
++	const auto now = crl::now();
++	if (now - _windowStart >= kWindow) {
++		_windowStart = now;
++		_spent = 0;
++		_overloaded = false;
++	}
++	_spent += spent;
++	if (_spent <= kWindowBudget || _overloaded || _failed) {
++		return;
++	}
++	_overloaded = true;
++	if (++_overruns >= kMaxOverruns) {
++		stop(u"the script kept using too much CPU and was stopped"_q);
++		return;
++	}
++	addLog(Level::Warn, u"the script is using too much CPU, slowing down"_q);
++	_resume.callOnce(std::max(_windowStart + kWindow - now, crl::time(1)));
++}
++
++void Script::setPaused(bool paused) {
++	_paused = paused;
++	if (!paused) {
++		resumeDeferred();
++	}
++}
++
++void Script::resumeDeferred() {
++	if (_paused || overloaded()) {
++		return;
++	}
++	for (const auto id : base::take(_deferred)) {
++		fire(id);
++	}
++}
++
++void Script::warn(const QString &text) {
++	addLog(Level::Warn, text);
++}
++
++void Script::runJobs() {
++	for (auto i = 0; i != kMaxJobs && !_failed; ++i) {
++		auto ctx = (JSContext*)nullptr;
++		const auto result = JS_ExecutePendingJob(_rt, &ctx);
++		if (result <= 0) {
++			if (result < 0) {
++				check(JS_EXCEPTION, u"promise"_q);
++			}
++			break;
++		}
++	}
++}
++
++QString Script::describe(JSValue exception) {
++	auto result = QString();
++	if (JS_IsObject(_hooks)) {
++		auto function = hook("describe");
++		if (JS_IsFunction(_ctx, function)) {
++			const auto saved = _deadline;
++			_deadline = crl::now() + kCallBudget;
++			auto value = JS_Call(_ctx, function, _hooks, 1, &exception);
++			_deadline = saved;
++			if (JS_IsException(value)) {
++				JS_FreeValue(_ctx, JS_GetException(_ctx));
++			} else {
++				result = string(value);
++			}
++			JS_FreeValue(_ctx, value);
++		}
++		JS_FreeValue(_ctx, function);
++	}
++	return result.isEmpty() ? string(exception) : result;
++}
++
++bool Script::check(JSValue value, const QString &where) {
++	if (!JS_IsException(value)) {
++		return true;
++	}
++	const auto exception = JS_GetException(_ctx);
++	if (_interrupted) {
++		JS_FreeValue(_ctx, exception);
++		stop(u"the script ran out of time in %1 and was stopped"_q
++			.arg(where));
++		return false;
++	}
++	const auto text = describe(exception);
++	JS_FreeValue(_ctx, exception);
++	if (text.contains(u"out of memory"_q, Qt::CaseInsensitive)) {
++		stop(u"the script ran out of memory in %1 and was stopped"_q
++			.arg(where));
++		return false;
++	}
++	addLog(Level::Error, where + u": "_q + text);
++	return false;
++}
++
++void Script::stop(const QString &reason) {
++	addLog(Level::Error, reason);
++	_failed = true;
++	_frames = false;
++	_deferred.clear();
++	crl::on_main(this, [=] {
++		_timers.clear();
++	});
++}
++
++void Script::addLog(Level level, QString text) {
++	const auto prefix = (level == Level::Error)
++		? u"error"_q
++		: (level == Level::Warn)
++		? u"warn"_q
++		: u"log"_q;
++	const auto time = QTime::currentTime().toString(u"HH:mm:ss.zzz"_q);
++	_log.push_back(time + ' ' + prefix + u": "_q + text);
++	if (_log.size() > kMaxLog) {
++		_log.erase(begin(_log), begin(_log) + (_log.size() - kMaxLog));
++	}
++	_logUpdates.fire({});
++}
++
++void Script::notify() {
++	if (_notifyScheduled) {
++		return;
++	}
++	_notifyScheduled = true;
++	crl::on_main(this, [=] {
++		_notifyScheduled = false;
++		if (_changed) {
++			_changed();
++		}
++	});
++}
++
++void Script::schedule(int id, crl::time delay, bool repeat) {
++	auto &timer = _timers[id];
++	timer = std::make_unique<base::Timer>([=] {
++		crl::on_main(this, [=] {
++			fire(id);
++		});
++	});
++	if (repeat) {
++		timer->callEach(std::max(delay, crl::time(4)));
++	} else {
++		timer->callOnce(delay);
++	}
++}
++
++void Script::cancel(int id) {
++	_timers.erase(id);
++}
++
++void Script::fire(int id) {
++	if (_failed) {
++		return;
++	} else if (_paused || overloaded()) {
++		if (!ranges::contains(_deferred, id)) {
++			_deferred.push_back(id);
++		}
++		return;
++	}
++	const auto i = _timers.find(id);
++	if (i == end(_timers)) {
++		return;
++	} else if (!i->second->isActive()) {
++		_timers.erase(i);
++	}
++	if (!enter(kCallBudget)) {
++		return;
++	}
++	auto function = hook("fire");
++	auto argument = JS_NewInt32(_ctx, id);
++	const auto result = JS_Call(_ctx, function, _hooks, 1, &argument);
++	JS_FreeValue(_ctx, function);
++	if (check(result, u"timer"_q)) {
++		JS_FreeValue(_ctx, result);
++		runJobs();
++	}
++	leave();
++	notify();
++}
++
++QString Script::render() {
++	if (!enter(kCallBudget)) {
++		return QString();
++	}
++	auto function = hook("render");
++	const auto result = JS_Call(_ctx, function, _hooks, 0, nullptr);
++	JS_FreeValue(_ctx, function);
++	auto html = QString();
++	if (check(result, u"render()"_q)) {
++		if (JS_IsString(result)) {
++			html = string(result);
++		}
++		JS_FreeValue(_ctx, result);
++		runJobs();
++	}
++	leave();
++	return html;
++}
++
++void Script::action(QString name, QString value) {
++	if (!enter(kCallBudget)) {
++		return;
++	}
++	_inAction = true;
++	auto function = hook("action");
++	const auto first = name.toUtf8();
++	const auto second = value.toUtf8();
++	JSValue args[] = {
++		JS_NewStringLen(_ctx, first.constData(), first.size()),
++		JS_NewStringLen(_ctx, second.constData(), second.size()),
++	};
++	const auto result = JS_Call(_ctx, function, _hooks, 2, args);
++	JS_FreeValue(_ctx, args[0]);
++	JS_FreeValue(_ctx, args[1]);
++	JS_FreeValue(_ctx, function);
++	if (check(result, u"onAction()"_q)) {
++		JS_FreeValue(_ctx, result);
++		runJobs();
++	}
++	_inAction = false;
++	leave();
++	notify();
++}
++
++bool Script::animating() const {
++	return _frames && !_failed;
++}
++
++void Script::tick(crl::time now) {
++	if (!_frames || _paused || overloaded() || !enter(kCallBudget)) {
++		return;
++	}
++	_frames = false;
++	auto function = hook("frame");
++	const auto result = JS_Call(_ctx, function, _hooks, 0, nullptr);
++	JS_FreeValue(_ctx, function);
++	if (check(result, u"animation frame"_q)) {
++		if (JS_ToBool(_ctx, result) > 0) {
++			_frames = true;
++		}
++		JS_FreeValue(_ctx, result);
++		runJobs();
++	}
++	leave();
++}
++
++QString Script::takeTransition() {
++	return base::take(_transition);
++}
++
++const std::vector<QString> &Script::log() const {
++	return _log;
++}
++
++rpl::producer<> Script::logUpdates() const {
++	return _logUpdates.events();
++}
++
++bool Script::failed() const {
++	return _failed;
++}
++
++} // namespace Tele::Html
+diff --git a/Telegram/SourceFiles/tele/tele_html_script.h b/Telegram/SourceFiles/tele/tele_html_script.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..5aa36e0eebd6c0896b3c3a305a110896d2d1898a
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_html_script.h
+@@ -0,0 +1,84 @@
++#pragma once
++
++#include "base/timer.h"
++#include "base/weak_ptr.h"
++
++#include <quickjs.h>
++
++namespace Tele::Html {
++
++class Script final : public base::has_weak_ptr {
++public:
++	[[nodiscard]] static std::unique_ptr<Script> Create(
++		QString source,
++		Fn<void()> changed);
++
++	Script(QString source, Fn<void()> changed);
++	~Script();
++
++	[[nodiscard]] QString render();
++	void action(QString name, QString value);
++	[[nodiscard]] bool animating() const;
++	void tick(crl::time now);
++	[[nodiscard]] QString takeTransition();
++	[[nodiscard]] const std::vector<QString> &log() const;
++	[[nodiscard]] rpl::producer<> logUpdates() const;
++	[[nodiscard]] bool failed() const;
++	void setPaused(bool paused);
++	void warn(const QString &text);
++
++	JSValue native(int magic, int argc, JSValueConst *argv);
++	[[nodiscard]] bool interrupt();
++
++private:
++	enum class Level {
++		Log,
++		Warn,
++		Error,
++	};
++
++	void start(const QString &source);
++	[[nodiscard]] JSValue hook(const char *name);
++	void addLog(Level level, QString text);
++	[[nodiscard]] bool enter(crl::time budget);
++	void leave();
++	void runJobs();
++	bool check(JSValue value, const QString &where);
++	[[nodiscard]] QString describe(JSValue exception);
++	[[nodiscard]] QString string(JSValueConst value);
++	void stop(const QString &reason);
++	void notify();
++	void fire(int id);
++	void schedule(int id, crl::time delay, bool repeat);
++	void cancel(int id);
++	void account(crl::time spent);
++	void resumeDeferred();
++	[[nodiscard]] bool overloaded() const;
++
++	const Fn<void()> _changed;
++	base::Timer _resume;
++	std::vector<int> _deferred;
++	crl::time _entered = 0;
++	crl::time _windowStart = 0;
++	crl::time _spent = 0;
++	int _overruns = 0;
++	bool _overloaded = false;
++	bool _paused = false;
++	JSRuntime *_rt = nullptr;
++	JSContext *_ctx = nullptr;
++	JSValue _hooks = JS_UNDEFINED;
++	std::map<int, std::unique_ptr<base::Timer>> _timers;
++	std::vector<QString> _log;
++	rpl::event_stream<> _logUpdates;
++	QString _transition;
++	crl::time _deadline = 0;
++	bool _interrupted = false;
++	bool _failed = false;
++	bool _frames = false;
++	bool _inAction = false;
++	bool _notifyScheduled = false;
++	int _depth = 0;
++
++};
++
++} // namespace Tele::Html

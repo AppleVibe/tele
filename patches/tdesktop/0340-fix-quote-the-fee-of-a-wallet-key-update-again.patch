@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Tue, 13 Oct 2026 00:36:30 +0300
+Subject: [PATCH] fix: quote the fee of a wallet key update again
+
+---
+ Telegram/SourceFiles/gram/gram_boc.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/Telegram/SourceFiles/gram/gram_boc.cpp b/Telegram/SourceFiles/gram/gram_boc.cpp
+index 2e5cea2df22818fae4381aa55974d2886256a966..dee73506d958b7a26496d534a17c9b9fa81e68cb 100644
+--- a/Telegram/SourceFiles/gram/gram_boc.cpp
++++ b/Telegram/SourceFiles/gram/gram_boc.cpp
+@@ -21,6 +21,7 @@ constexpr auto kSignatureBytes = 64;
+ // key's ownership proof in the single reference.
+ constexpr auto kRequestBytes = kSignatureBytes + 4 + 4 + 4 + 4 + 32;
+ constexpr auto kRequestRefs = 1;
++constexpr auto kRequestRefsWithOldKey = 2;
+ constexpr auto kExternalOpcode = quint32(0xFBBA99C8);
+ constexpr auto kInternalOpcode = quint32(0xFBBA99C7);
+ constexpr auto kMaxCells = 64;
+@@ -117,7 +118,8 @@ struct ParsedBoc {
+ 	for (auto i = 0, count = int(cells.size()); i != count; ++i) {
+ 		const auto &cell = cells[i];
+ 		if (!cell.wholeBytes
+-			|| cell.refs != kRequestRefs
++			|| (cell.refs != kRequestRefs
++				&& cell.refs != kRequestRefsWithOldKey)
+ 			|| cell.dataSize != kRequestBytes) {
+ 			continue;
+ 		}

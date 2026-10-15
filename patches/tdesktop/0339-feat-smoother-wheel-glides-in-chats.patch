@@ -1,0 +1,1545 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Mon, 12 Oct 2026 23:34:46 +0300
+Subject: [PATCH] feat: smoother wheel glides in chats
+
+---
+ Telegram/CMakeLists.txt                       |   4 +
+ .../dialogs/dialogs_inner_widget.cpp          |  17 +-
+ .../history/history_inner_widget.cpp          | 176 +++++++--
+ .../history/history_inner_widget.h            |  17 +
+ .../SourceFiles/settings/settings_tele.cpp    |   4 +
+ Telegram/SourceFiles/tele/tele_options.cpp    |  11 +
+ Telegram/SourceFiles/tele/tele_options.h      |   2 +
+ .../SourceFiles/tele/tele_scroll_layer.cpp    | 280 +++++++++++++++
+ Telegram/SourceFiles/tele/tele_scroll_layer.h | 106 ++++++
+ .../SourceFiles/tele/tele_scroll_stats.cpp    | 334 ++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_scroll_stats.h |   9 +
+ .../SourceFiles/tele/tele_settings_io.cpp     |   1 +
+ .../SourceFiles/tele/tele_smooth_scroll.cpp   | 234 ++++++++++++
+ .../SourceFiles/tele/tele_smooth_scroll.h     |  13 +
+ 14 files changed, 1182 insertions(+), 26 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_scroll_layer.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_scroll_layer.h
+ create mode 100644 Telegram/SourceFiles/tele/tele_scroll_stats.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_scroll_stats.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index c8a3cdadae4843f90494727919dc1a4a96a5a8fe..af2a77bec6012eeba69f7b172c1d8d03d30d5e1b 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2762,6 +2762,10 @@ PRIVATE
+     tele/tele_rmb_beside_bubble.h
+     tele/tele_screen_capture.cpp
+     tele/tele_screen_capture.h
++    tele/tele_scroll_layer.cpp
++    tele/tele_scroll_layer.h
++    tele/tele_scroll_stats.cpp
++    tele/tele_scroll_stats.h
+     tele/tele_search_types.cpp
+     tele/tele_search_types.h
+     tele/tele_secret_media.cpp
+diff --git a/Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp b/Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp
+index 1bbcf06001613fa6d3a98be1c6e2d34a1a61e1c8..ba2de7e69698d4b7073d3e760bb4bfdbcae91a11 100644
+--- a/Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp
++++ b/Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp
+@@ -94,6 +94,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_local_pins.h"
+ #include "tele/tele_options.h"
+ #include "tele/tele_search_types.h"
++#include "tele/tele_smooth_scroll.h"
+ #include "tele/tele_unsorted_folder.h"
+ #include "tele/tele_username_aliases.h"
+ #include "api/api_chat_filters.h"
+@@ -370,11 +371,11 @@ InnerWidget::InnerWidget(
+ 		}
+ 	}, lifetime());
+ 
+-	session().downloaderTaskFinished(
+-	) | rpl::on_next([=] {
++	::Tele::RepaintAfterDownloads(this, session().downloaderTaskFinished(), [=] {
+ 		invalidateLoadedUserpics();
+ 		update();
+-	}, lifetime());
++	});
++	::Tele::PauseDuringOtherGlides(this);
+ 
+ 	Core::App().notifications().settingsChanged(
+ 	) | rpl::on_next([=](Window::Notifications::ChangeType change) {
+@@ -1370,6 +1371,13 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
+ 				}
+ 			};
+ 
++			const auto exactRows = !reorderingPinned
++				&& !_pinnedShiftAnimation.animating()
++				&& (e->region().rectCount() > 1);
++			const auto damaged = [&](int top, int height) {
++				return !exactRows || e->region().intersects(
++					QRect(0, skip + top, fullWidth, height));
++			};
+ 			auto i = list.findByY(dialogsClip.top() - skip);
+ 			if (_skipTopDialog && i != list.cend() && !(*i)->index()) {
+ 				++i;
+@@ -1392,7 +1400,8 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
+ 					}
+ 
+ 					// Skip currently dragged chat to paint it above others after.
+-					if (row->index() != promoted + _aboveIndex || _aboveIndex < 0) {
++					if ((row->index() != promoted + _aboveIndex || _aboveIndex < 0)
++						&& damaged(top, row->height())) {
+ 						paintDialog(row);
+ 					}
+ 
+diff --git a/Telegram/SourceFiles/history/history_inner_widget.cpp b/Telegram/SourceFiles/history/history_inner_widget.cpp
+index 9a0f3c5be50d6a44545615579b302f424a433e8c..826c750056555abc4bdcbf69eae318b922666d86 100644
+--- a/Telegram/SourceFiles/history/history_inner_widget.cpp
++++ b/Telegram/SourceFiles/history/history_inner_widget.cpp
+@@ -59,6 +59,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "ui/controls/who_reacted_context_action.h"
+ #include "ui/controls/swipe_handler.h"
+ #include "ui/inactive_press.h"
++#include "ui/chat/chat_theme.h"
+ #include "ui/painter.h"
+ #include "ui/rect.h"
+ #include "ui/screen_reader_mode.h"
+@@ -142,11 +143,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_secret_media.h"
+ #include "tele/tele_select_many.h"
+ #include "tele/tele_shot.h"
++#include "tele/tele_smooth_scroll.h"
+ #include "tele/tele_message_menu.h"
+ #include "tele/tele_options.h"
+ #include "tele/tele_protected.h"
+ #include "tele/tele_rich_quote.h"
+ #include "tele/tele_rmb_beside_bubble.h"
++#include "tele/tele_scroll_layer.h"
+ #include "tele/tele_select_service.h"
+ #include "tele/tele_send_order.h"
+ #include "tele/tele_wallet_links.h"
+@@ -408,7 +411,12 @@ HistoryInner::HistoryInner(
+ , _pathGradient(
+ 	HistoryView::MakePathShiftGradient(
+ 		controller->chatStyle(),
+-		[=] { update(); }))
++		[=] {
++			if (_teleScrollLayer) {
++				_teleScrollLayer->invalidate();
++			}
++			update();
++		}))
+ , _reactionsManager(
+ 	std::make_unique<HistoryView::Reactions::Manager>(
+ 		this,
+@@ -424,7 +432,20 @@ HistoryInner::HistoryInner(
+ 	[=] { mouseActionUpdate(QCursor::pos()); setCursor(_cursor); },
+ 	[=] { return window()->isActiveWindow(); })
+ , _scrollDateCheck([this] { scrollDateCheck(); })
+-, _scrollDateHideTimer([this] { scrollDateHideByTimer(); }) {
++, _scrollDateHideTimer([this] { scrollDateHideByTimer(); })
++, _teleScrollLayer(std::make_unique<Tele::ScrollLayer>(
++	this,
++	scroll,
++	[=](Painter &p, QRect clip) {
++		paintChat(p, clip, ChatPaint::Messages);
++	})) {
++	rpl::merge(
++		style::PaletteChanged(),
++		controller->chatStyle()->paletteChanged()
++	) | rpl::on_next([=] {
++		_teleScrollLayer->invalidate();
++	}, lifetime());
++	Tele::PauseDuringOtherGlides(this);
+ 	_history->delegateMixin()->setCurrent(this);
+ 	if (_migrated) {
+ 		_migrated->delegateMixin()->setCurrent(this);
+@@ -453,6 +474,7 @@ HistoryInner::HistoryInner(
+ 	_controller->gifPauseLevelChanged(
+ 	) | rpl::on_next([=] {
+ 		if (!elementAnimationsPaused()) {
++			_teleScrollLayer->invalidate();
+ 			update();
+ 		}
+ 	}, lifetime());
+@@ -484,6 +506,7 @@ HistoryInner::HistoryInner(
+ 
+ 	session().data().peerDecorationsUpdated(
+ 	) | rpl::on_next([=] {
++		_teleScrollLayer->invalidate();
+ 		update();
+ 	}, lifetime());
+ 	session().data().itemRemoved(
+@@ -519,6 +542,10 @@ HistoryInner::HistoryInner(
+ 	) | rpl::filter([=](not_null<const Element*> view) {
+ 		return (view == viewByItem(view->data()));
+ 	}) | rpl::on_next([=](not_null<const Element*> view) {
++		if (const auto top = itemTop(view); top >= 0) {
++			_teleScrollLayer->invalidate(
++				QRect(0, top, width(), view->height()));
++		}
+ 		markReadMetricsStale();
+ 		if (view->isUnderCursor()) {
+ 			mouseActionUpdate();
+@@ -537,6 +564,7 @@ HistoryInner::HistoryInner(
+ 		(Data::HistoryUpdate::Flag::OutboxRead
+ 			| Data::HistoryUpdate::Flag::TranslatedTo)
+ 	) | rpl::on_next([=] {
++		_teleScrollLayer->invalidate();
+ 		update();
+ 	}, lifetime());
+ 
+@@ -1448,15 +1476,94 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
+ 		&& !pendingResized
+ 		&& _widget->markingContentsRead());
+ 	if (overlapped || pendingResized) {
++		if (pendingResized) {
++			_teleScrollLayer->invalidate();
++		}
+ 		return;
+ 	} else if (_recountedAfterPendingResizedItems) {
+ 		_recountedAfterPendingResizedItems = false;
+ 		mouseActionUpdate();
+ 	}
+ 
++	const auto teleTiming = _teleScrollLayer->measure();
+ 	Painter p(this);
+-	auto clip = e->rect();
++	const auto clip = e->rect();
++	if (!paintScrollLayer(p, clip)) {
++		paintChat(p, clip, ChatPaint::Full);
++	}
++}
++
++bool HistoryInner::paintScrollLayer(Painter &p, QRect clip) {
++	if (!_teleScrollLayer->gliding()) {
++		return false;
++	}
++	const auto mtop = migratedTop();
++	const auto htop = historyTop();
++	const auto historyDisplayedEmpty = _history->isDisplayedEmpty()
++		&& (!_migrated || _migrated->isDisplayedEmpty());
++	const auto usable = !historyDisplayedEmpty
++		&& (mtop >= 0 || htop >= 0)
++		&& !_theme->bubblesBackgroundPattern()
++		&& !_gestureHorizontal
++		&& !_inSelectionModeAnimation.animating();
++	if (usable && !Tele::NoAi()) {
++		const auto band = st::msgDateImgDelta + st::historyFastShareSize;
++		enumerateItems<EnumItemsDirection::TopToBottom>([&](
++				not_null<Element*> view,
++				int itemtop,
++				int itembottom) {
++			if (itemtop >= _visibleAreaTop + st::msgDateImgDelta) {
++				return false;
++			} else if (view->data()->canBeSummarized()) {
++				const auto from = std::max(itemtop, _visibleAreaTop);
++				const auto till = std::min(
++					itembottom,
++					_visibleAreaTop + band);
++				_teleScrollLayer->stick(QRect(0, from, width(), till - from));
++			}
++			return true;
++		});
++	}
++	const auto key = Tele::ScrollLayerKey(
++		width(),
++		height(),
++		mtop,
++		htop,
++		_contentWidth,
++		_isChatWide,
++		_theme.get(),
++		_selected.size(),
++		_dragSelFrom,
++		_dragSelTo,
++		_dragSelecting,
++		_mouseAction,
++		_lastInSelectionMode,
++		collapseGaps().size(),
++		_aboutView ? _aboutView->top : -1);
++	if (!_teleScrollLayer->paint(p, clip, usable, key)) {
++		return false;
++	}
++	if (base::take(_readMetricsStale)) {
++		_readMetricsTracker->startBatch(_visibleAreaTop, _visibleAreaBottom);
++		enumerateItems<EnumItemsDirection::TopToBottom>([&](
++				not_null<Element*> view,
++				int itemtop,
++				int itembottom) {
++			if (itembottom > itemtop) {
++				_readMetricsTracker->push(
++					view->data(),
++					itemtop,
++					itembottom - itemtop);
++			}
++			return true;
++		});
++		_readMetricsTracker->endBatch();
++	}
++	paintChat(p, clip, ChatPaint::Overlay);
++	return true;
++}
+ 
++void HistoryInner::paintChat(Painter &p, QRect clip, ChatPaint what) {
+ 	auto context = preparePaintContext(clip);
+ 	context.gestureHorizontal = _gestureHorizontal;
+ 	context.highlightPathCache = &_highlightPathCache;
+@@ -1467,34 +1574,48 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
+ 
+ 	const auto historyDisplayedEmpty = _history->isDisplayedEmpty()
+ 		&& (!_migrated || _migrated->isDisplayedEmpty());
+-	if (const auto view = _aboutView ? _aboutView->view() : nullptr) {
+-		if (clip.y() < _aboutView->top + _aboutView->height
+-			&& clip.y() + clip.height() > _aboutView->top) {
+-			const auto top = _aboutView->top;
+-			context.translate(0, -top);
+-			const auto selection = computeRenderSelection(&_selected, view);
+-			context.selection = selection.selection;
+-			context.fullMessageSelected = selection.fullMessageSelected;
+-			context.messageSelection = selection.messageSelection;
+-			p.translate(0, top);
+-			view->draw(p, context);
+-			context.translate(0, top);
+-			p.translate(0, -top);
++	if (what != ChatPaint::Overlay) {
++		if (const auto view = _aboutView ? _aboutView->view() : nullptr) {
++			if (clip.y() < _aboutView->top + _aboutView->height
++				&& clip.y() + clip.height() > _aboutView->top) {
++				const auto top = _aboutView->top;
++				context.translate(0, -top);
++				const auto selection = computeRenderSelection(&_selected, view);
++				context.selection = selection.selection;
++				context.fullMessageSelected = selection.fullMessageSelected;
++				context.messageSelection = selection.messageSelection;
++				p.translate(0, top);
++				view->draw(p, context);
++				context.translate(0, top);
++				p.translate(0, -top);
++			}
++		} else if (historyDisplayedEmpty) {
++			paintEmpty(p, context.st, width(), height());
++		} else {
++			_emptyPainter = nullptr;
+ 		}
+-	} else if (historyDisplayedEmpty) {
+-		paintEmpty(p, context.st, width(), height());
+-	} else {
+-		_emptyPainter = nullptr;
+ 	}
+ 
+ 	const auto mtop = migratedTop();
+ 	const auto htop = historyTop();
+ 	if (historyDisplayedEmpty || (mtop < 0 && htop < 0)) {
+ 		return;
++	} else if (what == ChatPaint::Overlay) {
++		if (htop >= 0) {
++			context.clip = clip.intersected(QRect(
++				0,
++				historyDrawTop(),
++				width(),
++				clip.top() + clip.height()));
++		}
++		paintChatOverlay(p, clip, context);
++		_userpicsCache.clear();
++		return;
+ 	}
+ 
+ 	_translateTracker->startBunch();
+-	const auto metricsStale = base::take(_readMetricsStale);
++	const auto metricsStale = (what == ChatPaint::Full)
++		&& base::take(_readMetricsStale);
+ 	if (metricsStale) {
+ 		_readMetricsTracker->startBatch(_visibleAreaTop, _visibleAreaBottom);
+ 	}
+@@ -1528,7 +1649,9 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
+ 		if (markingAsViewed && !readContents.empty()) {
+ 			session().api().markContentsRead(readContents);
+ 		}
+-		_userpicsCache.clear();
++		if (what == ChatPaint::Full) {
++			_userpicsCache.clear();
++		}
+ 	});
+ 
+ 	const auto processPainted = [&](
+@@ -1739,7 +1862,15 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
+ 		context.translate(0, top);
+ 		p.translate(0, -top);
+ 	}
++	if (what == ChatPaint::Full) {
++		paintChatOverlay(p, clip, context);
++	}
++}
+ 
++void HistoryInner::paintChatOverlay(
++		Painter &p,
++		QRect clip,
++		const Ui::ChatPaintContext &context) {
+ 	enumerateUserpics([&](not_null<Element*> view, int userpicTop) {
+ 		// stop the enumeration if the userpic is below the painted rect
+ 		if (userpicTop >= clip.top() + clip.height()) {
+@@ -4906,6 +5037,7 @@ void HistoryInner::updateSize() {
+ 			mouseActionUpdate(QCursor::pos());
+ 		}
+ 	} else {
++		_teleScrollLayer->invalidate();
+ 		update();
+ 	}
+ 
+diff --git a/Telegram/SourceFiles/history/history_inner_widget.h b/Telegram/SourceFiles/history/history_inner_widget.h
+index 9fcc6228db9d25408cf076330e99281e36eb209a..d6767b1c2d0c8d2c1bc6ceb509552e31d556dac5 100644
+--- a/Telegram/SourceFiles/history/history_inner_widget.h
++++ b/Telegram/SourceFiles/history/history_inner_widget.h
+@@ -83,6 +83,10 @@ using namespace ::Ui;
+ class VideoUserpic;
+ } // namespace Dialogs::Ui
+ 
++namespace Tele {
++class ScrollLayer;
++} // namespace Tele
++
+ class HistoryInner;
+ class HistoryMainElementDelegate;
+ class HistoryMainElementDelegateMixin {
+@@ -429,6 +433,17 @@ private:
+ 		not_null<const Ui::ChatStyle*> st,
+ 		int width,
+ 		int height);
++	enum class ChatPaint {
++		Full,
++		Messages,
++		Overlay,
++	};
++	void paintChat(Painter &p, QRect clip, ChatPaint what);
++	void paintChatOverlay(
++		Painter &p,
++		QRect clip,
++		const Ui::ChatPaintContext &context);
++	[[nodiscard]] bool paintScrollLayer(Painter &p, QRect clip);
+ 
+ 	QPoint mapPointToItem(QPoint p, const Element *view) const;
+ 	QPoint mapPointToItem(QPoint p, const HistoryItem *item) const;
+@@ -724,6 +739,8 @@ private:
+ 
+ 	std::unique_ptr<Ui::ThanosEffectController> _thanosController;
+ 
++	std::unique_ptr<Tele::ScrollLayer> _teleScrollLayer;
++
+ };
+ 
+ [[nodiscard]] bool CanSendReply(not_null<const HistoryItem*> item);
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index c18ebff152481b2c9e74230d96df8bcdd00a1816..57079c8300f637399ede7194588d8651090807a3 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -4091,6 +4091,10 @@ void FillDebug(SectionBuilder &builder) {
+ 	AddDebugLogs(builder);
+ 	AddLogFolders(builder);
+ 	AddClearLogs(builder);
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionScrollStats,
++		{ u"fps"_q, u"frame rate"_q, u"smooth scroll"_q, u"wheel"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"MTProto"_q);
+ 	AddMtpInspector(builder);
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 8e8d36cf3214732041d56b79f0d8b658b47ccb59..70dce73141d689b6ab99203a20ccb8bb3582695c 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -63,6 +63,7 @@ const char kOptionReduceMotion[] = "tele-reduce-motion";
+ const char kOptionReduceMotionSaved[] = "tele-reduce-motion-saved";
+ const char kOptionListKeys[] = "tele-list-keys";
+ const char kOptionSmoothScroll[] = "tele-smooth-scroll";
++const char kOptionScrollStats[] = "tele-scroll-stats";
+ const char kOptionScrollZoom[] = "tele-scroll-zoom";
+ const char kOptionStaticUserpicsChats[] = "tele-static-userpics-chats";
+ const char kOptionHideMentionsButton[] = "tele-hide-mentions-button";
+@@ -622,6 +623,12 @@ base::options::toggle SmoothScrollOption({
+ 	.description = "Eases each mouse wheel step, like profiles already do.",
+ });
+ 
++base::options::toggle ScrollStatsOption({
++	.id = kOptionScrollStats,
++	.name = "Log scroll frame rate",
++	.description = "Writes one line per smooth wheel glide to log.txt.",
++});
++
+ base::options::toggle ScrollZoomOption({
+ 	.id = kOptionScrollZoom,
+ 	.name = "Scroll to zoom in the media viewer",
+@@ -2254,6 +2261,10 @@ rpl::producer<bool> SmoothScrollValue() {
+ 	});
+ }
+ 
++bool ScrollStats() {
++	return ScrollStatsOption.value();
++}
++
+ bool StaticUserpicsChats() {
+ 	return StaticUserpicsChatsOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index fbe98d2149c4799d9da96b6b1cad41a4cfdfb1ec..1727c50bf2be51b9646337e47931b411eaf0f94f 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -57,6 +57,7 @@ extern const char kOptionReduceMotion[];
+ extern const char kOptionReduceMotionSaved[];
+ extern const char kOptionListKeys[];
+ extern const char kOptionSmoothScroll[];
++extern const char kOptionScrollStats[];
+ extern const char kOptionScrollZoom[];
+ extern const char kOptionGhostInMenu[];
+ extern const char kOptionStaticUserpicsChats[];
+@@ -336,6 +337,7 @@ void SetLinkPreviews(const QString &value);
+ void SetReduceMotionSaved(const QString &value);
+ [[nodiscard]] rpl::producer<bool> ListKeysValue();
+ [[nodiscard]] rpl::producer<bool> SmoothScrollValue();
++[[nodiscard]] bool ScrollStats();
+ [[nodiscard]] bool ScrollZoom();
+ [[nodiscard]] bool StaticUserpicsChats();
+ [[nodiscard]] rpl::producer<> StaticUserpicsChatsChanges();
+diff --git a/Telegram/SourceFiles/tele/tele_scroll_layer.cpp b/Telegram/SourceFiles/tele/tele_scroll_layer.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..acbe127cc06043f23368735d12fd962877e080e5
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_scroll_layer.cpp
+@@ -0,0 +1,280 @@
++#include "tele/tele_scroll_layer.h"
++
++#include "ui/painter.h"
++
++#include <QtGui/QPaintEngine>
++
++#include <cmath>
++#include <cstring>
++
++namespace Tele {
++namespace {
++
++constexpr auto kScreens = 3;
++
++[[nodiscard]] std::vector<not_null<ScrollLayer*>> &Layers() {
++	static auto result = std::vector<not_null<ScrollLayer*>>();
++	return result;
++}
++
++[[nodiscard]] ScrollLayer *Find(not_null<QWidget*> scroll) {
++	for (const auto &layer : Layers()) {
++		if (layer->scroll() == scroll) {
++			return layer;
++		}
++	}
++	return nullptr;
++}
++
++} // namespace
++
++ScrollLayer::Timing::Timing(ScrollLayer *layer)
++: _layer(layer)
++, _started(layer
++	? std::chrono::steady_clock::now()
++	: std::chrono::steady_clock::time_point()) {
++}
++
++ScrollLayer::Timing::~Timing() {
++	if (_layer) {
++		const auto elapsed = std::chrono::duration<float64, std::milli>(
++			std::chrono::steady_clock::now() - _started);
++		++_layer->_paints;
++		_layer->_paintMs += elapsed.count();
++	}
++}
++
++ScrollLayer::ScrollLayer(
++	not_null<QWidget*> widget,
++	not_null<QWidget*> scroll,
++	Fn<void(Painter&, QRect)> paint)
++: _widget(widget)
++, _scroll(scroll)
++, _paint(std::move(paint)) {
++	Layers().push_back(this);
++}
++
++ScrollLayer::~ScrollLayer() {
++	auto &layers = Layers();
++	layers.erase(
++		ranges::remove(layers, not_null<ScrollLayer*>(this)),
++		layers.end());
++}
++
++bool ScrollLayer::gliding() const {
++	return _gliding;
++}
++
++ScrollLayer::Timing ScrollLayer::measure() {
++	return Timing((_gliding && _measuring) ? this : nullptr);
++}
++
++void ScrollLayer::invalidate() {
++	_validBottom = _validTop;
++	_dirty = QRegion();
++}
++
++void ScrollLayer::invalidate(QRect rect) {
++	if (_gliding && !_image.isNull() && !rect.isEmpty()) {
++		_dirty += rect;
++	}
++}
++
++void ScrollLayer::stick(QRect rect) {
++	if (_gliding && !rect.isEmpty()) {
++		_sticky += rect;
++	}
++}
++
++bool ScrollLayer::paint(
++		QPainter &p,
++		QRect clip,
++		bool usable,
++		uint64 key) {
++	if (!_gliding) {
++		return false;
++	}
++	const auto ratio = _widget->devicePixelRatioF();
++	const auto whole = int(std::round(ratio));
++	const auto width = _widget->width();
++	const auto height = _scroll->height() * kScreens;
++	const auto top = std::max(clip.y(), 0);
++	const auto bottom = std::min(clip.y() + clip.height(), _widget->height());
++	if (bottom <= top) {
++		return false;
++	}
++	const auto sticky = base::take(_sticky);
++	const auto stickyBefore = std::exchange(_stickyBefore, sticky);
++	if (!usable
++		|| whole < 1
++		|| std::abs(ratio - whole) > 0.001
++		|| width <= 0
++		|| height <= 0
++		|| (bottom - top) > height) {
++		release();
++		return false;
++	}
++	if (_image.isNull()
++		|| _ratio != whole
++		|| _image.width() != width * whole
++		|| _image.height() != height * whole) {
++		_image = QImage(
++			QSize(width, height) * whole,
++			QImage::Format_ARGB32_Premultiplied);
++		_image.setDevicePixelRatio(whole);
++		_ratio = whole;
++		_imageTop = top;
++		_validTop = _validBottom = top;
++		_dirty = QRegion();
++		_key = key;
++	} else if (_key != key) {
++		_key = key;
++		invalidate();
++	}
++	if (top < _imageTop || bottom > _imageTop + height) {
++		moveTo(top - (height - (bottom - top)) / 2);
++	}
++	auto dirty = base::take(_dirty) + sticky + stickyBefore;
++	if (_validTop < _validBottom && !dirty.isEmpty()) {
++		dirty &= QRect(0, _validTop, width, _validBottom - _validTop);
++		for (const auto &rect : dirty) {
++			repaint(rect);
++		}
++	}
++	if (_validTop >= _validBottom
++		|| bottom <= _validTop
++		|| top >= _validBottom) {
++		repaint(QRect(0, top, width, bottom - top));
++		_validTop = top;
++		_validBottom = bottom;
++	} else {
++		if (top < _validTop) {
++			repaint(QRect(0, top, width, _validTop - top));
++			_validTop = top;
++		}
++		if (bottom > _validBottom) {
++			repaint(QRect(0, _validBottom, width, bottom - _validBottom));
++			_validBottom = bottom;
++		}
++	}
++	const auto target = QRect(clip.x(), top, clip.width(), bottom - top);
++	p.drawImage(
++		target,
++		_image,
++		QRect(
++			target.x() * whole,
++			(target.y() - _imageTop) * whole,
++			target.width() * whole,
++			target.height() * whole));
++	_used = true;
++	return true;
++}
++
++void ScrollLayer::moveTo(int top) {
++	const auto height = _image.height() / _ratio;
++	const auto from = std::max({ _validTop, _imageTop, top });
++	const auto till = std::min({
++		_validBottom,
++		_imageTop + height,
++		top + height,
++	});
++	if (from < till) {
++		const auto line = std::size_t(_image.bytesPerLine()) * _ratio;
++		const auto bits = _image.bits();
++		std::memmove(
++			bits + std::size_t(from - top) * line,
++			bits + std::size_t(from - _imageTop) * line,
++			std::size_t(till - from) * line);
++		_validTop = from;
++		_validBottom = till;
++	} else {
++		_validTop = _validBottom = top;
++	}
++	_imageTop = top;
++}
++
++void ScrollLayer::repaint(QRect rect) {
++	const auto engine = _image.paintEngine();
++	engine->setSystemClip(QRegion(
++		rect.x() * _ratio,
++		(rect.y() - _imageTop) * _ratio,
++		rect.width() * _ratio,
++		rect.height() * _ratio));
++	{
++		auto p = Painter(&_image);
++		p.translate(0, -_imageTop);
++		p.setCompositionMode(QPainter::CompositionMode_Source);
++		p.fillRect(rect, Qt::transparent);
++		p.setCompositionMode(QPainter::CompositionMode_SourceOver);
++		_paint(p, rect);
++	}
++	engine->setSystemClip(QRegion());
++}
++
++not_null<QWidget*> ScrollLayer::scroll() const {
++	return _scroll;
++}
++
++ScrollLayerInfo ScrollLayer::info() const {
++	return {
++		.used = _used,
++		.paints = _paints,
++		.paintMs = _paintMs,
++	};
++}
++
++void ScrollLayer::started(bool measure) {
++	_gliding = true;
++	_used = false;
++	_measuring = measure;
++	_paints = 0;
++	_paintMs = 0.;
++}
++
++void ScrollLayer::finished() {
++	if (!base::take(_gliding)) {
++		return;
++	}
++	release();
++	if (base::take(_used)) {
++		_widget->update();
++	}
++}
++
++void ScrollLayer::release() {
++	_image = QImage();
++	_validTop = _validBottom = _imageTop = 0;
++	_dirty = QRegion();
++	_sticky = QRegion();
++	_stickyBefore = QRegion();
++	_key = 0;
++}
++
++uint64 ScrollLayerMix(uint64 seed, uint64 value) {
++	return seed ^ (value
++		+ 0x9e3779b97f4a7c15ULL
++		+ (seed << 6)
++		+ (seed >> 2));
++}
++
++void ScrollLayerStarted(not_null<QWidget*> scroll, bool measure) {
++	if (const auto layer = Find(scroll)) {
++		layer->started(measure);
++	}
++}
++
++void ScrollLayerFinished(not_null<QWidget*> scroll) {
++	if (const auto layer = Find(scroll)) {
++		layer->finished();
++	}
++}
++
++std::optional<ScrollLayerInfo> ScrollLayerGlideInfo(
++		not_null<QWidget*> scroll) {
++	if (const auto layer = Find(scroll)) {
++		return layer->info();
++	}
++	return std::nullopt;
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_scroll_layer.h b/Telegram/SourceFiles/tele/tele_scroll_layer.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..1e27db1a49dc6ba07264948f5ce2d36796572fa6
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_scroll_layer.h
+@@ -0,0 +1,106 @@
++#pragma once
++
++#include <chrono>
++
++class Painter;
++
++namespace Tele {
++
++struct ScrollLayerInfo {
++	bool used = false;
++	int paints = 0;
++	float64 paintMs = 0.;
++};
++
++class ScrollLayer final {
++public:
++	ScrollLayer(
++		not_null<QWidget*> widget,
++		not_null<QWidget*> scroll,
++		Fn<void(Painter&, QRect)> paint);
++	~ScrollLayer();
++
++	class Timing final {
++	public:
++		explicit Timing(ScrollLayer *layer);
++		Timing(const Timing &other) = delete;
++		Timing &operator=(const Timing &other) = delete;
++		~Timing();
++
++	private:
++		ScrollLayer *_layer = nullptr;
++		std::chrono::steady_clock::time_point _started;
++
++	};
++
++	[[nodiscard]] bool gliding() const;
++	[[nodiscard]] Timing measure();
++
++	void invalidate();
++	void invalidate(QRect rect);
++	void stick(QRect rect);
++	[[nodiscard]] bool paint(
++		QPainter &p,
++		QRect clip,
++		bool usable,
++		uint64 key);
++
++	[[nodiscard]] not_null<QWidget*> scroll() const;
++	[[nodiscard]] ScrollLayerInfo info() const;
++	void started(bool measure);
++	void finished();
++
++private:
++	void release();
++	void moveTo(int top);
++	void repaint(QRect rect);
++
++	const not_null<QWidget*> _widget;
++	const not_null<QWidget*> _scroll;
++	const Fn<void(Painter&, QRect)> _paint;
++	QImage _image;
++	int _ratio = 1;
++	int _imageTop = 0;
++	int _validTop = 0;
++	int _validBottom = 0;
++	QRegion _dirty;
++	QRegion _sticky;
++	QRegion _stickyBefore;
++	uint64 _key = 0;
++	bool _gliding = false;
++	bool _used = false;
++	bool _measuring = false;
++	int _paints = 0;
++	float64 _paintMs = 0.;
++
++};
++
++[[nodiscard]] uint64 ScrollLayerMix(uint64 seed, uint64 value);
++
++template <typename ...Values>
++[[nodiscard]] uint64 ScrollLayerKey(const Values &...values) {
++	auto result = uint64(0x9e3779b97f4a7c15ULL);
++	const auto add = [&](const auto &value) {
++		using Type = std::decay_t<decltype(value)>;
++		if constexpr (std::is_pointer_v<Type>) {
++			result = ScrollLayerMix(
++				result,
++				uint64(reinterpret_cast<uintptr_t>(value)));
++		} else if constexpr (std::is_enum_v<Type>) {
++			result = ScrollLayerMix(
++				result,
++				uint64(int64(std::underlying_type_t<Type>(value))));
++		} else {
++			result = ScrollLayerMix(result, uint64(int64(value)));
++		}
++	};
++	(add(values), ...);
++	return result;
++}
++
++void ScrollLayerStarted(not_null<QWidget*> scroll, bool measure);
++void ScrollLayerFinished(not_null<QWidget*> scroll);
++[[nodiscard]] std::optional<ScrollLayerInfo> ScrollLayerGlideInfo(
++	not_null<QWidget*> scroll);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_scroll_stats.cpp b/Telegram/SourceFiles/tele/tele_scroll_stats.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..2e34ba36a15d223a8abc6b155137e5fa079efc2e
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_scroll_stats.cpp
+@@ -0,0 +1,334 @@
++#include "tele/tele_scroll_stats.h"
++
++#include "tele/tele_scroll_layer.h"
++
++#include "base/flat_map.h"
++
++#include <QtCore/QAbstractEventDispatcher>
++#include <QtCore/QCoreApplication>
++#include <QtCore/QEvent>
++#include <QtCore/QPointer>
++#include <QtGui/QPaintEvent>
++#include <QtGui/QScreen>
++
++#include <chrono>
++#include <typeinfo>
++
++#ifndef _MSC_VER
++#include <cxxabi.h>
++#include <cstdlib>
++#endif // !_MSC_VER
++
++namespace Tele {
++namespace {
++
++using Clock = std::chrono::steady_clock;
++
++[[nodiscard]] float64 Milliseconds(Clock::duration duration) {
++	return std::chrono::duration<float64, std::milli>(duration).count();
++}
++
++class AppFilter final : public QObject {
++public:
++	AppFilter(QObject *parent, Fn<bool(QObject*, QEvent*)> filter)
++	: QObject(parent)
++	, _filter(std::move(filter)) {
++		QCoreApplication::instance()->installEventFilter(this);
++	}
++
++	bool eventFilter(QObject *watched, QEvent *e) override {
++		return _filter(watched, e);
++	}
++
++private:
++	const Fn<bool(QObject*, QEvent*)> _filter;
++
++};
++
++class WindowPaints final : public QObject {
++public:
++	struct Widget {
++		int count = 0;
++		float64 sum = 0.;
++		float64 width = 0.;
++		float64 height = 0.;
++		float64 dirty = 0.;
++	};
++
++	explicit WindowPaints(not_null<QWidget*> window) : _window(window) {
++		window->installEventFilter(this);
++		new AppFilter(this, [=](QObject *watched, QEvent *e) {
++			return (e->type() == QEvent::Paint) && paint(watched, e);
++		});
++		if (const auto dispatcher = QAbstractEventDispatcher::instance()) {
++			using Dispatcher = QAbstractEventDispatcher;
++			connect(dispatcher, &Dispatcher::aboutToBlock, this, [=] {
++				_blockedSince = Clock::now();
++				_blocked = true;
++			});
++			connect(dispatcher, &Dispatcher::awake, this, [=] {
++				if (base::take(_blocked)) {
++					idle += Milliseconds(Clock::now() - _blockedSince);
++				}
++			});
++		}
++	}
++
++	bool eventFilter(QObject *watched, QEvent *e) override {
++		if (_inside
++			|| watched != _window.data()
++			|| e->type() != QEvent::UpdateRequest) {
++			return false;
++		}
++		_inside = true;
++		const auto started = Clock::now();
++		watched->event(e);
++		const auto ms = Milliseconds(Clock::now() - started);
++		_inside = false;
++		++count;
++		sum += ms;
++		max = std::max(max, ms);
++		return true;
++	}
++
++	int count = 0;
++	float64 sum = 0.;
++	float64 max = 0.;
++	float64 idle = 0.;
++	base::flat_map<const std::type_info*, Widget> widgets;
++
++private:
++	bool paint(QObject *watched, QEvent *e) {
++		if (!_inside || _painting || !watched->isWidgetType()) {
++			return false;
++		}
++		const auto info = &typeid(*watched);
++		const auto rect = static_cast<QPaintEvent*>(e)->rect();
++		auto area = 0.;
++		for (const auto &part : static_cast<QPaintEvent*>(e)->region()) {
++			area += float64(part.width()) * part.height();
++		}
++		const auto full = float64(rect.width()) * rect.height();
++		_painting = true;
++		const auto started = Clock::now();
++		QCoreApplication::instance()->notify(watched, e);
++		const auto ms = Milliseconds(Clock::now() - started);
++		_painting = false;
++		auto &widget = widgets[info];
++		++widget.count;
++		widget.sum += ms;
++		widget.width += rect.width();
++		widget.height += rect.height();
++		widget.dirty += (full > 0.) ? (area / full) : 1.;
++		return true;
++	}
++
++	QPointer<QWidget> _window;
++	Clock::time_point _blockedSince;
++	bool _blocked = false;
++	bool _inside = false;
++	bool _painting = false;
++
++};
++
++struct DeleteLater {
++	void operator()(QObject *object) const {
++		object->deleteLater();
++	}
++};
++
++struct Glide {
++	QPointer<QWidget> scroll;
++	QString name;
++	std::unique_ptr<WindowPaints, DeleteLater> paints;
++	Clock::time_point started;
++	Clock::time_point last;
++	int frames = 0;
++	float64 minInterval = 0.;
++	float64 maxInterval = 0.;
++	float64 sumInterval = 0.;
++};
++
++[[nodiscard]] std::vector<Glide> &Glides() {
++	static auto result = std::vector<Glide>();
++	return result;
++}
++
++[[nodiscard]] Glide *Find(not_null<QWidget*> scroll) {
++	for (auto &glide : Glides()) {
++		if (glide.scroll.data() == scroll.get()) {
++			return &glide;
++		}
++	}
++	return nullptr;
++}
++
++[[nodiscard]] QString TypeName(const std::type_info &info) {
++	const auto raw = info.name();
++#ifdef _MSC_VER
++	auto result = QString::fromLatin1(raw);
++	for (const auto prefix : { u"class "_q, u"struct "_q }) {
++		if (result.startsWith(prefix)) {
++			return result.mid(prefix.size());
++		}
++	}
++	return result;
++#else // _MSC_VER
++	auto status = 0;
++	const auto demangled = abi::__cxa_demangle(raw, nullptr, nullptr, &status);
++	const auto result = QString::fromLatin1(
++		(status == 0 && demangled) ? demangled : raw);
++	std::free(demangled);
++	return result;
++#endif // _MSC_VER
++}
++
++[[nodiscard]] QString Name(not_null<QWidget*> scroll) {
++	auto result = TypeName(typeid(*scroll.get()));
++	if (const auto parent = scroll->parentWidget()) {
++		result += u" in "_q + TypeName(typeid(*parent));
++	}
++	return result;
++}
++
++[[nodiscard]] QString Format(float64 value) {
++	return QString::number(value, 'f', 2);
++}
++
++[[nodiscard]] float64 ScreenRate(not_null<QWidget*> scroll) {
++	const auto screen = scroll->screen();
++	return screen ? float64(screen->refreshRate()) : 0.;
++}
++
++[[nodiscard]] QString WidgetPaints(const WindowPaints &paints) {
++	if (!paints.count) {
++		return QString();
++	}
++	using Entry = std::pair<const std::type_info*, WindowPaints::Widget>;
++	auto entries = std::vector<Entry>();
++	entries.reserve(paints.widgets.size());
++	for (const auto &[info, widget] : paints.widgets) {
++		entries.emplace_back(info, widget);
++	}
++	ranges::sort(entries, ranges::greater(), [](const Entry &entry) {
++		return entry.second.sum;
++	});
++	constexpr auto kShown = 6;
++	auto list = QStringList();
++	auto painted = 0.;
++	for (const auto &[info, widget] : entries) {
++		painted += widget.sum;
++		if (list.size() < kShown) {
++			list.push_back((u"%1 %2 x%3 (%4x%5, %6% dirty)"_q)
++				.arg(TypeName(*info))
++				.arg(Format(widget.sum / paints.count))
++				.arg(Format(widget.count / float64(paints.count)))
++				.arg(int(base::SafeRound(widget.width / widget.count)))
++				.arg(int(base::SafeRound(widget.height / widget.count)))
++				.arg(int(base::SafeRound(100. * widget.dirty / widget.count))));
++		}
++	}
++	if (int(entries.size()) > kShown) {
++		auto others = 0.;
++		for (auto i = kShown; i != int(entries.size()); ++i) {
++			others += entries[i].second.sum;
++		}
++		list.push_back((u"%1 others %2"_q)
++			.arg(int(entries.size()) - kShown)
++			.arg(Format(others / paints.count)));
++	}
++	return (u", per update: %1; compose and present %2 ms"_q)
++		.arg(list.join(u", "_q))
++		.arg(Format((paints.sum - painted) / paints.count));
++}
++
++} // namespace
++
++void ScrollStatsStarted(not_null<QWidget*> scroll) {
++	auto &glides = Glides();
++	glides.erase(ranges::remove_if(glides, [&](const Glide &glide) {
++		return !glide.scroll || (glide.scroll.data() == scroll.get());
++	}), glides.end());
++	const auto now = Clock::now();
++	glides.push_back({
++		.scroll = scroll.get(),
++		.name = Name(scroll),
++		.paints = std::unique_ptr<WindowPaints, DeleteLater>(
++			new WindowPaints(scroll->window())),
++		.started = now,
++		.last = now,
++	});
++}
++
++void ScrollStatsFrame(not_null<QWidget*> scroll) {
++	const auto glide = Find(scroll);
++	if (!glide) {
++		return;
++	}
++	const auto now = Clock::now();
++	if (glide->frames > 0) {
++		const auto interval = Milliseconds(now - glide->last);
++		glide->minInterval = (glide->frames > 1)
++			? std::min(glide->minInterval, interval)
++			: interval;
++		glide->maxInterval = std::max(glide->maxInterval, interval);
++		glide->sumInterval += interval;
++	}
++	glide->last = now;
++	++glide->frames;
++}
++
++void ScrollStatsFinished(not_null<QWidget*> scroll) {
++	const auto glide = Find(scroll);
++	if (!glide) {
++		return;
++	}
++	const auto duration = Milliseconds(Clock::now() - glide->started);
++	const auto fps = (duration > 0.)
++		? (glide->frames * 1000. / duration)
++		: 0.;
++	const auto intervals = glide->frames - 1;
++	const auto interval = (intervals > 0)
++		? (u"interval min %1 / avg %2 / max %3 ms"_q)
++			.arg(Format(glide->minInterval))
++			.arg(Format(glide->sumInterval / intervals))
++			.arg(Format(glide->maxInterval))
++		: u"interval n/a"_q;
++	const auto info = ScrollLayerGlideInfo(scroll);
++	const auto layer = !info
++		? u"no chat layer"_q
++		: (u"chat layer %1, paint %2 ms avg over %3 paints"_q)
++			.arg(info->used ? u"used"_q : u"not used"_q)
++			.arg(Format(info->paints ? (info->paintMs / info->paints) : 0.))
++			.arg(info->paints);
++	const auto &paints = *glide->paints;
++	const auto window = (u"window paint and present %1 ms avg / %2 max"
++		" over %3 updates"_q)
++		.arg(Format(paints.count ? (paints.sum / paints.count) : 0.))
++		.arg(Format(paints.max))
++		.arg(paints.count);
++	const auto busy = (glide->frames > 0)
++		? (u", main thread busy %1 ms per frame, idle %2%"_q)
++			.arg(Format(
++				std::max(duration - paints.idle, 0.) / glide->frames))
++			.arg(int(base::SafeRound((duration > 0.)
++				? (100. * paints.idle / duration)
++				: 0.)))
++		: QString();
++	LOG(("Tele Scroll: %1, %2 frames in %3 ms, %4 fps, %5, screen %6 Hz, "
++		"%7%10, %8%9"
++		).arg(glide->name
++		).arg(glide->frames
++		).arg(Format(duration)
++		).arg(Format(fps)
++		).arg(interval
++		).arg(Format(ScreenRate(scroll))
++		).arg(window
++		).arg(layer
++		).arg(WidgetPaints(paints)
++		).arg(busy));
++	auto &glides = Glides();
++	glides.erase(glides.begin() + (glide - glides.data()));
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_scroll_stats.h b/Telegram/SourceFiles/tele/tele_scroll_stats.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..8d06de83b3a63f9f95bdd0dba2f49cbcd6918585
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_scroll_stats.h
+@@ -0,0 +1,9 @@
++#pragma once
++
++namespace Tele {
++
++void ScrollStatsStarted(not_null<QWidget*> scroll);
++void ScrollStatsFrame(not_null<QWidget*> scroll);
++void ScrollStatsFinished(not_null<QWidget*> scroll);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index 5fad0cd454e23f990050455538f8b0ebc9fbbd71..d18a9e61548a4bfc750697859f9411c1101f3e74 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -147,6 +147,7 @@ struct Spec {
+ 		Toggle(kOptionReduceMotion),
+ 		Toggle(kOptionListKeys),
+ 		Toggle(kOptionSmoothScroll),
++		Toggle(kOptionScrollStats),
+ 		Toggle(kOptionScrollZoom),
+ 		Toggle(kOptionLocalFolders),
+ 		Toggle(kOptionUnsortedFolder),
+diff --git a/Telegram/SourceFiles/tele/tele_smooth_scroll.cpp b/Telegram/SourceFiles/tele/tele_smooth_scroll.cpp
+index e0b2bede571db9fff706a3631b8b1aff645abc09..8f05787b328676a63689f9c42398d920ab65c8d2 100644
+--- a/Telegram/SourceFiles/tele/tele_smooth_scroll.cpp
++++ b/Telegram/SourceFiles/tele/tele_smooth_scroll.cpp
+@@ -1,9 +1,173 @@
+ #include "tele/tele_smooth_scroll.h"
+ 
+ #include "tele/tele_options.h"
++#include "tele/tele_scroll_layer.h"
++#include "tele/tele_scroll_stats.h"
++#include "base/timer.h"
++#include "ui/rp_widget.h"
+ #include "ui/widgets/smooth_wheel.h"
+ 
++#include <QtCore/QCoreApplication>
++#include <QtCore/QPointer>
++
+ namespace Tele {
++namespace {
++
++constexpr auto kDownloadsRepaintDelay = crl::time(100);
++constexpr auto kHeldRepaintTimeout = crl::time(32);
++
++[[nodiscard]] std::vector<QPointer<QWidget>> &Gliding();
++
++[[nodiscard]] std::vector<QPointer<QWidget>> &Pausable() {
++	static auto result = std::vector<QPointer<QWidget>>();
++	return result;
++}
++
++[[nodiscard]] std::vector<QPointer<QWidget>> &Paused() {
++	static auto result = std::vector<QPointer<QWidget>>();
++	return result;
++}
++
++[[nodiscard]] bool InsideGlide(not_null<QWidget*> widget) {
++	return ranges::any_of(Gliding(), [&](const QPointer<QWidget> &scroll) {
++		return scroll && scroll->isAncestorOf(widget);
++	});
++}
++
++void Resume(not_null<QWidget*> widget) {
++	auto &paused = Paused();
++	const auto i = ranges::find_if(paused, [&](const QPointer<QWidget> &e) {
++		return (e.data() == widget.get());
++	});
++	if (i != end(paused)) {
++		paused.erase(i);
++		widget->setUpdatesEnabled(true);
++	}
++}
++
++// While a glide runs, window repaints wait for its next step, so the
++// window paints once per step instead of whenever something changes.
++// Widgets outside the glide that asked for it stop repainting meanwhile.
++class FrameBatcher final : public QObject {
++public:
++	FrameBatcher(not_null<QWidget*> scroll, not_null<QWidget*> window)
++	: QObject(scroll)
++	, _scroll(scroll)
++	, _window(window)
++	, _timeout([=] {
++		_stepped = true;
++		release();
++	}) {
++		window->installEventFilter(this);
++		for (const auto &weak : Pausable()) {
++			const auto widget = weak.data();
++			if (!widget
++				|| widget->window() != window.get()
++				|| widget->isAncestorOf(scroll)) {
++				continue;
++			} else if (scroll->isAncestorOf(widget)) {
++				Resume(widget);
++			} else if (widget->updatesEnabled() && !InsideGlide(widget)) {
++				widget->setUpdatesEnabled(false);
++				Paused().push_back(widget);
++				_paused.push_back(widget);
++			}
++		}
++	}
++	~FrameBatcher() {
++		release();
++		for (const auto &widget : _paused) {
++			if (widget) {
++				Resume(widget.data());
++			}
++		}
++	}
++
++	[[nodiscard]] QWidget *scroll() const {
++		return _scroll.data();
++	}
++
++	void stepped() {
++		_stepped = true;
++		release();
++	}
++
++	bool eventFilter(QObject *watched, QEvent *e) override {
++		if (watched != _window.data() || e->type() != QEvent::UpdateRequest) {
++			return false;
++		} else if (base::take(_stepped)) {
++			return false;
++		} else if (!_held) {
++			_held = true;
++			_timeout.callOnce(kHeldRepaintTimeout);
++		}
++		return true;
++	}
++
++private:
++	void release() {
++		if (!base::take(_held)) {
++			return;
++		}
++		_timeout.cancel();
++		if (const auto window = _window.data()) {
++			QCoreApplication::postEvent(
++				window,
++				new QEvent(QEvent::UpdateRequest),
++				Qt::LowEventPriority);
++		}
++	}
++
++	const QPointer<QWidget> _scroll;
++	const QPointer<QWidget> _window;
++	std::vector<QPointer<QWidget>> _paused;
++	base::Timer _timeout;
++	bool _stepped = false;
++	bool _held = false;
++
++};
++
++[[nodiscard]] std::vector<QPointer<FrameBatcher>> &Batchers() {
++	static auto result = std::vector<QPointer<FrameBatcher>>();
++	return result;
++}
++
++[[nodiscard]] FrameBatcher *FindBatcher(not_null<QWidget*> scroll) {
++	auto &list = Batchers();
++	list.erase(ranges::remove_if(list, [](const QPointer<FrameBatcher> &e) {
++		return !e;
++	}), end(list));
++	for (const auto &batcher : list) {
++		if (batcher->scroll() == scroll.get()) {
++			return batcher.data();
++		}
++	}
++	return nullptr;
++}
++
++void StartBatching(not_null<QWidget*> scroll) {
++	if (!FindBatcher(scroll)) {
++		Batchers().push_back(new FrameBatcher(scroll, scroll->window()));
++	}
++}
++
++void StopBatching(not_null<QWidget*> scroll) {
++	delete FindBatcher(scroll);
++}
++
++[[nodiscard]] std::vector<QPointer<QWidget>> &Gliding() {
++	static auto result = std::vector<QPointer<QWidget>>();
++	return result;
++}
++
++void ForgetGlide(QWidget *scroll) {
++	auto &list = Gliding();
++	list.erase(ranges::remove_if(list, [&](const QPointer<QWidget> &entry) {
++		return !entry || (entry.data() == scroll);
++	}), end(list));
++}
++
++} // namespace
+ 
+ void StartSmoothScroll() {
+ 	static auto lifetime = rpl::lifetime();
+@@ -11,6 +175,76 @@ void StartSmoothScroll() {
+ 	) | rpl::on_next([](bool enabled) {
+ 		Ui::SetSmoothWheelScroll(enabled);
+ 	}, lifetime);
++	Ui::SetSmoothWheelHooks({
++		.started = [](not_null<QWidget*> scroll) {
++			ForgetGlide(scroll);
++			Gliding().push_back(scroll.get());
++			const auto measure = ScrollStats();
++			ScrollLayerStarted(scroll, measure);
++			if (measure) {
++				ScrollStatsStarted(scroll);
++			}
++			StartBatching(scroll);
++		},
++		.frame = [](not_null<QWidget*> scroll) {
++			ScrollStatsFrame(scroll);
++			if (const auto batcher = FindBatcher(scroll)) {
++				batcher->stepped();
++			}
++		},
++		.finished = [](not_null<QWidget*> scroll) {
++			StopBatching(scroll);
++			ForgetGlide(scroll);
++			ScrollStatsFinished(scroll);
++			ScrollLayerFinished(scroll);
++		},
++	});
++}
++
++bool SmoothGlideActive() {
++	ForgetGlide(nullptr);
++	return !Gliding().empty();
++}
++
++void PauseDuringOtherGlides(not_null<QWidget*> widget) {
++	auto &list = Pausable();
++	list.erase(ranges::remove_if(list, [](const QPointer<QWidget> &entry) {
++		return !entry;
++	}), end(list));
++	list.push_back(widget.get());
++}
++
++void RepaintAfterDownloads(
++		not_null<Ui::RpWidget*> widget,
++		rpl::producer<> downloads,
++		Fn<void()> repaint) {
++	struct State {
++		base::Timer timer;
++		crl::time last = 0;
++	};
++	const auto state = widget->lifetime().make_state<State>();
++	const auto run = [=] {
++		state->last = crl::now();
++		repaint();
++	};
++	state->timer.setCallback([=] {
++		if (SmoothGlideActive()) {
++			state->timer.callOnce(kDownloadsRepaintDelay);
++		} else {
++			run();
++		}
++	});
++	std::move(downloads) | rpl::on_next([=] {
++		if (state->timer.isActive()) {
++			return;
++		}
++		const auto wait = state->last + kDownloadsRepaintDelay - crl::now();
++		if (wait <= 0 && !SmoothGlideActive()) {
++			run();
++		} else {
++			state->timer.callOnce((wait > 0) ? wait : kDownloadsRepaintDelay);
++		}
++	}, widget->lifetime());
+ }
+ 
+ } // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_smooth_scroll.h b/Telegram/SourceFiles/tele/tele_smooth_scroll.h
+index 321bef2c5bf822bbe6c9274c5d423ab204b58e3c..ecddf35fb70a857d2d0641c25dc7e121a01304f6 100644
+--- a/Telegram/SourceFiles/tele/tele_smooth_scroll.h
++++ b/Telegram/SourceFiles/tele/tele_smooth_scroll.h
+@@ -1,7 +1,20 @@
+ #pragma once
+ 
++namespace Ui {
++class RpWidget;
++} // namespace Ui
++
+ namespace Tele {
+ 
+ void StartSmoothScroll();
++[[nodiscard]] bool SmoothGlideActive();
++
++// The widget doesn't repaint while a glide outside it runs.
++void PauseDuringOtherGlides(not_null<QWidget*> widget);
++
++void RepaintAfterDownloads(
++	not_null<Ui::RpWidget*> widget,
++	rpl::producer<> downloads,
++	Fn<void()> repaint);
+ 
+ } // namespace Tele

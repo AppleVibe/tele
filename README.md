@@ -34,6 +34,8 @@ everything tele adds lives in settings → tele, right below the language row.
 - [ghost mode](docs/features.md#privacy): no read receipts, typing, online status or story views, for every chat or just some.
 - [notification centre](docs/features.md#notifications): tele toasts, updates, crash reports and server notices in one list.
 - [mtproto console](docs/features.md#debug): call any api method with your own session, with autocomplete and schema hints.
+- [scripts](docs/scripting.md): javascript and typescript plugins that can use telegram's whole api, the web platform and tele's own windows, each power behind your consent. ready ones are in the [catalog](https://gettele.app/scripting/catalog).
+- [money card designs](docs/features.md#chats): dress money's card in one of your collectible gifts and put your gifts on it as stickers.
 - [kept deleted messages](docs/features.md#messages): messages deleted by others stay in the chat, even after a restart if you want.
 - [local folders and pins](docs/features.md#interface): more folders, chats per folder and pinned chats than telegram allows, kept on this device.
 - [docked media](docs/features.md#sending): attach media above the field, each with its own caption, and keep it as a draft.

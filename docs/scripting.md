@@ -5,7 +5,7 @@ description: Write, fix and explain scripts for tele (a Telegram Desktop fork) i
 
 # tele scripting
 
-tele runs scripts: small TypeScript or JavaScript files that live in a folder, start when you switch them on, and can do anything tele itself can do. a script talks to telegram through the raw api (any method, any update, middleware around tele's own requests), reads and changes tele's local data and settings, adds its own commands, buttons, menu items, settings pages and notices, and reaches into any window through the widget layer. power is never cut down; it's gated by grants, which tele asks you to confirm in plain words before a script starts.
+tele runs scripts: small TypeScript or JavaScript files that live in a folder, start when you switch them on, and can do anything tele itself can do. a script talks to telegram through the raw api (any method, any update, middleware around tele's own requests), reads and changes tele's local data and settings, adds its own commands, buttons, menu items, settings pages, notices, banners, search results, sticker sets and inline answers, opens its own web pages and telegram's mini apps, works with stories, gifts, calls and files on disk, and reaches into any window through the widget layer. next to the javascript standard library it gets the familiar web platform: `fetch`, `WebSocket`, `URL`, `AbortController`, `crypto.subtle`, `Intl`, workers and more. power is never cut down; it's gated by grants, which tele asks you to confirm in plain words before a script starts.
 
 this is the complete reference. every function, getter, property, type, event, grant and global has its own entry with its signature (copied from the `tele.d.ts` tele writes into your scripts folder), what it does, the grant it needs, its parameters, what it returns, what it throws, and an example. on [gettele.app/scripting](https://gettele.app/scripting) it's one page with a filter. for ai agents, [SKILL.md](https://gettele.app/scripting/SKILL.md) is a short index that points to one file per section, so an agent reads only what it needs.
 
@@ -34,7 +34,7 @@ a script is a javascript or typescript module that tele runs inside itself, once
 - **notes:**
   - scripts run on [QuickJS-ng](https://github.com/quickjs-ng/quickjs) 0.17, a small modern javascript engine (ES2025+), not node and not a browser. see [globals](#globals) for what is there.
   - every script gets its own engine, memory and globals. two scripts never share javascript state, and neither do two accounts running the same script.
-  - everything runs on tele's main thread: a script that blocks freezes tele until its time budget runs out (see [errors and limits](#errors-and-limits)).
+  - everything runs on tele's main thread: a script that blocks freezes tele until its time budget runs out (see [errors and limits](#errors-and-limits)). heavy work can move to a `Worker`, which runs on its own thread.
   - the entry module must `export default defineScript({ ... })`.
 
 Example:
@@ -65,7 +65,7 @@ scripts live in one folder on disk, the scripts folder. by default it is `script
 - **grant:** none.
 - **notes:**
   - open it from the Scripts manager: Settings > tele > Scripts β, then the ⋮ menu > Open the scripts folder. tele creates the folder if it's missing.
-  - the same menu has Change the folder (pick any folder) and, once changed, Use the default folder. the choice is global for all accounts and saved in `tdata/tele_scripts.json` as `{ "folder": "..." }`.
+  - the same menu has Change the folder (pick any folder) and, once changed, Use the default folder. the choice is global for all accounts and saved in `tdata/tele_scripts.json`, which also holds `"sources"`, the update links of link-installed scripts (see [updates for link-installed scripts](#updates-for-link-installed-scripts)): `{ "folder": "...", "sources": { ... } }`.
   - changing the folder stops every script of every account and loads the scripts of the new folder.
   - tele writes two files into the folder: `tele.d.ts` (the generated typings, rewritten whenever tele's api schema changes) and `tsconfig.json` (only if there is none). see [typescript setup](#typescript-setup).
 
@@ -100,7 +100,7 @@ tele scans the top level of the scripts folder. every matching file or folder th
   - a top-level `.ts`, `.mts`, `.js` or `.mjs` file is a script.
   - a top-level folder is a script when it has `index.ts` (or, if not, `index.js`). everything else inside the folder is that script's private code.
   - skipped: names starting with `_` or `.`, `node_modules`, `*.d.ts` and `*.d.mts`, and any other extension. put shared helpers in `_lib/` or similar.
-  - `.ts` and `.mts` files go through a type stripper (sucrase): types are erased, enums and constructor parameter properties are compiled, nothing else changes and line numbers stay the same. there is no type checking at runtime; use `tsc` for that. typescript `namespace`s with values and legacy decorators are not supported.
+  - `.ts` and `.mts` files go through a type stripper (sucrase): types are erased, enums and constructor parameter properties are compiled, nothing else changes and line numbers stay the same, and stack traces map columns back to the typescript source. there is no type checking at runtime; use `tsc` for that. typescript `namespace`s with values and legacy decorators are not supported.
   - `.js` and `.mjs` files run as they are. every file is an ES module.
   - the script id is what tele stores your switch, grants and `tg.storage` under. renaming the file makes it a new script that starts off.
 
@@ -124,20 +124,23 @@ export default defineScript({
 ```ts
 import { defineScript, Message, md, html } from 'tele'
 import { helper } from './_lib/helper.ts'
+import { nanoid } from 'nanoid'
+import config from './config.json' with { type: 'json' }
 const lazy = await import('./big-table.ts')
 ```
 
-scripts can import the built-in `tele` module and their own files with relative paths. static and dynamic `import()` both work.
+scripts can import the built-in `tele` module, their own files with relative paths, packages from `node_modules` (see [npm packages](#npm-packages)) and json files. static and dynamic `import()` both work.
 
 - **grant:** none.
 - **notes:**
-  - `'tele'` exports `defineScript`, `Message`, `md` and `html`, plus every api type (`import { type Tg, type PeerInfo } from 'tele'`).
-  - any other specifier must start with `./` or `../`. there are no npm packages: `import x from 'lodash'` fails the start with `only relative imports and 'tele' work, not 'lodash'`.
-  - a relative path must stay inside the script's root, or the start fails with `'<path>' is outside the script`. the root of a single-file script is the whole scripts folder (so it may import `./_lib/x.ts` or even `./other.ts`); the root of a folder script is its own folder.
-  - resolution tries, in order: the exact path, then `+ .ts`, `+ .js`, `+ /index.ts`, `+ /index.js`. `.mts`, `.mjs` and `.json` are never guessed; write them out. a missing file fails with `can't find '<path>'`.
-  - json files are not modules: importing one evaluates the text as javascript, which is normally a syntax error. keep data in a `.ts` file that exports it.
-  - a module is evaluated once per start; static and dynamic imports share it.
-  - every file a script loads, including files it tried and failed to load, is watched for [hot reload](#hot-reload-on-save).
+  - `'tele'` exports `defineScript`, `Message`, `md` and `html`, plus every api type (`import { type Tg, type PeerInfo } from 'tele'`). it always wins over a package called `tele`.
+  - a specifier starting with `./` or `../` is a file of the script; `#name` is an entry of the nearest `package.json`'s `"imports"`; anything else is a package. absolute paths and urls fail the start with `only relative imports, 'tele' and packages from node_modules work, not '<specifier>'`.
+  - a relative path must stay inside the script's root (or inside the scripts folder's `node_modules`), or the start fails with `'<path>' is outside the script`. the root of a single-file script is the whole scripts folder (so it may import `./_lib/x.ts` or even `./other.ts`); the root of a folder script is its own folder.
+  - resolution of your own files tries, in order: the exact path, then `+ .ts`, `+ .js`, `+ /index.ts`, `+ /index.js`; `.mts`, `.mjs` and `.json` are never guessed, write them out. files inside `node_modules` are resolved like node does it: the exact path, then `+ .js`, `+ .mjs`, `+ .ts`, `+ .json`, `+ /index.js`, `+ /index.mjs`, `+ /index.ts`. a missing file fails with `can't find '<path>'`.
+  - json: a `.json` file, or any file imported `with { type: 'json' }`, is a module whose default export is the parsed value (no named exports). invalid json fails with the parser's `SyntaxError`. any other import attribute fails with `TypeError: import type '<type>' isn't supported, only type: 'json'` (or `the import attribute '<key>' isn't supported, only type: 'json'`). the generated `tsconfig.json` turns on `resolveJsonModule`, so `tsc` types json imports too.
+  - a module is evaluated once per start; static and dynamic imports share it. a json file imported both with and without `with { type: 'json' }` is two modules with equal values.
+  - every file a script loads, including files it tried and failed to load, package files, the `package.json` files resolution read and the `node_modules/<name>` folders it looked in for a missing package, is watched for [hot reload](#hot-reload-on-save).
+  - `.ts` and `.mts` files keep their line numbers after stripping, and stack traces (`error.stack`, errors in the log) also map columns back to the typescript source, so `file.ts:12:34` is where your editor shows it. columns of `.js` files are byte offsets. a script that sets its own `Error.prepareStackTrace` gets the raw positions in its call sites.
 
 Example:
 
@@ -157,6 +160,47 @@ export default defineScript({
 })
 ```
 
+### npm packages
+
+```ts
+// npm install nanoid dayjs   (in the scripts folder)
+import { nanoid } from 'nanoid'
+import dayjs from 'dayjs'
+```
+
+bare specifiers (`'pkg'`, `'pkg/sub/path'`, `'@scope/pkg'`) resolve from `node_modules` the way node and bundlers do. install packages with npm, pnpm, yarn or bun in the scripts folder, or in a folder script's own folder. es modules are the format; simple commonjs files work as a default export.
+
+- **grant:** none. package code runs inside the script with the script's grants, like the script's own files.
+- **notes:**
+  - lookup: for an import in a file in folder `F`, tele tries `F/node_modules/<name>`, then the `node_modules` of each parent folder, up to and including the scripts folder. so a folder script sees its own `node_modules` first, then the scripts folder's; a single-file script uses the scripts folder's (and a package sees its own nested `node_modules` first).
+  - the entry comes from `package.json`: `exports` first (a string, an array of fallbacks, condition objects, subpath exports like `"./sub"` and patterns like `"./features/*"`, the longest matching prefix wins). conditions are picked by priority, not by their order in the file: `import`, then `module`, then `browser`, then `default`. `require`, `node`, `types` and any other condition are never used; so a package with a `browser` build (no node built-ins) gets that one over its node `default`.
+  - without `exports`: `module`, then `main`, then `index.js` (and `.mjs`, `.ts`); a subpath is a file inside the package with the same extension guesses.
+  - `exports` is a whitelist: a subpath the package doesn't list fails with `package '<name>' doesn't export './sub'`, one mapped to `null` with `'<name>/sub' is not exported by node_modules/<name>/package.json`, and a package with only `require`/`node` conditions with `'<name>': node_modules/<name>/package.json has no condition tele uses (import, module, browser or default), only node, require`.
+  - a package's `"imports"` (`#internal` specifiers, patterns, and targets that are other packages) work inside that package; your own folder script can use them too with its own `package.json`.
+  - commonjs: a `.cjs` file, or a `.js` file under `node_modules` that has no `import`/`export` and uses `module.exports`, `exports.x =` or `require(`, runs on its own as a commonjs module (sloppy mode, `this` is `module.exports`, `exports`, `module`, `__filename` and `__dirname` exist) and becomes a single default export: `import pkg from 'pkg'` works, named imports from it (`import { x } from 'pkg'`) fail to link. a file that sets `exports.__esModule = true` and has `exports.default` gives `exports.default` as the default export (like esbuild). `require()` inside such a file throws `require('<name>') in <file>: tele runs a commonjs file only on its own and can't require() other modules; import an es module build of the package instead`. so umd bundles and dependency-free commonjs files work; anything that requires other files needs its es module build (often `lodash-es`-style packages or an `import` condition) or a bundle (`esbuild --bundle --format=esm`).
+  - there is no node: `node:<name>` always fails, and a bare built-in name (`fs`, `path`, `crypto`…) fails unless a package with that name is installed (npm polyfills like `buffer` or `events` do work). the error says what to use instead, e.g. `'node:fs' is a node built-in, and tele scripts don't run on node: use tg.fs (the script's file area) instead`: `fs` → `tg.fs`, `path` → `URL` and string methods, `url` → the global `URL` and `URLSearchParams`, `querystring` → `URLSearchParams`, `crypto` → the global `crypto`, `buffer` → `Uint8Array`, `TextEncoder`, `TextDecoder`, `atob` and `btoa`, `string_decoder` → `TextDecoder`, `events` → `EventTarget`, `zlib` → `compression`, `worker_threads` → `Worker`, `child_process` → `tg.unsafe.exec`, `http`, `https`, `http2`, `net`, `tls`, `dns`, `dgram` → `fetch` and `WebSocket`, `timers` → `setTimeout` and `setInterval`, `util` → `structuredClone`, `TextEncoder` and `TextDecoder`, `console` → the global `console`; the rest say `tele has no equivalent`.
+  - which packages work: es modules (or simple commonjs) that only need the language and the [globals](#globals) tele has, like date, string, id, parsing and validation libraries. packages that touch `window`, `document`, `localStorage`, `process` or node built-ins when they load fail with the usual `ReferenceError` or one of the errors above.
+  - a package that isn't installed fails the start with `can't find package '<name>' in node_modules: install it in the scripts folder (npm install <name>)`; installing it restarts the script.
+  - package files are watched like your own: `npm update` restarts the scripts that loaded the package. `node_modules` folders are never scanned for scripts.
+  - typings: `tsc` uses the package's own types (`types`, a `types` condition in `exports`) or `@types/<name>`; the generated `tsconfig.json` resolves like a bundler (`moduleResolution: "Bundler"`).
+  - workers can't import anything, packages included: bundle what a worker needs into its file.
+
+Example:
+
+```ts
+// scripts/ids.ts, after `npm install nanoid dayjs` in the scripts folder
+import { defineScript } from 'tele'
+import { nanoid } from 'nanoid'
+import dayjs from 'dayjs'
+
+export default defineScript({
+  name: 'ids',
+  setup(tg) {
+    tg.toast(`session ${nanoid(10)} started at ${dayjs().format('HH:mm:ss')}`)
+  },
+})
+```
+
 ### hot reload on save
 
 ```ts
@@ -168,7 +212,7 @@ when you save a file a running script loaded, tele stops that script (its cleanu
 - **grant:** none.
 - **notes:**
   - file changes are collected for 300 ms, so editors that write a file in several steps cause one reload.
-  - only files the script actually loaded count (the entry, its imports, files loaded later with `import()`, and files it tried to load). a new file nobody imports restarts nothing.
+  - only files the script actually loaded count (the entry, its imports, files loaded later with `import()`, files it tried to load, and the package files and `package.json` files of [npm packages](#npm-packages) it used). a new file nobody imports restarts nothing.
   - a new top-level script appears in the Scripts manager at once, turned off. a deleted script stops and disappears.
   - a script that failed to start, or is waiting for your approval, tries again only when one of its files changes.
   - an edited script that now declares more grants than you gave doesn't start: it waits for your approval (see [the consent box](#the-consent-box)). declaring fewer starts without asking.
@@ -541,11 +585,14 @@ export default defineScript({ name: 'auto read', setup() {} })
 version?: string
 ```
 
-a version string for people. tele doesn't compare or enforce it.
+a version string for people, and the number tele compares when it checks a link-installed script for updates.
 
 - **grant:** none.
 - **notes:**
   - shown on the script page as "version {version}" and returned by `tg.scripts.list()`.
+  - for updates, versions are compared semver-style: an optional leading `v`, dot-separated numbers (missing parts count as 0, so `1.2` equals `1.2.0`), an optional `-prerelease` that sorts before the release (`1.0.0-beta.2` < `1.0.0`), `+build` ignored. when either side isn't in that shape, any different text counts as an update.
+  - a script without a version never shows "update available": tele only offers what the link's `defineScript({ version })` says is newer.
+  - tele reads it statically (see [off until turned on](#off-until-turned-on)), so write it as a string literal.
 
 Example:
 
@@ -879,9 +926,11 @@ the Scripts manager is tele's panel for scripts: a separate resizable window per
 - **grant:** none.
 - **notes:**
   - the list: a search field on top (matches name, file id, description and author; Enter opens the only match), tabs All, On, Off and Need attention (waiting for approval or failing), and a row per script with its icon, name, a status line and a switch.
-  - the status line shows, in order: "Waiting for your approval", the start error (red), the description, "Running", "Starting" or "Off".
+  - the status line shows, in order: "Waiting for your approval", the start error (red), "Update available: {version}" (accent color), the description, "Running", "Starting" or "Off".
+  - opening the manager checks every link-installed script for updates (at most once a minute per script); see [updates for link-installed scripts](#updates-for-link-installed-scripts).
   - clicking a row opens the [script page](#the-script-page).
-  - the ⋮ menu: Install from a file, Install from a link, Open the scripts folder, Change the folder, Use the default folder (only when changed), MTProto console.
+  - the ⋮ menu: Install from a file, Install from a link, Open the scripts folder, Rescan the scripts folder, Change the folder, Use the default folder (only when changed), MTProto console.
+  - new, removed and renamed scripts show up on their own: tele watches the folder and also checks it every 2 seconds (for folders where change notifications don't arrive, like network drives or some sync tools), and rescans whenever the manager opens. Rescan the scripts folder does it at once.
 
 Example:
 
@@ -905,10 +954,11 @@ everything about one script on this account.
 - **grant:** none.
 - **notes:**
   - header: icon, name, "version {version} · by {author} · {file}", the description and the homepage link.
-  - status: "It's waiting for your approval: it asks for permissions you haven't given yet." with Review permissions, or the start error in red (selectable).
+  - status: "It's waiting for your approval: it asks for permissions you haven't given yet." with Review permissions, or the start error in red (selectable). then, when the update link has a newer version, "Update available: {version}" with Update to {version}... .
   - Turned on: the switch. Reload (when on), Open the file, Show in folder, Remove... .
   - Settings: the page the script registered with `tg.registerSettings`, rendered inline.
   - Permissions: every granted grant in plain words with a revoke link each, then "Asks for, not given:" with declared grants you haven't approved, or "It asks for nothing.". revoking asks "Revoke «{grant}»? The script restarts and asks for it again if it needs it.".
+  - Updates (single-file `.ts` and `.js` scripts only): "Update link: {url}" with Check for updates and Change update link..., or "No update link: it was installed from a file or copied into the folder." with Set update link... .
   - Storage: "tg.storage: {n} keys, {size}" and "Saved ghost messages: {n}, {size}", with Clear storage... ("Clear everything this script saved on this account, including its saved ghost messages?"). clearing restarts a running script.
   - Log: the last 5 lines, live, and Open the console.
 
@@ -962,17 +1012,54 @@ besides copying files into the folder, the manager can install a script from a f
 
 - **grant:** none.
 - **notes:**
-  - Install from a file: pick a `.ts` or `.js` file; it is copied into the scripts folder.
-  - Install from a link: "A direct link to a .ts or .js file. It goes into the scripts folder and stays off until you turn it on." http and https only, at most 5 MB, 30 s timeout, redirects only to equally safe urls.
-  - other names are refused with "A script is a .ts or .js file.". an existing file asks "{file} is already in the scripts folder. Replace it?".
+  - Install from a file: pick a `.ts` or `.js` file; it is copied into the scripts folder. it has no update link (set one on its page if you want updates).
+  - Install from a link: "A direct link to a .ts or .js file. It goes into the scripts folder and stays off until you turn it on. tele checks the link for new versions." http and https only, at most 5 MB, 30 s timeout, redirects only to equally safe urls. the link you typed is remembered as the script's update link.
+  - the install link `tg://tele/script?url=<encoded url>` (an http(s) url, `encodeURIComponent`-encoded) opens the Scripts manager's Install from a link box with that url filled in. nothing is downloaded until you press Install, and the script stays off until you turn it on and approve its grants, like any link install. a link without a valid http(s) url shows "This link doesn't point to a script.". the file gets the name at the end of the url.
+  - the script catalog at [gettele.app/scripting/catalog](https://gettele.app/scripting/catalog) lists ready scripts with their grants; each card has an install link of that form, the source and a copy-link button (paste the link into Install from a link when `tg://` opens another app). catalog installs keep the catalog url as their update link.
+  - other names are refused with "A script is a .ts or .js file.". an existing file asks "{file} is already in the scripts folder. Replace it?". replacing from a file drops the old update link; replacing from a link sets the new one.
   - after installing: "Installed {file}. It stays off until you turn it on.".
-  - Remove... asks "Remove {name}? Its file goes to the recycle bin, its storage stays until you clear it." and moves the file (or the whole folder of a folder script) to the recycle bin, or deletes it when that isn't possible. its grants are forgotten.
+  - Remove... asks "Remove {name}? Its file goes to the recycle bin, its storage stays until you clear it." and moves the file (or the whole folder of a folder script) to the recycle bin, or deletes it when that isn't possible. its grants and its update link are forgotten.
+  - if the script kept files in its [file area](#the-file-area), a second box asks "Also delete the files {name} kept in its file area? They are in {folder}."; Delete removes that folder.
 
 Example:
 
 ```bash
 # the same as Install from a file
 cp ~/Downloads/auto-read.ts path/to/tele/scripts/
+```
+
+### updates for link-installed scripts
+
+```ts
+// script page > Update to {version}...
+// script page > Updates > Check for updates | Set update link...
+```
+
+a script installed from a link keeps that link, and tele looks there for newer versions: when you open the Scripts manager and every 6 hours while tele runs (the first check a minute after start).
+
+- **grant:** none.
+- **notes:**
+  - the update link is app-wide, kept per script file name in `tdata/tele_scripts.json` under `"sources"` (`{ "url", "etag", "latest" }`), next to `"folder"`. folder scripts have no update link.
+  - a check downloads the link (at most 1 MB, 30 s timeout, tele's proxy, `If-None-Match` with the last `ETag`, so an unchanged file costs a `304`), reads `defineScript({ version })` from it the same static way as for scripts that are off, and remembers that version. nothing is written into the scripts folder and nothing runs.
+  - when the link's version is newer than the installed one (see [definition.version](#definitionversion)), the row says "Update available: {version}" and the page shows it with Update to {version}... .
+  - Update to {version}... downloads the file again and asks: "Update {name} from {old} to {new}? Its file is replaced and the old one goes to the recycle bin.", then the grants diff: "New grants:" (each in plain words, plus "It waits for your approval of them before it runs again." when it's on), "No longer asks for:", or "It asks for the same grants.". a grant counts as new only when the old declaration doesn't already cover it.
+  - confirming moves the old file to the recycle bin, writes the new one and says "Updated {name} to {version}.". hot reload restarts a script that is on; when it now declares more than you approved it waits for your approval like any edit (see [the consent box](#the-consent-box)). a script that is off stays off.
+  - when the downloaded file is byte-for-byte the installed one: "It's up to date.".
+  - Check for updates checks this script now and says "Update available: {version}", "It's up to date." or "Can't check for updates: {error}".
+  - Set update link... / Change update link... take a direct http(s) link to the newest `.ts`/`.js` file and check it at once; saving an empty field stops checking. use a link that always points at the latest version (a gist's raw link without the revision hash, a repo's raw `main` link), not a pinned revision.
+  - failed automatic checks go to tele's `log.txt` only.
+  - with the `-teleoffline` [launch flag](launch-flags.md) tele doesn't check at all, and Check for updates says "Can't check for updates: updates are off for this launch.". installing from a link still works: it's something you asked for.
+
+Example:
+
+```ts
+// https://gist.githubusercontent.com/you/<id>/raw/pinger.ts
+export default defineScript({
+  name: 'pinger',
+  version: '1.5.0', // was '1.4.2': everyone who installed the raw link sees "Update available: 1.5.0"
+  grants: ['call(help.getConfig)'],
+  setup(tg) {},
+})
 ```
 
 ## grants
@@ -988,7 +1075,7 @@ a script declares in `grants` everything powerful it may do. you approve the lis
 - **grant:** n/a.
 - **notes:**
   - an entry is a bare name (`'call'`) meaning everything that name allows, or a name with scopes (`'call(messages.getHistory, users.getUsers)'`). `name(*)` is the same as the bare name. names may repeat; scopes add up.
-  - what needs no grant at all: `tg.toast`, `tg.ui` boxes and pages, commands, buttons, menu items, quick actions, shortcuts, `tg.storage`, navigation, reading `tg.options`, the app theme and player state, connection state, `tg.schedule`, `tg.scripts.list`. they change nothing outside this tele or are triggered by you.
+  - what needs no grant at all: `tg.toast`, `tg.ui` boxes and pages, commands, buttons, menu items, quick actions, shortcuts, `tg.storage`, navigation, reading `tg.options`, the app theme and player state, connection state, `tg.schedule`, `tg.scripts.list`, the script's own file area in `tg.fs`, `tg.image`, `compression`, workers, banners, sticker and gif panels, registering inline answers, search providers, the media viewer and html `tg.ui.webview` panels. they change nothing outside this tele or are triggered by you.
   - changing what tele shows you about messages and people (decorations, peer overrides, local messages) changes nothing on the server either, but it needs [`display`](#grant-display): a script could make a message say something it doesn't ("send money to this card") or make a stranger look verified, so tele asks first.
   - the error message names the missing grant, for example `tg.call(users.getUsers) needs the grant 'account.read(peers)'` or `fetch(https://example.com/) needs the grant 'fetch(example.com)'`.
   - whatever the grants say, the [account protection](#account-protection) and the [dangerous methods](#dangerous-methods) rule apply.
@@ -1030,7 +1117,7 @@ export type Grant =
   | 'interceptSendMessage'
   | 'account.read'
   | `account.read(${Some<
-    'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft'
+    'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft' | 'stories' | 'gifts'
   >})`
   | 'account.write'
   | `account.write(${Some<
@@ -1042,6 +1129,9 @@ export type Grant =
     | 'read'
     | 'typing'
     | 'draft'
+    | 'notify'
+    | 'stories'
+    | 'gifts'
   >})`
   | 'fetch'
   | `fetch(${string})`
@@ -1063,6 +1153,10 @@ export type Grant =
   | 'ui.write'
   | 'display'
   | `display(${Some<'messages' | 'peers' | 'local'>})`
+  | 'fs.read'
+  | `fs.read(${string})`
+  | 'fs.write'
+  | `fs.write(${string})`
   | 'unsafe.automate'
   | 'unsafe.disableApiFiltering'
 ```
@@ -1089,6 +1183,7 @@ const grants: Grant[] = ['call(help.getConfig)', 'onUpdate(updateNewMessage, upd
 'call(messages.*)'
 'interceptRpc(messages.send*)'
 'fetch(example.com)'
+'fs.read(documents/notes)'
 ```
 
 scopes narrow a grant. what a scope may be depends on the grant.
@@ -1099,10 +1194,12 @@ scopes narrow a grant. what a scope may be depends on the grant.
   - updates (`onUpdate`, `interceptUpdate`): an `Update` constructor name or one of the short ones (`updateShortMessage`, `updateShortChatMessage`, `updateShortSentMessage`); `onUpdate` also takes `new_message`, `edit_message` and `delete_message`.
   - lists (`account.read`, `account.write`, `display`): one of the fixed words.
   - hosts (`fetch`): a host name; lowercased; covers the host and its subdomains.
+  - folders (`fs.read`, `fs.write`): an absolute path, or `~`, `home`, `documents`, `downloads`, `desktop`, `pictures`, `music`, `videos` or `temp` (the system's folders), optionally followed by `/sub`; covers the folder and everything in it. anything else is `grant 'fs.read(x)': 'x' is not a folder (...)`.
   - no scope at all: every other grant. `grant '<entry>' takes no scopes` otherwise.
 - **notes:**
   - a glob matches by prefix: `call(messages.*)` covers `messages.getHistory`, but never a [dangerous method](#dangerous-methods).
   - `fetch(github.com)` covers `github.com` and `api.github.com`, not `notgithub.com`.
+  - `fs.read(documents)` covers every file under the documents folder; `..` is resolved first, so `documents/../secret.txt` isn't inside it.
   - `'*'` as an update or method name in `tg.onUpdate('*')`, `tg.interceptRpc('*')` or `tg.interceptUpdate('*')` needs the bare grant.
 
 Example:
@@ -1127,8 +1224,9 @@ when a script starts, its declared grants must be covered by what you approved f
 
 - **grant:** n/a.
 - **notes:**
-  - a grant covers another of the same name when the scopes are equal, when it is bare, when it is a glob whose prefix covers the other's method or prefix, or when its host covers the other's host or subdomain.
+  - a grant covers another of the same name when the scopes are equal, when it is bare, when it is a glob whose prefix covers the other's method or prefix, when its host covers the other's host or subdomain, or when its folder contains the other's folder (`fs.read(documents)` covers `fs.read(documents/notes)`).
   - an exact dangerous method (`call(messages.deleteMessages)`) is covered only by itself, never by a bare grant or a glob.
+  - `account.write(gifts)` is covered only by itself: a bare `account.write` (or `account.write(*)`) never covers it.
   - so a script edited to declare fewer or narrower grants starts silently; one that declares more stops and asks.
   - Allow stores exactly the declared list, replacing what was approved before.
 
@@ -1151,8 +1249,8 @@ every grant has a tier that says how much trust it asks for. the tier is listed 
 - **grant:** n/a.
 - **notes:**
   - neutral: reads and reactions that stay within what a script is for (`onUpdate`, `account.read`, `fetch`, `notify`...).
-  - caution: acting as you, reaching outside tele or changing what it shows you (`account.write`, `interceptSendMessage`, `clipboard.read`, `options`, `app`, `calls`, `accounts`, `files.write`, `ui.read`, `ui.write`, `display`, bare `call`...).
-  - dangerous: `unsafe.exec`, `unsafe.automate`, `unsafe.disableApiFiltering`, and exact entries for dangerous methods (`call(messages.deleteMessages)`, `interceptRpc(channels.leaveChannel)`).
+  - caution: acting as you, reaching outside tele or changing what it shows you (`account.write`, `interceptSendMessage`, `clipboard.read`, `options`, `app`, `calls`, `accounts`, `files.write`, `ui.read`, `ui.write`, `display`, `fs.read(<folder>)`, `fs.write(<folder>)`, bare `call`...).
+  - dangerous: `unsafe.exec`, `unsafe.automate`, `unsafe.disableApiFiltering`, bare `fs.read` and `fs.write`, `account.write(gifts)`, and exact entries for dangerous methods (`call(messages.deleteMessages)`, `interceptRpc(channels.leaveChannel)`).
   - the consent box shows every grant in plain words and puts the dangerous ones in a bold "Dangerous: ..." line at the end.
 
 Example:
@@ -1175,12 +1273,12 @@ grants: [
 // Dangerous: <dangerous entries>.
 ```
 
-the consent box shows one bullet per grant name, in a fixed order (account.read, account.write, onUpdate, call, interceptRpc, interceptUpdate, interceptSendMessage, fetch, clipboard.read, clipboard.write, openUrl, notify, interceptLink, interceptNotification, scripts, app, interceptDrop, calls, accounts, ui.read, ui.write, display, files.write, options), then the dangerous line.
+the consent box shows one bullet per grant name, in a fixed order (account.read, account.write, onUpdate, call, interceptRpc, interceptUpdate, interceptSendMessage, fetch, clipboard.read, clipboard.write, openUrl, notify, interceptLink, interceptNotification, scripts, app, interceptDrop, calls, accounts, ui.read, ui.write, fs.read, fs.write, display, files.write, options), then the dangerous line.
 
 - **grant:** n/a.
 - **notes:**
-  - a bare grant shows its "everything" sentence; scoped ones show the scoped sentence with the scopes joined by commas (methods, updates and hosts as written; account scopes as words like "chats and contacts").
-  - dangerous parts are joined with "; " in the bold line, in this order: "send {methods}" for `call`, "intercept {methods}" for `interceptRpc`, "turn off the account protection: log in, change the password and sessions, see login codes", "run any program on your computer, with your rights" and "press any button in tele for you".
+  - a bare grant shows its "everything" sentence; scoped ones show the scoped sentence with the scopes joined by commas (methods, updates and hosts as written; account scopes as words like "chats and contacts", folders as written).
+  - dangerous parts are joined with "; " in the bold line, in this order: "send {methods}" for `call`, "intercept {methods}" for `interceptRpc`, "turn off the account protection: log in, change the password and sessions, see login codes", "run any program on your computer, with your rights", "press any button in tele for you", then, in the order the grants are declared, "transfer, sell, convert and upgrade your gifts" for `account.write(gifts)`, "read any file on your computer" for a bare `fs.read` and "create, change and delete any file on your computer" for a bare `fs.write`.
   - the script page's Permissions list uses the same sentences, one per approved grant string.
 
 Example:
@@ -1438,12 +1536,12 @@ export default defineScript({
 | 'account.read'
 ```
 
-every `account.read` scope at once: profile, chats and contacts, messages, chat list, history and drafts.
+every `account.read` scope at once: profile, chats and contacts, messages, chat list, history, drafts, stories and gifts.
 
 - **grant:** `account.read`, `account.read(*)`.
 - **tier:** neutral.
-- **consent text:** "Read your profile, chats, messages, history and drafts.".
-- **unlocks:** everything in the six scope items below.
+- **consent text:** "Read your profile, chats, messages, history, drafts, stories and gifts.".
+- **unlocks:** everything in the eight scope items below.
 - **notes:**
   - prefer the scopes you need; the box is shorter and you approve less.
 
@@ -1457,7 +1555,7 @@ grants: ['account.read']
 
 ```ts
 `account.read(${Some<
-  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft'
+  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft' | 'stories' | 'gifts'
 >})`
 ```
 
@@ -1482,7 +1580,7 @@ console.log('logged in as', me._ === 'user' ? me.firstName : '?')
 
 ```ts
 `account.read(${Some<
-  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft'
+  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft' | 'stories' | 'gifts'
 >})`
 ```
 
@@ -1507,7 +1605,7 @@ console.log(durov?.name, durov?.id)
 
 ```ts
 `account.read(${Some<
-  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft'
+  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft' | 'stories' | 'gifts'
 >})`
 ```
 
@@ -1516,7 +1614,7 @@ lets the script read messages by id, download media and look into tele's message
 - **grant:** `account.read(messages)`.
 - **tier:** neutral.
 - **consent text:** "Read your messages.".
-- **unlocks:** `tg.getMessages`, `tg.downloadMedia` (both forms), `tg.decorateMessages` (together with `display(messages)`), `tg.getCachedMessage` (always `null` without it), the `message` field of `tg.interceptNotification`, the cached `previous` of `tg.onMessageEdited` and `messages` of `tg.onMessageDeleted`, and the raw methods `messages.getMessages` and `channels.getMessages`.
+- **unlocks:** `tg.getMessages`, `tg.downloadMedia` (both forms), `tg.decorateMessages` (together with `display(messages)`), `tg.getCachedMessage` (always `null` without it), the `message` field of `tg.interceptNotification`, the cached `previous` of `tg.onMessageEdited` and `messages` of `tg.onMessageDeleted`, `tg.tele.bookmarks.list`, `tg.tele.editHistory`, `tg.tele.deleted.list`, `onKept` and `interceptKeep` (that one with `options`), `tg.interceptSearch`, and the raw methods `messages.getMessages` and `channels.getMessages`.
 - **throws:** `TeleError` `not-granted` (`tg.downloadMedia needs the grant 'account.read(messages)'`).
 
 Example:
@@ -1530,7 +1628,7 @@ console.log(message?.text)
 
 ```ts
 `account.read(${Some<
-  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft'
+  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft' | 'stories' | 'gifts'
 >})`
 ```
 
@@ -1539,7 +1637,7 @@ lets the script read your chat list and folders.
 - **grant:** `account.read(dialogs)`.
 - **tier:** neutral.
 - **consent text:** "Read your chat list.".
-- **unlocks:** `tg.getDialogs`, `tg.iterDialogs`, `tg.local.dialogs()`, `tg.local.unread()`, `tg.local.folders()`, and the raw methods `messages.getDialogs`, `messages.getPeerDialogs`, `messages.getPinnedDialogs`.
+- **unlocks:** `tg.getDialogs`, `tg.iterDialogs`, `tg.local.dialogs()`, `tg.local.unread()`, `tg.local.folders()`, `tg.tele.pins.list`, the chats in the rules of `tg.tele.folders.list()`, and the raw methods `messages.getDialogs`, `messages.getPeerDialogs`, `messages.getPinnedDialogs`.
 - **throws:** `TeleError` `not-granted` (`tg.local.dialogs needs the grant 'account.read(dialogs)'`).
 - **notes:**
   - `tg.local.loaded()` needs nothing.
@@ -1555,7 +1653,7 @@ console.log('badge:', unread.badge)
 
 ```ts
 `account.read(${Some<
-  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft'
+  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft' | 'stories' | 'gifts'
 >})`
 ```
 
@@ -1579,7 +1677,7 @@ for await (const message of tg.iterHistory('me', { limit: 50 })) {
 
 ```ts
 `account.read(${Some<
-  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft'
+  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft' | 'stories' | 'gifts'
 >})`
 ```
 
@@ -1599,18 +1697,67 @@ tg.compose.onInput(({ chatId, text }) => {
 })
 ```
 
+### grant: account.read(stories)
+
+```ts
+`account.read(${Some<
+  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft' | 'stories' | 'gifts'
+>})`
+```
+
+lets the script read stories: a peer's active stories, its archive and pinned stories, who has stories to watch, and new stories as they come.
+
+- **grant:** `account.read(stories)`.
+- **tier:** neutral.
+- **consent text:** "Read your stories." (scopes are joined: "Read your chats and contacts, stories.").
+- **unlocks:** `tg.stories.list`, `tg.stories.get`, `tg.stories.archive`, `tg.stories.pinned`, `tg.stories.sources`, `tg.stories.onStory`, `tg.stories.interceptStoryView`, and the raw methods `stories.getPeerStories`, `stories.getStoriesByID`, `stories.getStoriesArchive`, `stories.getPinnedStories`.
+- **throws:** `TeleError` `not-granted` (`tg.stories.sources needs the grant 'account.read(stories)'`).
+- **notes:**
+  - `tg.stories.registerStoryAction` needs no grant; marking stories as read is `account.write(stories)`. see [stories](#stories).
+
+Example:
+
+```ts
+for (const source of tg.stories.sources()) console.log(source.peer, source.unread)
+```
+
+### grant: account.read(gifts)
+
+```ts
+`account.read(${Some<
+  'self' | 'peers' | 'messages' | 'dialogs' | 'history' | 'draft' | 'stories' | 'gifts'
+>})`
+```
+
+lets the script read star gifts and stars: the gifts on a profile, unique gifts by slug, the gift catalog, what a unique gift is worth, your stars balance and its history.
+
+- **grant:** `account.read(gifts)`.
+- **tier:** neutral.
+- **consent text:** "Read your gifts." (scopes are joined: "Read your profile, gifts.").
+- **unlocks:** `tg.gifts.list`, `tg.gifts.get`, `tg.gifts.catalog`, `tg.gifts.value`, `tg.stars.balance`, `tg.stars.history`, and the raw methods `payments.getSavedStarGifts`, `payments.getSavedStarGift`, `payments.getUniqueStarGift`, `payments.getStarGifts`, `payments.getUniqueStarGiftValueInfo`, `payments.getStarsStatus`, `payments.getStarsTransactions`.
+- **throws:** `TeleError` `not-granted` (`tg.gifts.list needs the grant 'account.read(gifts)'`).
+- **notes:**
+  - changing gifts is the separate, dangerous `account.write(gifts)`. see [gifts and stars](#gifts-and-stars).
+
+Example:
+
+```ts
+const { count } = await tg.gifts.list()
+console.log(count, 'gifts on your profile')
+```
+
 ### grant: account.write
 
 ```ts
 | 'account.write'
 ```
 
-every `account.write` scope at once: send, edit, delete, forward, react, read, typing and drafts.
+every `account.write` scope but one at once: send, edit, delete, forward, react, read, typing, drafts, notification settings and stories. gifts are left out: `account.write(gifts)` is only given by its exact entry.
 
 - **grant:** `account.write`, `account.write(*)`.
 - **tier:** caution.
-- **consent text:** "Act as you: send, edit, delete and forward messages, react, read chats, type and change drafts.".
-- **unlocks:** everything in the eight scope items below.
+- **consent text:** "Act as you: send, edit, delete and forward messages, react, read chats, type, change drafts and notification settings and post stories (not your gifts: they need their own grant).".
+- **unlocks:** everything in the scope items below except `account.write(gifts)`.
 
 Example:
 
@@ -1630,6 +1777,9 @@ grants: ['account.write']
   | 'read'
   | 'typing'
   | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
 >})`
 ```
 
@@ -1638,7 +1788,7 @@ lets the script send messages and upload files as you.
 - **grant:** `account.write(send)`.
 - **tier:** caution.
 - **consent text:** "Act as you: send messages." (scopes are joined: "Act as you: send messages, react.").
-- **unlocks:** `tg.sendMessage`, `tg.sendMedia`, `tg.sendFile`, `tg.uploadFile`, `message.reply`, and the raw methods `messages.sendMessage`, `messages.sendMedia`, `messages.sendMultiMedia`.
+- **unlocks:** `tg.sendMessage`, `tg.sendMedia`, `tg.sendFile`, `tg.uploadFile`, `message.reply`, sending from the script's sticker sets and gif sources (`tg.ui.registerStickerSet`, `tg.ui.registerGifSource`, checked on click), sending the inline answers of `tg.registerInline` (checked when the user picks a result: without it tele shows a toast and sends nothing; registering needs no grant), and the raw methods `messages.sendMessage`, `messages.sendMedia`, `messages.sendMultiMedia`.
 - **throws:** `TeleError` `not-granted` (`tg.uploadFile needs the grant 'account.write(send)'`).
 
 Example:
@@ -1659,6 +1809,9 @@ await tg.sendMessage('me', md`**reminder:** drink water`)
   | 'read'
   | 'typing'
   | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
 >})`
 ```
 
@@ -1689,6 +1842,9 @@ await sent.edit('done')
   | 'read'
   | 'typing'
   | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
 >})`
 ```
 
@@ -1720,6 +1876,9 @@ await tg.deleteMessages('me', [101, 102], { revoke: true })
   | 'read'
   | 'typing'
   | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
 >})`
 ```
 
@@ -1751,6 +1910,9 @@ tg.onNewMessage((message) => {
   | 'read'
   | 'typing'
   | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
 >})`
 ```
 
@@ -1782,6 +1944,9 @@ tg.onNewMessage((message) => {
   | 'read'
   | 'typing'
   | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
 >})`
 ```
 
@@ -1813,6 +1978,9 @@ tg.onNewMessage((message) => {
   | 'read'
   | 'typing'
   | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
 >})`
 ```
 
@@ -1842,6 +2010,9 @@ await tg.sendTyping('me', 'recordVoice')
   | 'read'
   | 'typing'
   | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
 >})`
 ```
 
@@ -1859,6 +2030,117 @@ Example:
 await tg.compose.insert(' -- sent from tele')
 ```
 
+### grant: account.write(notify)
+
+```ts
+`account.write(${Some<
+  | 'send'
+  | 'edit'
+  | 'delete'
+  | 'forward'
+  | 'react'
+  | 'read'
+  | 'typing'
+  | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
+>})`
+```
+
+lets the script change a chat's notification settings that are kept on the server: its notification sound and a channel's silent posting.
+
+- **grant:** `account.write(notify)`.
+- **tier:** caution.
+- **consent text:** "Act as you: change notification settings.".
+- **unlocks:** `tg.notifications.setSound(peer, sound)` and `tg.compose.setSendOptions({ silent })`.
+- **throws:** `TeleError` `not-granted` (`tg.notifications.setSound needs the grant 'account.write(notify)'`).
+- **notes:**
+  - reading a chat's sound (`tg.notifications.getSound`) needs nothing.
+
+Example:
+
+```ts
+await tg.notifications.setSound('me', 'none')
+```
+
+### grant: account.write(stories)
+
+```ts
+`account.write(${Some<
+  | 'send'
+  | 'edit'
+  | 'delete'
+  | 'forward'
+  | 'react'
+  | 'read'
+  | 'typing'
+  | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
+>})`
+```
+
+lets the script post, edit and delete your stories, react to stories and mark them as read.
+
+- **grant:** `account.write(stories)`.
+- **tier:** caution.
+- **consent text:** "Act as you: post, edit and delete stories.".
+- **unlocks:** `tg.stories.post`, `tg.stories.edit`, `tg.stories.delete`, `tg.stories.react`, `tg.stories.markRead`, and the raw methods `stories.sendStory`, `stories.editStory`, `stories.deleteStories`, `stories.readStories`, `stories.sendReaction` (`stories.deleteStories` is a [dangerous method](#dangerous-methods), but this grant allows it, like `account.write(delete)` does for messages).
+- **throws:** `TeleError` `not-granted` (`tg.stories.post needs the grant 'account.write(stories)'`).
+- **notes:**
+  - posting bytes uploads them itself; it doesn't need `account.write(send)`.
+
+Example:
+
+```ts
+const photo = (await tg.ui.openFile({ filter: 'Images (*.jpg *.png)' }))?.[0]
+if (photo) await tg.stories.post({ media: photo.bytes, caption: 'from tele' })
+```
+
+### grant: account.write(gifts)
+
+```ts
+`account.write(${Some<
+  | 'send'
+  | 'edit'
+  | 'delete'
+  | 'forward'
+  | 'react'
+  | 'read'
+  | 'typing'
+  | 'draft'
+  | 'notify'
+  | 'stories'
+  | 'gifts'
+>})`
+```
+
+lets the script transfer, sell, convert, upgrade, pin and hide your star gifts. transferring and upgrading can spend stars, without a confirmation box.
+
+- **grant:** `account.write(gifts)`, only as this exact entry: a bare `account.write` or `account.write(*)` never covers it.
+- **tier:** dangerous.
+- **consent text:** "Act as you: transfer, sell, convert and upgrade your gifts.", and "transfer, sell, convert and upgrade your gifts" in the bold "Dangerous: ..." line.
+- **unlocks:** `tg.gifts.transfer`, `tg.gifts.convert`, `tg.gifts.upgrade`, `tg.gifts.sell`, `tg.gifts.unlist`, `tg.gifts.setPinned`, `tg.gifts.setVisible`, and the raw methods `payments.saveStarGift`, `payments.convertStarGift`, `payments.upgradeStarGift`, `payments.transferStarGift`, `payments.updateStarGiftPrice`, `payments.toggleStarGiftsPinnedToTop`, plus `payments.getPaymentForm` and `payments.sendStarsForm` for a gift upgrade or transfer invoice.
+- **throws:** `TeleError` `not-granted` (`tg.gifts.transfer needs the grant 'account.write(gifts)'`).
+- **notes:**
+  - grant it only to scripts you trust with your stars. see [gifts and stars](#gifts-and-stars).
+
+Example:
+
+```ts
+export default defineScript({
+  name: 'gift mover',
+  grants: ['account.read(gifts)', 'account.write(gifts)'],
+  async setup(tg) {
+    const { gifts } = await tg.gifts.list()
+    const unique = gifts.find((gift) => gift.unique)
+    if (unique) await tg.gifts.transfer(unique, '@friend')
+  },
+})
+```
+
 ### grant: fetch(host)
 
 ```ts
@@ -1873,10 +2155,10 @@ lets the global `fetch` reach the internet.
   - `scope` (host): a host name like `api.example.com`; lowercased; must be a valid domain (`grant 'fetch(x)': 'x' is not a host` otherwise). covers the host and all its subdomains.
 - **tier:** neutral.
 - **consent text:** bare: "Connect to any server on the internet."; scoped: "Connect to these servers: {hosts}.".
-- **unlocks:** `fetch(url, init?)` to covered hosts, and redirects to covered hosts.
+- **unlocks:** `fetch(url, init?)` to covered hosts and redirects to covered hosts, `new WebSocket(url)` to covered hosts, and `tg.ui.webview({ url })` for the url's host; the page of an html webview may reach covered hosts too.
 - **throws:** `TeleError` `not-granted` synchronously (`fetch(<url>) needs the grant 'fetch(<host>)'`); a redirect to another host rejects with `TeleError` `not-granted` whose `grant` is the `fetch(<host>)` to add.
 - **notes:**
-  - only http and https.
+  - only http and https (`ws` and `wss` for `WebSocket`).
 
 Example:
 
@@ -2028,10 +2310,10 @@ lets the script change tele's settings and tele's own per-chat features.
 - **grant:** `options`.
 - **tier:** caution.
 - **consent text:** "Change any of tele's settings, including ghost mode, link rewrites and the checkmark server, and your ignore list, local names and per-chat ghost mode.".
-- **unlocks:** `tg.options.set(id, value)`, `tg.tele.ignored.set`, `tg.tele.ghost.set`, `tg.tele.localNames.set`.
+- **unlocks:** `tg.options.set(id, value)`, `tg.tele.ignored.set`, `tg.tele.ghost.set`, `tg.tele.localNames.set`, `tg.tele.bookmarks.add` / `remove`, `tg.tele.pins.pin` / `unpin`, `tg.tele.folders.create` / `edit` / `delete` / `reorder`, `tg.tele.hiddenWords.add` / `remove`, and `tg.tele.deleted.interceptKeep` (together with `account.read(messages)`).
 - **throws:** `TeleError` `not-granted` (`tg.options.set needs the grant 'options'`).
 - **notes:**
-  - reading settings (`tg.options.list`, `get`, `onChange`) needs nothing; reading `tg.tele` lists needs `account.read(peers)`.
+  - reading settings (`tg.options.list`, `get`, `onChange`) needs nothing; reading the ignored, ghost and local-name lists needs `account.read(peers)`, bookmarks, edit history and kept messages `account.read(messages)`, pins `account.read(dialogs)`; folders and hidden words are free to read.
 
 Example:
 
@@ -2077,6 +2359,7 @@ lets the script save downloads to any path on disk.
 - **throws:** `TeleError` `not-granted` (`tg.downloadMedia({ saveTo }) needs the grant 'files.write'`).
 - **notes:**
   - `saveTo: 'downloads'` (tele's download folder) and `tg.ui.saveFile` (you pick the path) need no `files.write`; downloading still needs `account.read(messages)`.
+  - reading and writing files yourself is `tg.fs`, with [`fs.read`](#grant-fsread) / [`fs.write`](#grant-fswrite) outside the script's own area.
 
 Example:
 
@@ -2119,7 +2402,7 @@ lets the script see files and text dropped or pasted into chats and handle them 
 - **grant:** `interceptDrop`.
 - **tier:** caution.
 - **consent text:** "See the files and text you drop or paste into chats and handle them instead of tele.".
-- **unlocks:** `tg.interceptDrop(interceptor)`.
+- **unlocks:** `tg.interceptDrop(interceptor)` and `tg.compose.interceptPaste(interceptor)`.
 - **throws:** `TeleError` `not-granted` (`tg.interceptDrop needs the grant 'interceptDrop'`).
 - **notes:**
   - secret chats are never offered.
@@ -2136,12 +2419,12 @@ tg.interceptDrop(({ files }) => (files.some((file) => file.name.endsWith('.exe')
 | 'calls'
 ```
 
-lets the script see and control this account's calls.
+lets the script see and control this account's calls, group calls and video chats.
 
 - **grant:** `calls`.
 - **tier:** caution.
 - **consent text:** "See your calls, answer, decline or start them, mute you.".
-- **unlocks:** all of `tg.calls`: `current`, `onChange`, `answer`, `hangup`, `setMuted`, `start`.
+- **unlocks:** all of `tg.calls`: `current`, `onChange`, `answer`, `hangup`, `setMuted`, `start`, and for group calls and video chats `group`, `onGroupChange`, `join`, `leave`, `raiseHand`, `participants`.
 - **throws:** `TeleError` `not-granted` (`tg.calls.current needs the grant 'calls'`).
 - **notes:**
   - only calls of the account the script runs in.
@@ -2188,7 +2471,7 @@ lets the script look at tele's own interface: every window's widgets, their text
 - **grant:** `ui.read`.
 - **tier:** caution.
 - **consent text:** "See everything tele shows in its windows: texts, buttons and layout.".
-- **unlocks:** `tg.ui.widgets.roots()`, `tg.ui.widgets.find(...)`, `tg.ui.widgets.observe(...)`, and on every `Widget` its getters, `parent`, `children`, `find` and `closest`. the api itself is documented in the widget layer section.
+- **unlocks:** `tg.ui.widgets.roots()`, `tg.ui.widgets.find(...)`, `tg.ui.widgets.observe(...)`, and on every `Widget` its getters, `parent`, `children`, `find` and `closest`; also `tg.ui.webApps()` and `tg.ui.onWebAppEvent(callback)`, because mini app windows are tele windows. the widget api is documented in the widget layer section.
 - **throws:** `TeleError` `not-granted` (`tg.ui.widgets.roots needs the grant 'ui.read'`).
 - **notes:**
   - what tele shows includes message texts, names and anything else on screen, so this sees much of what `account.read` would.
@@ -2265,7 +2548,7 @@ grants: ['display']
 `display(${Some<'messages' | 'peers' | 'local'>})`
 ```
 
-lets the script change how real messages look: shown text, a footer, opacity, hiding them, a badge.
+lets the script change how real messages look: shown text, a footer, opacity, hiding them, a badge, buttons under them.
 
 - **grant:** `display(messages)`.
 - **tier:** caution.
@@ -2278,6 +2561,8 @@ lets the script change how real messages look: shown text, a footer, opacity, hi
 Example:
 
 ```ts
+import { md } from 'tele'
+
 export default defineScript({
   name: 'spoiler secrets',
   grants: ['display(messages)', 'account.read(messages)'],
@@ -2341,6 +2626,73 @@ export default defineScript({
   grants: ['display(local)', 'interceptSendMessage'],
   setup(tg) {
     tg.interceptSendMessage({ text: /^\/note / }, () => 'local')
+  },
+})
+```
+
+### grant: fs.read
+
+```ts
+| 'fs.read'
+| `fs.read(${string})`
+```
+
+lets `tg.fs` read files and folders outside the script's own file area.
+
+- **grant:** `fs.read(<folder>, ...)` for those folders and everything inside them, or bare `fs.read` (`fs.read(*)`) for any file on the computer.
+- **parameters:**
+  - `scope` (folder): an absolute path (`C:/Users/me/notes`, `/home/me/notes`), or `~`, `home`, `documents`, `downloads`, `desktop`, `pictures`, `music`, `videos` or `temp` (the system's folders), optionally followed by `/sub`. `\` works like `/`. anything else is `grant 'fs.read(x)': 'x' is not a folder (an absolute path, ~ or documents, downloads, desktop, pictures, music, videos, home, temp, optionally followed by /sub)`.
+- **tier:** caution with a folder; bare `fs.read` is dangerous.
+- **consent text:** scoped: "Read files in {folders}." (the folders as written); bare: "Read any file on your computer.", plus "read any file on your computer" in the bold "Dangerous: ..." line.
+- **unlocks:** outside the file area: `tg.fs.readText`, `tg.fs.readBytes`, `tg.fs.list`, `tg.fs.stat`, `tg.fs.exists`, and the source of `tg.fs.copy`.
+- **throws:** `TeleError` `not-granted` whose `grant` is the exact absolute path (`tg.fs.read needs the grant 'fs.read(C:/Users/me/Documents/x.txt)'`); any folder grant covering it works too.
+- **notes:**
+  - the script's own file area needs no grant at all.
+  - it doesn't include writing; declare `fs.write` too to change files.
+  - tele's data and other scripts' areas stay out of reach even with the bare grant. see [the file area](#the-file-area).
+
+Example:
+
+```ts
+export default defineScript({
+  name: 'todo reader',
+  grants: ['fs.read(documents/todo)'],
+  async setup(tg) {
+    const text = await tg.fs.readText('documents/todo/today.md')
+    tg.toast(`${text.split('\n').length} lines to do`)
+  },
+})
+```
+
+### grant: fs.write
+
+```ts
+| 'fs.write'
+| `fs.write(${string})`
+```
+
+lets `tg.fs` create, change, move and delete files and folders outside the script's own file area.
+
+- **grant:** `fs.write(<folder>, ...)` for those folders and everything inside them, or bare `fs.write` (`fs.write(*)`) for any file on the computer.
+- **parameters:**
+  - `scope` (folder): the same folders as `fs.read`: an absolute path, or `~`, `home`, `documents`, `downloads`, `desktop`, `pictures`, `music`, `videos` or `temp`, optionally followed by `/sub`.
+- **tier:** caution with a folder; bare `fs.write` is dangerous.
+- **consent text:** scoped: "Create, change and delete files in {folders}."; bare: "Create, change and delete any file on your computer.", plus "create, change and delete any file on your computer" in the bold "Dangerous: ..." line.
+- **unlocks:** outside the file area: `tg.fs.writeText`, `tg.fs.writeBytes`, `tg.fs.mkdir`, `tg.fs.remove`, both ends of `tg.fs.rename`, and the target of `tg.fs.copy`.
+- **throws:** `TeleError` `not-granted` whose `grant` is the exact absolute path (`tg.fs.write needs the grant 'fs.write(C:/Users/me/Desktop/out.txt)'`).
+- **notes:**
+  - it doesn't include reading: a script that reads back what it writes declares both.
+  - `tg.downloadMedia({ saveTo })` is still `files.write`, a different grant.
+
+Example:
+
+```ts
+export default defineScript({
+  name: 'daily export',
+  grants: ['fs.write(documents/tele-export)'],
+  async setup(tg) {
+    await tg.fs.mkdir('documents/tele-export', { recursive: true })
+    await tg.fs.writeText(`documents/tele-export/${new Date().toISOString().slice(0, 10)}.txt`, 'hello')
   },
 })
 ```
@@ -2583,7 +2935,7 @@ setTimeout(async () => {
 // a call over its budget: "took too long and was stopped"
 ```
 
-everything runs on tele's main thread, so every entry into script code has a time limit. over it, the code is stopped with an error that `try` / `catch` can't catch, logged as `took too long and was stopped`.
+everything except workers runs on tele's main thread, so every entry into script code has a time limit. over it, the code is stopped with an error that `try` / `catch` can't catch, logged as `took too long and was stopped`.
 
 - **grant:** none.
 - **notes:**
@@ -2608,7 +2960,9 @@ everything runs on tele's main thread, so every entry into script code has a tim
 | REPL, synchronous part | 5 s | shown in the REPL | no |
 
   - nested calls share one deadline; awaiting doesn't use the budget, only running code does.
-  - a slow script freezes tele for up to its budget, so keep handlers short and move heavy work behind `await`s and timers.
+  - a slow script freezes tele for up to its budget, so keep handlers short and move heavy work behind `await`s and timers, or into a `Worker`.
+  - the newer interceptors and providers (`tg.compose.interceptPaste`, `tg.ui.registerSearchProvider`, `tg.interceptSearch`, `tg.stories.interceptStoryView`, `tg.tele.deleted.interceptKeep`) get 2 s to answer and then fall back to what tele does by itself; see each item.
+  - code inside a `Worker` has no budget: it runs on its own thread, so an endless loop only blocks that worker.
 
 Example:
 
@@ -2660,14 +3014,22 @@ the fixed size limits scripts run into.
   - `fetch`: responses up to 16 MB by default (`maxSize`), 30 s without data (`timeout`).
   - `tg.downloadMedia` into memory: 10 MB (`quota-exceeded` above; pass `saveTo` for bigger files).
   - `crypto.getRandomValues`: 65536 bytes per call.
+  - the file area (`tg.fs`): 256 MB per script; one read returns at most 256 MB.
+  - `compression.gunzip` / `inflate` / `inflateRaw`: 64 MB of output by default (`maxSize`, at most 256 MB).
+  - `tg.image`: 100 megapixels per image, in and out.
+  - `WebSocket`: 64 MB per message.
+  - workers: 8 per script at a time, each with its own 256 MB of memory.
+  - `tg.app.playSound` and `tg.stories.post` bytes: 10 MB.
   - logs: the last 2000 lines per script.
   - installing from a link: 5 MB.
+  - update checks and updates of link-installed scripts: 1 MB.
   - metadata of scripts that are off is read from the first 1 MB of the entry file.
   - hot reload watches at most 512 paths in the scripts folder.
 
 Example:
 
 ```ts
+const hugeObject = { blob: 'x'.repeat(20_000_000) }
 try {
   tg.storage.set('cache', hugeObject)
 } catch (error) {
@@ -2719,7 +3081,7 @@ scripts get the full modern javascript standard library, plus a few web-style gl
 - **grant:** none.
 - **notes:**
   - built in: `BigInt`, `Proxy`, `Reflect`, `Symbol.dispose` and `using`, `WeakRef`, `FinalizationRegistry`, `Iterator` helpers, `Set` methods, `Object.groupBy`, `Map.groupBy`, `Array.prototype.toSorted` / `findLast` / `at`, `Array.fromAsync`, `Promise.withResolvers`, `RegExp` `v` flag and `RegExp.escape`, `String.prototype.isWellFormed`, `JSON.rawJSON`, `Float16Array`, `Math.sumPrecise`, `Error` `cause`, `SharedArrayBuffer`, `Atomics`, `DOMException`, `escape` / `unescape`, `globalThis`, `Uint8Array` base64 and hex methods.
-  - from tele: `console`, timers, `defineScript`, `fetch` (from `setup` on), `crypto`, `TextEncoder`, `TextDecoder`, `TeleError`, `RpcError`. QuickJS adds `atob`, `btoa`, `performance` and `queueMicrotask`.
+  - from tele: `console`, timers, `defineScript`, `fetch` (from `setup` on), `crypto` with the whole `crypto.subtle`, `TextEncoder`, `TextDecoder`, `URL`, `URLSearchParams`, `EventTarget`, `Event`, `CustomEvent`, `AbortController`, `AbortSignal`, `structuredClone`, `reportError`, `WebSocket`, `MessageEvent`, `CloseEvent`, `Worker`, `ErrorEvent`, `Intl` (and with it locale-aware `toLocaleString` and `localeCompare`), `compression`, `TeleError`, `RpcError`. QuickJS adds `atob`, `btoa`, `performance` and `queueMicrotask`.
   - `Date` uses the computer's time zone.
 
 Example:
@@ -2733,8 +3095,7 @@ const { promise, resolve } = Promise.withResolvers<void>()
 
 ```ts
 // not defined in scripts
-// require, module, process, Buffer, __dirname, XMLHttpRequest, WebSocket,
-// URL, URLSearchParams, AbortController, structuredClone, Intl,
+// process, Buffer, XMLHttpRequest, Blob,
 // window, document, navigator, localStorage, setImmediate
 ```
 
@@ -2742,18 +3103,20 @@ scripts are not node and not a browser.
 
 - **grant:** none.
 - **notes:**
-  - no node: no `require`, `module`, `process`, `Buffer`, file system or environment. files come from `tg.ui.openFile` / `tg.ui.saveFile` and `tg.downloadMedia`; programs from `tg.unsafe.exec`.
+  - no node: no `require`, `module`, `process`, `Buffer` or environment. files come from `tg.fs` (the script's own file area, other folders with `fs.read` / `fs.write`), `tg.ui.openFile` / `tg.ui.saveFile` and `tg.downloadMedia`; programs from `tg.unsafe.exec`.
   - no dom: no `window`, `document`, `navigator`, `localStorage`. persist with `tg.storage`.
-  - no `XMLHttpRequest` or `WebSocket`; use `fetch`.
-  - no `URL`, `URLSearchParams`, `AbortController`, `structuredClone`, `Intl` (locale methods give plain output), `setImmediate`.
-  - no npm packages: only relative imports and `'tele'`.
+  - no `XMLHttpRequest`; use `fetch`, and `WebSocket` for sockets. no `Blob`: binary data is a `Uint8Array` or an `ArrayBuffer`.
+  - no `setImmediate`; use `queueMicrotask` or `setTimeout(callback, 0)`.
+  - `require`, `module`, `exports`, `__filename` and `__dirname` exist only inside commonjs files of [npm packages](#npm-packages); es modules (your scripts) have none of them.
   - extra arguments to `setTimeout` / `setInterval` are ignored.
 
 Example:
 
 ```ts
-// instead of new URL(link).hostname
-const hostname = (link: string) => /^[a-z]+:\/\/([^/:?#]+)/i.exec(link)?.[1]?.toLowerCase()
+// instead of Buffer.from('hello').toString('base64')
+const base64 = new TextEncoder().encode('hello').toBase64()
+// instead of setImmediate(next)
+setTimeout(() => console.log('next turn'), 0)
 ```
 
 ### console.log(...data)
@@ -2961,28 +3324,32 @@ const timer = setInterval(() => {
 ### fetch(url, init?)
 
 ```ts
-declare function fetch(
-  url: string,
-  init?: {
-    method?: string
-    headers?: Record<string, string>
-    body?: string | Uint8Array
-    timeout?: number
-    maxSize?: number
-  },
-): Promise<FetchResponse>
+interface FetchInit {
+  method?: string
+  headers?: Record<string, string>
+  body?: string | Uint8Array
+  timeout?: number
+  maxSize?: number
+}
+
+interface FetchInit {
+  signal?: AbortSignal | null
+}
+
+declare function fetch(url: string | URL, init?: FetchInit): Promise<FetchResponse>
 ```
 
 makes an http or https request through tele's network stack and resolves with the response.
 
 - **grant:** `fetch(<host>)` (or a parent domain, or bare `fetch`).
 - **parameters:**
-  - `url` (`string`): an absolute `http://` or `https://` url.
+  - `url` (`string | URL`): an absolute `http://` or `https://` url, as a string or a `URL`.
   - `init.method` (`string`, optional): any method, uppercased; default `GET`.
   - `init.headers` (`Record<string, string>`, optional): a plain object of header names and values.
   - `init.body` (`string | Uint8Array`, optional): sent as UTF-8 text or raw bytes; `null` / `undefined` send nothing.
   - `init.timeout` (`number`, optional): milliseconds without any data before giving up; default 30000, `0` means none.
   - `init.maxSize` (`number`, optional): the largest response body in bytes; default 16 MB (16777216), `0` means no limit besides memory.
+  - `init.signal` (`AbortSignal | null`, optional): aborting it cancels the request and rejects with `signal.reason`; an already aborted signal rejects before any request or grant check.
 - **returns:** `Promise<FetchResponse>`. http errors (404, 500) still resolve, with `ok: false`.
 - **throws:**
   - synchronously: `TypeError: fetch needs a url string`, `TypeError: fetch only takes http and https urls`, `TypeError: fetch: timeout is a number of milliseconds, 0 for no limit` (and the same for `maxSize` in bytes), `TypeError: fetch: body must be a string or a Uint8Array`, `TeleError` `not-granted` (`fetch(<url>) needs the grant 'fetch(<host>)'`).
@@ -3001,7 +3368,7 @@ const response = await fetch('https://api.example.com/translate', {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ text: 'hello', to: 'de' }),
-  timeout: 10_000,
+  signal: AbortSignal.timeout(10_000),
 })
 if (!response.ok) throw new Error(`translate failed: ${response.status}`)
 const { result } = (await response.json()) as { result: string }
@@ -3046,6 +3413,655 @@ console.log(response.status, response.headers['x-ratelimit-remaining'])
 const repo = (await response.json()) as { stargazers_count: number }
 ```
 
+### class URL
+
+```ts
+declare class URL {
+  constructor(url: string | URL, base?: string | URL)
+  href: string
+  readonly origin: string
+  protocol: string
+  username: string
+  password: string
+  host: string
+  hostname: string
+  port: string
+  pathname: string
+  search: string
+  readonly searchParams: URLSearchParams
+  hash: string
+  toString(): string
+  toJSON(): string
+  static canParse(url: string | URL, base?: string | URL): boolean
+  static parse(url: string | URL, base?: string | URL): URL | null
+}
+```
+
+parses a url the way browsers do (the WHATWG URL standard) and lets you read and change its parts.
+
+- **grant:** none.
+- **parameters:**
+  - `url` (`string | URL`): an absolute url, or a relative one when `base` is given.
+  - `base` (`string | URL`, optional): the url `url` is resolved against (`../`, `?query`, `#hash`, `//host/path` all work).
+  - `href`: the whole url; setting it reparses everything.
+  - `protocol`, `username`, `password`, `host` (with the port), `hostname`, `port`, `pathname`, `search` (with `?`), `hash` (with `#`): the parts as strings; setting one changes only that part, invalid values are ignored like in browsers.
+  - `origin` (read only): `scheme://host[:port]` for `http`, `https`, `ws`, `wss` and `ftp`, `'null'` for everything else.
+  - `searchParams` (read only): the query as a live `URLSearchParams`; changing it rewrites `search`, setting `search` or `href` refreshes it.
+  - `URL.canParse(url, base?)`: whether `new URL(url, base)` would work.
+  - `URL.parse(url, base?)`: the `URL`, or `null` instead of throwing.
+- **returns:** `toString()` and `toJSON()` give `href`, so `JSON.stringify` and template strings print the url.
+- **throws:** `TypeError: invalid url: <url>` from the constructor and the `href` setter.
+- **notes:**
+  - special schemes (`http`, `https`, `ws`, `wss`, `ftp`, `file`) get normalized hosts (lowercase, IPv4 and IPv6 forms, punycode for unicode domains), default ports dropped, dot segments resolved and `\` read as `/`. other schemes (`tg:`, `mailto:`, `data:`, your own) keep their text and get an opaque origin.
+  - each part is percent-encoded with its own rules; `searchParams` uses form encoding (space as `+`).
+  - unicode domains are lowercased, NFKC-normalized and punycoded; the full UTS 46 mapping table isn't there, so rare characters may differ from a browser.
+  - `fetch` takes a `URL` directly.
+
+Example:
+
+```ts
+const api = new URL('/search', 'https://api.example.com')
+api.searchParams.set('q', 'tele scripts')
+api.searchParams.set('page', '2')
+console.log(api.href) // https://api.example.com/search?q=tele+scripts&page=2
+const response = await fetch(api)
+```
+
+### class URLSearchParams
+
+```ts
+declare class URLSearchParams {
+  constructor(
+    init?: Iterable<readonly [string, string]> | readonly (readonly string[])[] | Record<string, string> | string | URLSearchParams,
+  )
+  readonly size: number
+  append(name: string, value: string): void
+  delete(name: string, value?: string): void
+  get(name: string): string | null
+  getAll(name: string): string[]
+  has(name: string, value?: string): boolean
+  set(name: string, value: string): void
+  sort(): void
+  forEach(callback: (value: string, name: string, parent: URLSearchParams) => void, thisArg?: unknown): void
+  entries(): URLSearchParamsIterator<[string, string]>
+  keys(): URLSearchParamsIterator<string>
+  values(): URLSearchParamsIterator<string>
+  [Symbol.iterator](): URLSearchParamsIterator<[string, string]>
+  toString(): string
+}
+
+interface URLSearchParamsIterator<T> extends IteratorObject<T, BuiltinIteratorReturn, unknown> {
+  [Symbol.iterator](): URLSearchParamsIterator<T>
+}
+```
+
+an ordered list of name/value pairs in `application/x-www-form-urlencoded` form: query strings and form bodies.
+
+- **grant:** none.
+- **parameters:**
+  - `init` (optional): a query string (a leading `?` is skipped), an object of names and values, or anything iterable of `[name, value]` pairs (arrays, a `Map`, another `URLSearchParams`).
+  - `append(name, value)`: adds a pair at the end, even if the name is there.
+  - `delete(name, value?)`: removes every pair with that name, or only the ones with that value too.
+  - `get(name)` / `getAll(name)`: the first value (`null` when missing) / all values in order.
+  - `has(name, value?)`: whether such a pair exists.
+  - `set(name, value)`: replaces the first pair with that name and removes the others, or appends.
+  - `sort()`: sorts by name (by UTF-16 code units), keeping the order of equal names.
+  - `size`: the number of pairs.
+- **returns:** `toString()` gives the encoded string without `?`; `entries`/`keys`/`values` and `for...of` give live iterators with iterator helpers (`.map`, `.toArray`).
+- **throws:** `TypeError` for a pair that doesn't have exactly two items, or when a method gets too few arguments.
+- **notes:**
+  - encoding: letters, digits and `*-._` stay, space becomes `+`, everything else is `%XX` of its UTF-8 bytes; decoding turns `+` into a space and invalid UTF-8 into U+FFFD.
+  - the one from `url.searchParams` writes every change back into the url.
+
+Example:
+
+```ts
+const body = new URLSearchParams({ grant_type: 'client_credentials', scope: 'read write' })
+await fetch('https://auth.example.com/token', {
+  method: 'POST',
+  headers: { 'content-type': 'application/x-www-form-urlencoded' },
+  body: body.toString(),
+})
+```
+
+### class EventTarget
+
+```ts
+declare class EventTarget {
+  constructor()
+  addEventListener(
+    type: string,
+    callback: EventListenerOrEventListenerObject | null,
+    options?: AddEventListenerOptions | boolean,
+  ): void
+  removeEventListener(
+    type: string,
+    callback: EventListenerOrEventListenerObject | null,
+    options?: EventListenerOptions | boolean,
+  ): void
+  dispatchEvent(event: Event): boolean
+}
+
+interface AddEventListenerOptions extends EventListenerOptions {
+  once?: boolean
+  passive?: boolean
+  signal?: AbortSignal
+}
+
+interface EventListenerOptions {
+  capture?: boolean
+}
+
+interface EventListener {
+  (evt: Event): void
+}
+
+interface EventListenerObject {
+  handleEvent(object: Event): void
+}
+
+type EventListenerOrEventListenerObject = EventListener | EventListenerObject
+```
+
+the browser's event emitter. `AbortSignal`, `WebSocket` and other web-style objects are event targets, and your own classes can extend it.
+
+- **grant:** none.
+- **parameters:**
+  - `callback`: a function, or an object with a `handleEvent(event)` method (called with the object as `this`). a function gets the target as `this`.
+  - `options.once`: remove the listener before its first call.
+  - `options.signal`: remove the listener when this `AbortSignal` aborts; an already aborted signal adds nothing.
+  - `options.passive`: `preventDefault()` does nothing inside this listener.
+  - `options.capture` (or a boolean `options`): kept only to tell listeners apart; there is no tree, so no capturing phase.
+- **returns:** `dispatchEvent` returns `false` when a listener called `preventDefault()` on a cancelable event, else `true`.
+- **throws:** `TypeError` when `dispatchEvent` gets something that isn't an `Event`; a `DOMException` `InvalidStateError` when the event is already being dispatched.
+- **notes:**
+  - the same function with the same `capture` is added only once.
+  - listeners run synchronously in the order they were added; listeners added during a dispatch wait for the next one, removed ones are skipped.
+  - an exception in one listener doesn't stop the others: it goes to `reportError` and shows up as a script error.
+  - there is no bubbling between targets; `event.target` and `currentTarget` are the target itself.
+
+Example:
+
+```ts
+class Counter extends EventTarget {
+  #value = 0
+  increment() {
+    this.#value += 1
+    this.dispatchEvent(new CustomEvent('change', { detail: this.#value }))
+  }
+}
+const counter = new Counter()
+const stop = new AbortController()
+counter.addEventListener('change', (event) => {
+  if (event instanceof CustomEvent) console.log('now', event.detail)
+}, { signal: stop.signal })
+counter.increment()
+stop.abort()
+```
+
+### class Event
+
+```ts
+declare class Event {
+  constructor(type: string, eventInitDict?: EventInit)
+  readonly type: string
+  readonly target: EventTarget | null
+  readonly srcElement: EventTarget | null
+  readonly currentTarget: EventTarget | null
+  readonly eventPhase: number
+  readonly bubbles: boolean
+  readonly cancelable: boolean
+  readonly composed: boolean
+  readonly defaultPrevented: boolean
+  readonly isTrusted: boolean
+  readonly timeStamp: number
+  returnValue: boolean
+  cancelBubble: boolean
+  composedPath(): EventTarget[]
+  preventDefault(): void
+  stopPropagation(): void
+  stopImmediatePropagation(): void
+  initEvent(type: string, bubbles?: boolean, cancelable?: boolean): void
+}
+
+interface EventInit {
+  bubbles?: boolean
+  cancelable?: boolean
+  composed?: boolean
+}
+```
+
+an event passed to `EventTarget` listeners.
+
+- **grant:** none.
+- **parameters:**
+  - `type`: the event name listeners subscribe to.
+  - `eventInitDict.cancelable`: lets `preventDefault()` set `defaultPrevented`.
+  - `target` / `currentTarget`: the target it was dispatched on (`currentTarget` is `null` again after the dispatch).
+  - `timeStamp`: `performance.now()` when the event was created.
+  - `isTrusted`: `true` only for events tele fires itself (like `abort` on a signal).
+  - `stopImmediatePropagation()`: skips the remaining listeners.
+- **notes:**
+  - extend it for your own event types (`class ProgressEvent extends Event`); the constructor reads `bubbles`, `cancelable` and `composed` from the init.
+  - `bubbles`, `composed` and the phase constants exist for compatibility; without a tree nothing bubbles.
+
+Example:
+
+```ts
+const event = new Event('save', { cancelable: true })
+if (!editor.dispatchEvent(event)) console.log('a listener cancelled the save')
+```
+
+### class CustomEvent
+
+```ts
+declare class CustomEvent<T = any> extends Event {
+  constructor(type: string, eventInitDict?: CustomEventInit<T>)
+  readonly detail: T
+}
+
+interface CustomEventInit<T = any> extends EventInit {
+  detail?: T
+}
+```
+
+an `Event` with a payload.
+
+- **grant:** none.
+- **parameters:**
+  - `eventInitDict.detail`: any value; listeners read it as `event.detail`.
+- **returns:** `detail` is `null` when not given.
+
+Example:
+
+```ts
+target.dispatchEvent(new CustomEvent('progress', { detail: { done: 3, total: 10 } }))
+```
+
+### class DOMException
+
+```ts
+declare class DOMException extends Error {
+  constructor(message?: string, name?: string)
+  readonly name: string
+  readonly message: string
+  readonly code: number
+  static readonly ABORT_ERR: 20
+  static readonly TIMEOUT_ERR: 23
+  static readonly DATA_CLONE_ERR: 25
+  // and the other legacy constants, INDEX_SIZE_ERR (1) to DATA_CLONE_ERR (25)
+}
+```
+
+the error type of web APIs, identified by `name`.
+
+- **grant:** none.
+- **parameters:**
+  - `message` (`string`, optional): the text; default `''`.
+  - `name` (`string`, optional): the kind; default `'Error'`.
+  - `code`: the legacy number for known names (`SyntaxError` 12, `NotFoundError` 8, `AbortError` 20, `TimeoutError` 23, `DataCloneError` 25, ...), `0` for other names.
+- **notes:**
+  - built into QuickJS; `instanceof Error` is true and `stack` is set.
+  - names you'll meet: `AbortError` (an aborted `AbortController`), `TimeoutError` (`AbortSignal.timeout`), `DataCloneError` (`structuredClone`), `InvalidCharacterError` (`atob`), `InvalidStateError` (dispatching an event twice).
+  - check `error.name`, not `code`.
+
+Example:
+
+```ts
+try {
+  await fetch(url, { signal: AbortSignal.timeout(5000) })
+} catch (error) {
+  if (error instanceof DOMException && error.name === 'TimeoutError') console.warn('too slow')
+  else throw error
+}
+```
+
+### class AbortController
+
+```ts
+declare class AbortController {
+  constructor()
+  readonly signal: AbortSignal
+  abort(reason?: unknown): void
+}
+```
+
+makes an `AbortSignal` and aborts it when you call `abort`.
+
+- **grant:** none.
+- **parameters:**
+  - `abort(reason?)`: aborts `signal` with `reason`; without one, a `DOMException` named `AbortError` (`signal is aborted without reason`). later calls do nothing.
+- **notes:**
+  - hand `signal` to `fetch`, `addEventListener` or your own code; one controller can cancel many things.
+
+Example:
+
+```ts
+const controller = new AbortController()
+tg.onUnload(() => controller.abort())
+const response = await fetch('https://api.example.com/stream', { signal: controller.signal })
+```
+
+### class AbortSignal
+
+```ts
+declare class AbortSignal extends EventTarget {
+  private constructor()
+  readonly aborted: boolean
+  readonly reason: unknown
+  onabort: ((this: AbortSignal, event: Event) => unknown) | null
+  throwIfAborted(): void
+  static abort(reason?: unknown): AbortSignal
+  static timeout(milliseconds: number): AbortSignal
+  static any(signals: Iterable<AbortSignal>): AbortSignal
+}
+
+interface AbortSignalEventMap {
+  abort: Event
+}
+```
+
+tells long-running work that it should stop.
+
+- **grant:** none.
+- **parameters:**
+  - `aborted` / `reason`: whether it was aborted, and with what (`undefined` before).
+  - `throwIfAborted()`: throws `reason` when aborted; handy between steps of a loop.
+  - `onabort` and `addEventListener('abort', ...)`: called once, when it aborts (`onabort` first if it was set first).
+  - `AbortSignal.abort(reason?)`: a signal that is already aborted.
+  - `AbortSignal.timeout(ms)`: a signal that aborts after `ms` milliseconds with a `DOMException` named `TimeoutError`.
+  - `AbortSignal.any(signals)`: a signal that aborts as soon as any of `signals` does, with that signal's reason (at once if one already is).
+- **throws:** `TypeError` from `new AbortSignal()` (use a controller or the static methods); `TypeError` from `timeout` for a negative or non-finite delay; `TypeError` from `any` for anything that isn't a signal.
+- **notes:**
+  - `fetch(url, { signal })` rejects with `signal.reason` the moment it aborts and cancels the request; a signal that is already aborted rejects before any request (no grant check either).
+  - `timeout` runs on a script timer, so it stops with the script like every timer.
+  - a signal from `any` stays linked to its sources until it aborts; avoid making endless `any` signals over a long-lived source that never aborts.
+
+Example:
+
+```ts
+const stop = new AbortController()
+tg.onUnload(() => stop.abort())
+const signal = AbortSignal.any([stop.signal, AbortSignal.timeout(10_000)])
+for (const id of ids) {
+  signal.throwIfAborted()
+  await fetch(`https://api.example.com/items/${id}`, { signal })
+}
+```
+
+### structuredClone(value, options?)
+
+```ts
+type Transferable = ArrayBuffer
+
+interface StructuredSerializeOptions {
+  transfer?: Transferable[]
+}
+
+declare function structuredClone<T = any>(value: T, options?: StructuredSerializeOptions): T
+```
+
+deep-copies a value with the browser's structured clone rules.
+
+- **grant:** none.
+- **parameters:**
+  - `value`: primitives (including `bigint`, `undefined`, `-0`, `NaN`), plain objects, arrays (holes stay holes), `Date`, `RegExp` (source and flags), `Map`, `Set`, `ArrayBuffer` (resizable too), every typed array, `DataView`, `Error` and its built-in subclasses, `DOMException`, and `Boolean`/`Number`/`String`/`BigInt` wrapper objects.
+  - `options.transfer`: `ArrayBuffer`s to move instead of copy: the copy gets the bytes, the originals become detached (length 0).
+- **returns:** the copy. cycles and shared references are kept: an object reached twice is copied once.
+- **throws:** a `DOMException` named `DataCloneError` for functions, symbols, `WeakMap`, `WeakSet`, `WeakRef`, `FinalizationRegistry`, `Promise`, generators, `SharedArrayBuffer`, out-of-bounds `DataView`s and web objects like `URL`, `EventTarget` and `AbortController`; for a transfer list with something other than an `ArrayBuffer`, a duplicate, or a detached buffer.
+- **notes:**
+  - objects copy only their own enumerable string keys; getters are read once and become plain values. class instances come back as plain objects (no prototype, no methods), like in browsers.
+  - errors keep `name` (unknown names become `Error`), `message`, `stack` and a cloned `cause`.
+  - views over a resizable buffer come back with a fixed length.
+  - `tg.storage` keeps its own, smaller set of types.
+
+Example:
+
+```ts
+const saved = { filters: [{ word: 'ad' }], updated: new Date() }
+const draft = structuredClone(saved)
+draft.filters.push({ word: 'spam' })
+console.log(saved.filters.length, draft.filters.length, draft.updated instanceof Date) // 1 2 true
+```
+
+### reportError(error)
+
+```ts
+declare function reportError(error: unknown): void
+```
+
+reports an error the way an uncaught exception would be, without stopping the current code.
+
+- **grant:** none.
+- **parameters:**
+  - `error` (`unknown`): anything; usually an `Error`.
+- **notes:**
+  - the error is thrown from a microtask, so it lands in the script log and counts as a script error.
+  - `EventTarget` uses it for exceptions in listeners.
+
+Example:
+
+```ts
+for (const job of jobs) {
+  try {
+    await job()
+  } catch (error) {
+    reportError(error)
+  }
+}
+```
+
+### new WebSocket(url, protocols?)
+
+```ts
+declare class WebSocket extends EventTarget {
+  constructor(url: string | URL, protocols?: string | string[])
+  static readonly CONNECTING: 0
+  static readonly OPEN: 1
+  static readonly CLOSING: 2
+  static readonly CLOSED: 3
+  readonly url: string
+  readonly protocol: string
+  readonly extensions: string
+  readonly readyState: number
+  readonly bufferedAmount: number
+  binaryType: WebSocketBinaryType
+  onopen: ((this: WebSocket, event: Event) => unknown) | null
+  onmessage: ((this: WebSocket, event: MessageEvent<string | ArrayBuffer>) => unknown) | null
+  onerror: ((this: WebSocket, event: Event) => unknown) | null
+  onclose: ((this: WebSocket, event: CloseEvent) => unknown) | null
+  send(data: string | ArrayBuffer | ArrayBufferView): void
+  close(code?: number, reason?: string): void
+}
+
+type WebSocketBinaryType = 'arraybuffer'
+```
+
+opens a websocket connection (RFC 6455) with the browser's `WebSocket` shape: connect, then `send` and listen for `message`.
+
+- **grant:** `fetch(<host>)` (or a parent domain, or bare `fetch`): the same grant as `fetch`.
+- **parameters:**
+  - `url` (`string | URL`): an absolute `ws://` or `wss://` url; `http://` and `https://` are turned into `ws://` and `wss://`. No fragment (`#...`).
+  - `protocols` (`string | string[]`, optional): subprotocols offered in `Sec-WebSocket-Protocol`, each an http token, no duplicates.
+- **returns:** the socket, `readyState` `CONNECTING`; `open` fires once the handshake is done.
+- **throws:** `DOMException` `SyntaxError` for a bad url, another scheme, a fragment or a bad / repeated subprotocol; `TeleError` `not-granted` (`WebSocket needs the grant 'fetch(<host>)'`); `TeleError` `unsupported` for `wss://` when tele has no TLS.
+- **notes:**
+  - members: `url` (the parsed url), `protocol` (the subprotocol the server chose, `''` until `open` and when it chose none), `extensions` (always `''`: no extensions are negotiated), `readyState` (`CONNECTING` 0, `OPEN` 1, `CLOSING` 2, `CLOSED` 3, also on instances), `bufferedAmount` (bytes queued in tele and not written to the network yet, plus whatever `send` dropped after `close`).
+  - `binaryType` is always `'arraybuffer'`: binary messages arrive as `ArrayBuffer` (wrap it in `new Uint8Array(data)`). Setting `'blob'` throws `DOMException` `NotSupportedError` (there is no `Blob`); other values are ignored like in browsers.
+  - goes through tele's network stack: the same proxy as `fetch`, the system's certificate authorities for `wss://`. No `Origin` header and no cookies are sent.
+  - a server that ignores the offered subprotocols is accepted (`protocol` stays `''`); one that picks a subprotocol that wasn't offered, or any extension, fails the connection. Redirects are failures.
+  - the handshake has 30 seconds; after that the socket fails (`error`, then `close` 1006).
+  - stopping or reloading the script closes every socket it opened with 1001 (going away); its handlers never run again.
+  - a socket that is never closed stays open (and its handlers alive) until the script stops.
+
+Example:
+
+```ts
+const socket = new WebSocket('wss://echo.websocket.org/')
+socket.onopen = () => socket.send(JSON.stringify({ hello: 'tele' }))
+socket.onmessage = (event) => {
+  if (typeof event.data === 'string') console.log('text', event.data)
+  else console.log('bytes', new Uint8Array(event.data).length)
+}
+socket.onclose = (event) => console.log('closed', event.code, event.reason)
+```
+
+### websocket.send(data)
+
+```ts
+send(data: string | ArrayBuffer | ArrayBufferView): void
+```
+
+sends one message: a string as a text frame (UTF-8), bytes as a binary frame.
+
+- **grant:** none (the socket's grant was checked when it was made).
+- **parameters:**
+  - `data` (`string | ArrayBuffer | ArrayBufferView`): text, or the bytes of an `ArrayBuffer` or of a typed array / `DataView` window (only `byteOffset` to `byteOffset + byteLength`). Anything else is sent as `String(data)`; lone surrogates become U+FFFD.
+- **returns:** nothing; the message is queued and written in the background (`bufferedAmount` shows what's still queued).
+- **throws:** `DOMException` `InvalidStateError` while `CONNECTING`; `RangeError: WebSocket: a message is over 64 MB`.
+- **notes:**
+  - after `close()` (or once the socket closed) `send` throws nothing and drops the message, adding its size to `bufferedAmount`, like browsers.
+  - every message is one frame, masked as RFC 6455 requires from clients.
+
+Example:
+
+```ts
+socket.send('ping')
+socket.send(new Uint8Array([1, 2, 3]))
+```
+
+### websocket.close(code?, reason?)
+
+```ts
+close(code?: number, reason?: string): void
+```
+
+starts the closing handshake; `close` fires when the server answers.
+
+- **grant:** none.
+- **parameters:**
+  - `code` (`number`, optional): 1000 or 3000 to 4999. Without it the close frame carries no code (the server usually answers 1005), or 1000 when a `reason` is given.
+  - `reason` (`string`, optional): at most 123 bytes of UTF-8.
+- **returns:** nothing; `readyState` becomes `CLOSING` right away.
+- **throws:** `DOMException` `InvalidAccessError` for any other code; `DOMException` `SyntaxError` for a reason over 123 bytes.
+- **notes:**
+  - while `CONNECTING` it gives up on the connection: `error`, then `close` with 1006.
+  - on `CLOSING` / `CLOSED` sockets it does nothing.
+  - a server that doesn't answer within 5 seconds gets cut off: `close` with 1006, `wasClean` false.
+
+Example:
+
+```ts
+socket.close(4000, 'done')
+```
+
+### websocket events
+
+```ts
+interface WebSocketEventMap {
+  open: Event
+  message: MessageEvent<string | ArrayBuffer>
+  error: Event
+  close: CloseEvent
+}
+```
+
+what a socket fires, through `addEventListener(type, listener)` or the `on<type>` properties.
+
+- **grant:** none.
+- **parameters:**
+  - `open` (`Event`): the handshake is done, `readyState` is `OPEN`, `protocol` is set.
+  - `message` (`MessageEvent<string | ArrayBuffer>`): a whole message: `data` is a `string` for text, an `ArrayBuffer` for binary; `origin` is the socket's origin (`wss://host`). Fragmented messages are joined first; only fired while `OPEN`.
+  - `error` (`Event`): the connection failed (refused, TLS, a bad handshake, a protocol error from the server, a timeout). `readyState` is already `CLOSED`; `close` follows right after.
+  - `close` (`CloseEvent`): the socket is `CLOSED`. `code` and `reason` are what the server sent (1005 if its close frame had no code), `wasClean` is true when both sides exchanged close frames.
+- **notes:**
+  - `onopen`, `onmessage`, `onerror`, `onclose` hold one handler each (`null` removes it); `addEventListener` adds any number, with `once` and `signal`.
+  - a dropped connection without a close frame closes with 1006, `wasClean` false, without `error`.
+  - differences from browsers: when the connection fails, `close`'s `reason` carries tele's description (`Connection refused`, `the server refused the upgrade: HTTP/1.1 404 Not Found`...) instead of `''`. When the server breaks the protocol tele sends the matching close code and reports it in `close`: 1002 (bad frames), 1007 (text that isn't UTF-8), 1009 (a message over 64 MB).
+  - server pings are answered with pongs automatically; they aren't events.
+
+Example:
+
+```ts
+socket.addEventListener('message', (event) => {
+  const data = typeof event.data === 'string' ? JSON.parse(event.data) : new Uint8Array(event.data)
+  console.log(data)
+})
+socket.addEventListener('close', (event) => {
+  if (!event.wasClean) console.warn('lost the connection:', event.code, event.reason)
+}, { once: true })
+```
+
+### class MessageEvent
+
+```ts
+declare class MessageEvent<T = unknown> extends Event {
+  constructor(type: string, init?: MessageEventInit<T>)
+  readonly data: T
+  readonly origin: string
+  readonly lastEventId: string
+  readonly source: null
+  readonly ports: readonly unknown[]
+}
+
+interface MessageEventInit<T = unknown> extends EventInit {
+  data?: T
+  origin?: string
+  lastEventId?: string
+  source?: null
+  ports?: unknown[]
+}
+```
+
+the event for a message: a `WebSocket` message, and anything else in tele that delivers messages to listeners.
+
+- **grant:** none.
+- **parameters:**
+  - `data` (`T`): the message; `null` when not given.
+  - `origin` (`string`): where it came from; `''` when not given.
+  - `lastEventId` (`string`), `source` (`null`), `ports` (frozen, empty): kept for the web shape.
+- **throws:** `TypeError` without a `type` or with an `init` that isn't an object.
+
+Example:
+
+```ts
+const target = new EventTarget()
+target.addEventListener('message', (event) => console.log((event as MessageEvent<string>).data))
+target.dispatchEvent(new MessageEvent('message', { data: 'hi' }))
+```
+
+### class CloseEvent
+
+```ts
+declare class CloseEvent extends Event {
+  constructor(type: string, init?: CloseEventInit)
+  readonly code: number
+  readonly reason: string
+  readonly wasClean: boolean
+}
+
+interface CloseEventInit extends EventInit {
+  code?: number
+  reason?: string
+  wasClean?: boolean
+}
+```
+
+the event a `WebSocket` fires when it is closed.
+
+- **grant:** none.
+- **parameters:**
+  - `code` (`number`): the close code (0 when not given). From a socket: the server's code, 1005 for none, 1006 when the connection was lost or failed, 1002 / 1007 / 1009 when tele closed it for a protocol error.
+  - `reason` (`string`): the server's reason, or tele's description of a failure; `''` when not given.
+  - `wasClean` (`boolean`): whether the closing handshake finished.
+- **throws:** `TypeError` without a `type` or with an `init` that isn't an object.
+
+Example:
+
+```ts
+socket.onclose = ({ code, reason, wasClean }) => console.log(code, reason, wasClean)
+```
+
 ### crypto.getRandomValues(array)
 
 ```ts
@@ -3083,13 +4099,183 @@ Example:
 tg.storage.set('install-id', tg.storage.get('install-id') ?? crypto.randomUUID())
 ```
 
-### crypto.subtle.digest(algorithm, data)
+### crypto.subtle
 
 ```ts
 type HashName = 'SHA-1' | 'SHA-256' | 'SHA-384' | 'SHA-512'
 type HashAlgorithm = HashName | { name: HashName }
 type BufferSource = ArrayBuffer | ArrayBufferView
+type KeyUsage = 'encrypt' | 'decrypt' | 'sign' | 'verify' | 'deriveKey' | 'deriveBits' | 'wrapKey' | 'unwrapKey'
+type KeyFormat = 'raw' | 'spki' | 'pkcs8' | 'jwk'
+type KeyType = 'public' | 'private' | 'secret'
+type NamedCurve = 'P-256' | 'P-384' | 'P-521'
+type AesName = 'AES-GCM' | 'AES-CBC' | 'AES-CTR' | 'AES-KW'
+type RsaName = 'RSA-OAEP' | 'RSASSA-PKCS1-v1_5' | 'RSA-PSS'
 
+interface AesGcmParams {
+  name: 'AES-GCM'
+  iv: BufferSource
+  additionalData?: BufferSource
+  tagLength?: 32 | 64 | 96 | 104 | 112 | 120 | 128
+}
+
+interface AesCbcParams {
+  name: 'AES-CBC'
+  iv: BufferSource
+}
+
+interface AesCtrParams {
+  name: 'AES-CTR'
+  counter: BufferSource
+  length: number
+}
+
+interface RsaOaepParams {
+  name: 'RSA-OAEP'
+  label?: BufferSource
+}
+
+interface EcdsaParams {
+  name: 'ECDSA'
+  hash: HashAlgorithm
+}
+
+interface RsaPssParams {
+  name: 'RSA-PSS'
+  saltLength: number
+}
+
+interface Pbkdf2Params {
+  name: 'PBKDF2'
+  salt: BufferSource
+  iterations: number
+  hash: HashAlgorithm
+}
+
+interface HkdfParams {
+  name: 'HKDF'
+  salt: BufferSource
+  info: BufferSource
+  hash: HashAlgorithm
+}
+
+interface EcdhKeyDeriveParams {
+  name: 'ECDH' | 'X25519'
+  public: CryptoKey
+}
+
+interface AesKeyGenParams {
+  name: AesName
+  length: 128 | 192 | 256
+}
+
+interface HmacKeyGenParams {
+  name: 'HMAC'
+  hash: HashAlgorithm
+  length?: number
+}
+
+interface EcKeyGenParams {
+  name: 'ECDSA' | 'ECDH'
+  namedCurve: NamedCurve
+}
+
+interface RsaHashedKeyGenParams {
+  name: RsaName
+  modulusLength: number
+  publicExponent: Uint8Array
+  hash: HashAlgorithm
+}
+
+interface RsaHashedImportParams {
+  name: RsaName
+  hash: HashAlgorithm
+}
+
+type CipherAlgorithm = AesGcmParams | AesCbcParams | AesCtrParams | RsaOaepParams | 'RSA-OAEP'
+type WrapAlgorithm = CipherAlgorithm | 'AES-KW' | { name: 'AES-KW' }
+
+type SignAlgorithm =
+  | 'HMAC' | 'Ed25519' | 'RSASSA-PKCS1-v1_5'
+  | { name: 'HMAC' | 'Ed25519' | 'RSASSA-PKCS1-v1_5' }
+  | EcdsaParams
+  | RsaPssParams
+
+type DeriveAlgorithm = Pbkdf2Params | HkdfParams | EcdhKeyDeriveParams
+type PairAlgorithm = EcKeyGenParams | RsaHashedKeyGenParams | 'Ed25519' | 'X25519' | { name: 'Ed25519' | 'X25519' }
+type SecretAlgorithm = AesKeyGenParams | HmacKeyGenParams
+
+type ImportAlgorithm =
+  | AesName | 'PBKDF2' | 'HKDF' | 'Ed25519' | 'X25519'
+  | { name: AesName | 'PBKDF2' | 'HKDF' | 'Ed25519' | 'X25519' }
+  | HmacKeyGenParams
+  | EcKeyGenParams
+  | RsaHashedImportParams
+
+type DerivedKeyAlgorithm = AesKeyGenParams | HmacKeyGenParams | 'HKDF' | 'PBKDF2' | { name: 'HKDF' | 'PBKDF2' }
+
+declare class SubtleCrypto {
+  private constructor()
+  // the methods below
+}
+
+interface Crypto {
+  getRandomValues<T extends ArrayBufferView>(array: T): T
+  randomUUID(): string
+  readonly subtle: SubtleCrypto
+}
+
+declare var crypto: Crypto
+```
+
+the WebCrypto api of browsers, with the same names, shapes and errors, so libraries written for `crypto.subtle` (jose, age, signal-style ratchets, PGP helpers) work unchanged. hashing, HMAC, AES, ECDH/X25519, ECDSA/Ed25519, RSA, PBKDF2 and HKDF all run on OpenSSL inside tele, off the UI thread.
+
+| algorithm | operations | key formats | generateKey / import parameters | operation parameters |
+| --- | --- | --- | --- | --- |
+| `AES-GCM` | encrypt, decrypt, wrapKey, unwrapKey | raw, jwk (`A128GCM`...) | `{ length: 128 \| 192 \| 256 }` | `AesGcmParams` |
+| `AES-CBC` | encrypt, decrypt, wrapKey, unwrapKey | raw, jwk (`A128CBC`...) | `{ length }` | `AesCbcParams` (16-byte iv, PKCS#7 padding) |
+| `AES-CTR` | encrypt, decrypt, wrapKey, unwrapKey | raw, jwk (`A128CTR`...) | `{ length }` | `AesCtrParams` (16-byte counter block, `length` counter bits 1-128) |
+| `AES-KW` | wrapKey, unwrapKey | raw, jwk (`A128KW`...) | `{ length }` | none (RFC 3394) |
+| `HMAC` | sign, verify | raw, jwk (`HS256`...) | `{ hash, length? }` (default: the hash's block size) | none, the hash comes from the key |
+| `PBKDF2` | deriveBits, deriveKey | raw (import only, never extractable) | none | `Pbkdf2Params` |
+| `HKDF` | deriveBits, deriveKey | raw (import only, never extractable) | none | `HkdfParams` |
+| `ECDH` | deriveBits, deriveKey | raw (public point), spki, pkcs8, jwk | `{ namedCurve }` | `EcdhKeyDeriveParams` |
+| `X25519` | deriveBits, deriveKey | raw (public), spki, pkcs8, jwk | none | `EcdhKeyDeriveParams` |
+| `ECDSA` | sign, verify | raw (public point), spki, pkcs8, jwk | `{ namedCurve }` | `EcdsaParams` (signatures are r‖s, IEEE P1363, like browsers) |
+| `Ed25519` | sign, verify | raw (public), spki, pkcs8, jwk | none | none |
+| `RSASSA-PKCS1-v1_5` | sign, verify | spki, pkcs8, jwk (`RS256`...) | `RsaHashedKeyGenParams` / `{ hash }` | none |
+| `RSA-PSS` | sign, verify | spki, pkcs8, jwk (`PS256`...) | `RsaHashedKeyGenParams` / `{ hash }` | `RsaPssParams` |
+| `RSA-OAEP` | encrypt, decrypt, wrapKey, unwrapKey | spki, pkcs8, jwk (`RSA-OAEP-256`...) | `RsaHashedKeyGenParams` / `{ hash }` | `RsaOaepParams` |
+
+- **grant:** none.
+- **parameters:**
+  - algorithms are a name or `{ name, ...parameters }`; names are case-insensitive. hashes are `SHA-1`, `SHA-256`, `SHA-384`, `SHA-512`.
+  - `BufferSource` is any `ArrayBuffer`, typed array or `DataView`; the bytes are copied when the call starts.
+- **returns:** every method returns a promise; bytes come back as `ArrayBuffer`.
+- **throws:** every method rejects instead of throwing, with a `DOMException` named like in browsers:
+  - `NotSupportedError`: an unknown algorithm, or one that can't do this operation (`encrypt` with `HMAC`), or a format the algorithm doesn't have (`raw` RSA keys).
+  - `InvalidAccessError`: the key belongs to another algorithm, its `usages` don't allow the operation, it isn't extractable, or it's the wrong half of a pair.
+  - `DataError`: key data that doesn't parse or doesn't match the algorithm (a 15-byte AES key, a P-384 spki imported as P-256, a jwk with the wrong `kty`/`crv`/`alg`/`use`/`key_ops`).
+  - `OperationError`: the operation itself failed (a wrong AES-GCM tag or RSA-OAEP label, a bad iv, an AES-CTR counter that would repeat, a length the algorithm can't produce).
+  - `SyntaxError`: usages that don't fit the key (`['encrypt']` for HMAC) or an empty list for secret and private keys.
+  - `TypeError`: wrong argument types, an unknown hash (`TypeError: the hash is SHA-1, SHA-256, SHA-384 or SHA-512`) or something that isn't a `CryptoKey`.
+- **notes:**
+  - key material stays inside tele's native code; a script only holds `CryptoKey` objects. keys are freed when the script drops them or stops.
+  - `getRandomValues` and `randomUUID` are the items above; workers keep the smaller `crypto.subtle` with only `digest`, HMAC `importKey`/`sign`/`verify`.
+  - not there: `RSA-PSS`/`RSA-OAEP` keys with the special `id-RSASSA-PSS` spki type, compressed points on export, X448/Ed448, `AES-KW` around jwk keys whose JSON isn't a multiple of 8 bytes (same as browsers).
+
+Example:
+
+```ts
+const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
+const iv = crypto.getRandomValues(new Uint8Array(12))
+const sealed = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode('secret note'))
+const opened = new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, sealed))
+```
+
+### crypto.subtle.digest(algorithm, data)
+
+```ts
 digest(algorithm: HashAlgorithm, data: BufferSource): Promise<ArrayBuffer>
 ```
 
@@ -3109,119 +4295,367 @@ const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('hel
 console.log(new Uint8Array(hash).toHex())
 ```
 
-### crypto.subtle.importKey(format, keyData, algorithm, extractable, usages)
+### crypto.subtle.generateKey(algorithm, extractable, usages)
 
 ```ts
-importKey(
-  format: 'raw',
-  keyData: BufferSource,
-  algorithm: { name: 'HMAC', hash: HashAlgorithm },
-  extractable: boolean,
-  usages: ('sign' | 'verify')[],
-): Promise<CryptoKey>
+generateKey(algorithm: PairAlgorithm, extractable: boolean, usages: readonly KeyUsage[]): Promise<CryptoKeyPair>
+generateKey(algorithm: SecretAlgorithm, extractable: boolean, usages: readonly KeyUsage[]): Promise<CryptoKey>
 ```
 
-imports raw bytes as an HMAC key for `sign` and `verify`.
+makes a new random secret key, or a key pair.
 
 - **grant:** none.
 - **parameters:**
-  - `format` (`'raw'`): the only supported format.
-  - `keyData` (`BufferSource`): the secret; copied.
-  - `algorithm` (`{ name: 'HMAC', hash }`): HMAC with SHA-1, SHA-256, SHA-384 or SHA-512.
-  - `extractable` (`boolean`): stored on the key; there is no `exportKey`.
-  - `usages` (`('sign' | 'verify')[]`): stored on the key.
-- **returns:** `Promise<CryptoKey>`, a frozen key object.
-- **throws:** rejects with `TypeError: crypto.subtle.importKey supports 'raw' HMAC keys` for other formats or algorithms, and the hash error for a bad hash.
+  - `algorithm`: AES (`length` 128, 192 or 256), HMAC (`hash`, optional `length` in bits, a multiple of 8; default 512 for SHA-1/SHA-256 and 1024 for SHA-384/SHA-512), ECDSA/ECDH (`namedCurve`), Ed25519, X25519, or RSA (`modulusLength` from 1024 to 16384 in steps of 8, `publicExponent` `[1, 0, 1]` or `[3]`, `hash`).
+  - `extractable` (`boolean`): whether `exportKey`/`wrapKey` may read the secret or private key. the public half of a pair is always extractable.
+  - `usages` (`KeyUsage[]`): what the key may do; for pairs they're split (`sign` goes to the private key, `verify` to the public one).
+- **returns:** `Promise<CryptoKey>` for secret keys, `Promise<CryptoKeyPair>` for asymmetric algorithms.
+- **throws:** `OperationError` for a bad length, modulus or exponent; `NotSupportedError` for an unknown curve or `PBKDF2`/`HKDF`; `SyntaxError` for usages that don't fit.
+- **notes:**
+  - RSA key generation runs on a worker thread; 2048 bits usually takes well under a second, 4096 can take a few.
 
 Example:
 
 ```ts
-const key = await crypto.subtle.importKey(
-  'raw',
-  new TextEncoder().encode('my webhook secret'),
-  { name: 'HMAC', hash: 'SHA-256' },
-  false,
-  ['sign', 'verify'],
-)
+const { publicKey, privateKey } = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+tg.storage.set('identity', { ...(await crypto.subtle.exportKey('jwk', privateKey)) })
+```
+
+### crypto.subtle.importKey(format, keyData, algorithm, extractable, usages)
+
+```ts
+importKey(
+  format: 'jwk',
+  keyData: JsonWebKey,
+  algorithm: ImportAlgorithm,
+  extractable: boolean,
+  usages: readonly KeyUsage[],
+): Promise<CryptoKey>
+importKey(
+  format: 'raw' | 'spki' | 'pkcs8',
+  keyData: BufferSource,
+  algorithm: ImportAlgorithm,
+  extractable: boolean,
+  usages: readonly KeyUsage[],
+): Promise<CryptoKey>
+
+interface JsonWebKey {
+  kty?: string
+  alg?: string
+  use?: string
+  key_ops?: string[]
+  ext?: boolean
+  crv?: string
+  x?: string
+  y?: string
+  d?: string
+  n?: string
+  e?: string
+  p?: string
+  q?: string
+  dp?: string
+  dq?: string
+  qi?: string
+  k?: string
+}
+```
+
+turns key bytes or a JSON Web Key into a `CryptoKey`.
+
+- **grant:** none.
+- **parameters:**
+  - `format`: `'raw'` (secret bytes, an EC public point `04‖x‖y` or compressed, a 32-byte Ed25519/X25519 public key), `'spki'` (DER public key), `'pkcs8'` (DER private key) or `'jwk'`. the table in `crypto.subtle` lists which algorithm takes which.
+  - `keyData` (`BufferSource | JsonWebKey`): the key; a jwk is a plain object with base64url fields. its `alg`, `use`, `key_ops` and `ext` are checked like browsers do.
+  - `algorithm`: the algorithm the key will be used with. HMAC may give `length` in bits; ECDSA/ECDH need `namedCurve`; RSA needs `hash`.
+  - `extractable` (`boolean`): whether it can be exported or wrapped later. PBKDF2 and HKDF keys can't be extractable.
+  - `usages` (`KeyUsage[]`): what it may do. ECDH/X25519 public keys take `[]`.
+- **returns:** `Promise<CryptoKey>`; its `type` is `secret`, `public` (raw, spki, a jwk without `d`) or `private` (pkcs8, a jwk with `d`).
+- **throws:** `DataError` for key data that doesn't parse or doesn't match (wrong size, curve, `kty`, a public half that doesn't fit the private one); `NotSupportedError` for a format the algorithm doesn't have; `SyntaxError` for wrong usages.
+- **notes:**
+  - EC and Ed25519/X25519 keys are validated (point on the curve, private matching public); an RSA jwk private key needs all of `n e d p q dp dq qi`.
+
+Example:
+
+```ts
+const peer = await crypto.subtle.importKey('raw', Uint8Array.fromBase64(theirKey), 'X25519', false, [])
+const mine = await crypto.subtle.importKey('jwk', tg.storage.get('x25519') as JsonWebKey, 'X25519', false, ['deriveKey'])
+```
+
+### crypto.subtle.exportKey(format, key)
+
+```ts
+exportKey(format: 'jwk', key: CryptoKey): Promise<JsonWebKey>
+exportKey(format: 'raw' | 'spki' | 'pkcs8', key: CryptoKey): Promise<ArrayBuffer>
+```
+
+reads an extractable key back out.
+
+- **grant:** none.
+- **parameters:**
+  - `format`: `'raw'` for secret keys and public EC/Ed25519/X25519 keys (EC points come out uncompressed), `'spki'` for public keys, `'pkcs8'` for private keys, `'jwk'` for everything.
+  - `key` (`CryptoKey`): an extractable key.
+- **returns:** `Promise<ArrayBuffer>`, or `Promise<JsonWebKey>` with `kty`, the key fields, `alg` (`A256GCM`, `HS256`, `RS256`, `PS256`, `RSA-OAEP-256`, `Ed25519`...), `key_ops` (the key's usages) and `ext: true`.
+- **throws:** `InvalidAccessError` for a non-extractable key or the wrong half (`spki` of a private key); `NotSupportedError` for a format the algorithm doesn't have.
+
+Example:
+
+```ts
+const spki = new Uint8Array(await crypto.subtle.exportKey('spki', publicKey))
+const pem = `-----BEGIN PUBLIC KEY-----\n${spki.toBase64()}\n-----END PUBLIC KEY-----`
+```
+
+### crypto.subtle.encrypt(algorithm, key, data)
+
+```ts
+encrypt(algorithm: CipherAlgorithm, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer>
+```
+
+encrypts bytes with AES-GCM, AES-CBC, AES-CTR or RSA-OAEP.
+
+- **grant:** none.
+- **parameters:**
+  - `algorithm`: `AES-GCM` with an `iv` (12 bytes is the norm; never reuse one with the same key), optional `additionalData` and `tagLength` (bits, default 128); `AES-CBC` with a 16-byte `iv`; `AES-CTR` with a 16-byte `counter` block and `length`, the number of its low bits that count; `RSA-OAEP` with an optional `label`.
+  - `key` (`CryptoKey`): a key of the same algorithm with the `encrypt` usage (the public key for RSA-OAEP).
+  - `data` (`BufferSource`): the plaintext.
+- **returns:** `Promise<ArrayBuffer>`: for AES-GCM the ciphertext followed by the tag; for AES-CBC the PKCS#7-padded ciphertext.
+- **throws:** `InvalidAccessError` for a key of another algorithm or without `encrypt`; `OperationError` for a bad iv, tag length or counter, a counter that would wrap onto itself, or RSA-OAEP data longer than the key allows.
+
+Example:
+
+```ts
+const iv = crypto.getRandomValues(new Uint8Array(12))
+const sealed = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(String(chatId)) }, key, bytes)
+```
+
+### crypto.subtle.decrypt(algorithm, key, data)
+
+```ts
+decrypt(algorithm: CipherAlgorithm, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer>
+```
+
+reverses `encrypt`.
+
+- **grant:** none.
+- **parameters:**
+  - `algorithm`: the same parameters `encrypt` got.
+  - `key` (`CryptoKey`): a key with the `decrypt` usage (the private key for RSA-OAEP).
+  - `data` (`BufferSource`): what `encrypt` returned.
+- **returns:** `Promise<ArrayBuffer>` with the plaintext.
+- **throws:** `OperationError` when the AES-GCM tag, the AES-CBC padding, the RSA-OAEP padding or label doesn't check out; otherwise like `encrypt`.
+
+Example:
+
+```ts
+try {
+  const text = new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, sealed))
+} catch (error) {
+  if (error instanceof DOMException && error.name === 'OperationError') console.log('tampered or wrong key')
+}
 ```
 
 ### crypto.subtle.sign(algorithm, key, data)
 
 ```ts
-sign(algorithm: 'HMAC' | { name: 'HMAC' }, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer>
+sign(algorithm: SignAlgorithm, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer>
 ```
 
-computes the HMAC of `data` with a key from `importKey`.
+signs bytes with HMAC, ECDSA, Ed25519, RSASSA-PKCS1-v1_5 or RSA-PSS.
 
 - **grant:** none.
 - **parameters:**
-  - `algorithm` (`'HMAC' | { name: 'HMAC' }`): always HMAC.
-  - `key` (`CryptoKey`): a key from `crypto.subtle.importKey` in this script.
-  - `data` (`BufferSource`): the message bytes.
-- **returns:** `Promise<ArrayBuffer>` with the signature.
-- **throws:** rejects with `TypeError: crypto.subtle.sign needs an HMAC key from importKey`.
+  - `algorithm`: the algorithm of the key; ECDSA also takes the `hash`, RSA-PSS the `saltLength` in bytes (32 for SHA-256 is usual). HMAC and RSASSA use the key's hash.
+  - `key` (`CryptoKey`): a secret HMAC key or a private key, with the `sign` usage.
+  - `data` (`BufferSource`): the message.
+- **returns:** `Promise<ArrayBuffer>`: the MAC, the raw Ed25519 or RSA signature, or ECDSA `r‖s` (64, 96 or 132 bytes for P-256, P-384, P-521), the same format browsers use.
+- **throws:** `InvalidAccessError` for a key of another algorithm or without `sign`; `TypeError` for something that isn't a `CryptoKey`.
 
 Example:
 
 ```ts
-const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body))
-const header = new Uint8Array(signature).toHex()
+const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, privateKey, new TextEncoder().encode(body))
 ```
 
 ### crypto.subtle.verify(algorithm, key, signature, data)
 
 ```ts
-verify(
-  algorithm: 'HMAC' | { name: 'HMAC' },
-  key: CryptoKey,
-  signature: BufferSource,
-  data: BufferSource,
-): Promise<boolean>
+verify(algorithm: SignAlgorithm, key: CryptoKey, signature: BufferSource, data: BufferSource): Promise<boolean>
 ```
 
-checks an HMAC signature in constant time.
+checks a signature; HMAC is compared in constant time.
 
 - **grant:** none.
 - **parameters:**
-  - `algorithm` (`'HMAC' | { name: 'HMAC' }`): always HMAC.
-  - `key` (`CryptoKey`): a key from `importKey`.
+  - `algorithm`: as for `sign`.
+  - `key` (`CryptoKey`): the HMAC key or the public key, with the `verify` usage.
   - `signature` (`BufferSource`): the signature to check.
   - `data` (`BufferSource`): the signed bytes.
-- **returns:** `Promise<boolean>`.
-- **throws:** rejects like `sign` for a foreign key.
+- **returns:** `Promise<boolean>`; a malformed signature is just `false`.
+- **throws:** like `sign`.
 
 Example:
 
 ```ts
-const valid = await crypto.subtle.verify('HMAC', key, Uint8Array.fromHex(given), new TextEncoder().encode(body))
+const valid = await crypto.subtle.verify('Ed25519', publicKey, Uint8Array.fromBase64(given), new TextEncoder().encode(body))
 ```
 
-### type CryptoKey
+### crypto.subtle.deriveBits(algorithm, baseKey, length?)
 
 ```ts
-interface CryptoKey {
-  readonly type: 'secret'
+deriveBits(algorithm: DeriveAlgorithm, baseKey: CryptoKey, length?: number | null): Promise<ArrayBuffer>
+```
+
+stretches a password (PBKDF2), expands a secret (HKDF) or agrees on a shared secret (ECDH, X25519).
+
+- **grant:** none.
+- **parameters:**
+  - `algorithm`: `PBKDF2` with `salt`, `iterations` and `hash`; `HKDF` with `salt`, `info` and `hash`; `ECDH`/`X25519` with the other side's `public` key (same algorithm and curve).
+  - `baseKey` (`CryptoKey`): an imported PBKDF2/HKDF key or your private ECDH/X25519 key, with `deriveBits`.
+  - `length` (`number | null`): bits to derive. PBKDF2 and HKDF need a multiple of 8; ECDH/X25519 take `null` for the whole shared secret or fewer bits to cut it.
+- **returns:** `Promise<ArrayBuffer>`.
+- **throws:** `OperationError` for zero iterations, a length the algorithm can't give (HKDF above 255 hash lengths, ECDH above the secret); `InvalidAccessError` for a `public` key of another algorithm or curve.
+- **notes:**
+  - PBKDF2 runs on a worker thread, so 600 000 iterations don't freeze tele.
+
+Example:
+
+```ts
+const password = await crypto.subtle.importKey('raw', new TextEncoder().encode(input), 'PBKDF2', false, ['deriveBits'])
+const hash = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 600_000, hash: 'SHA-256' }, password, 256)
+```
+
+### crypto.subtle.deriveKey(algorithm, baseKey, derivedKeyType, extractable, usages)
+
+```ts
+deriveKey(
+  algorithm: DeriveAlgorithm,
+  baseKey: CryptoKey,
+  derivedKeyType: DerivedKeyAlgorithm,
+  extractable: boolean,
+  usages: readonly KeyUsage[],
+): Promise<CryptoKey>
+```
+
+`deriveBits` followed by `importKey('raw', ...)`: makes an AES or HMAC key (or an HKDF key from an ECDH secret) directly.
+
+- **grant:** none.
+- **parameters:**
+  - `algorithm`, `baseKey`: as for `deriveBits`; the base key needs the `deriveKey` usage.
+  - `derivedKeyType`: the key to make; AES needs `length`, HMAC derives its hash's block size unless `length` is given, HKDF/PBKDF2 take the whole secret (only after ECDH/X25519).
+  - `extractable`, `usages`: for the new key.
+- **returns:** `Promise<CryptoKey>`.
+- **throws:** like `deriveBits` and `importKey`.
+
+Example:
+
+```ts
+const shared = await crypto.subtle.deriveKey({ name: 'X25519', public: peer }, mine, 'HKDF', false, ['deriveKey'])
+const chatKey = await crypto.subtle.deriveKey(
+  { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: new TextEncoder().encode('tele chat') },
+  shared,
+  { name: 'AES-GCM', length: 256 },
+  false,
+  ['encrypt', 'decrypt'],
+)
+```
+
+### crypto.subtle.wrapKey(format, key, wrappingKey, wrapAlgorithm)
+
+```ts
+wrapKey(format: KeyFormat, key: CryptoKey, wrappingKey: CryptoKey, wrapAlgorithm: WrapAlgorithm): Promise<ArrayBuffer>
+```
+
+exports a key and encrypts the result in one step, for storing keys under a master key.
+
+- **grant:** none.
+- **parameters:**
+  - `format` (`KeyFormat`): how `key` is exported first; `jwk` is wrapped as its JSON text.
+  - `key` (`CryptoKey`): an extractable key.
+  - `wrappingKey` (`CryptoKey`): an AES or RSA-OAEP public key with the `wrapKey` usage.
+  - `wrapAlgorithm`: the parameters `encrypt` would take, or `AES-KW` (RFC 3394).
+- **returns:** `Promise<ArrayBuffer>` with the wrapped key.
+- **throws:** like `exportKey` and `encrypt`; `AES-KW` needs a multiple of 8 bytes (at least 16), so wrap jwk keys with AES-GCM instead.
+
+Example:
+
+```ts
+const iv = crypto.getRandomValues(new Uint8Array(12))
+const blob = await crypto.subtle.wrapKey('pkcs8', identity, masterKey, { name: 'AES-GCM', iv })
+```
+
+### crypto.subtle.unwrapKey(format, wrappedKey, unwrappingKey, unwrapAlgorithm, unwrappedKeyAlgorithm, extractable, usages)
+
+```ts
+unwrapKey(
+  format: KeyFormat,
+  wrappedKey: BufferSource,
+  unwrappingKey: CryptoKey,
+  unwrapAlgorithm: WrapAlgorithm,
+  unwrappedKeyAlgorithm: ImportAlgorithm,
+  extractable: boolean,
+  usages: readonly KeyUsage[],
+): Promise<CryptoKey>
+```
+
+decrypts a wrapped key and imports it.
+
+- **grant:** none.
+- **parameters:**
+  - `format` (`KeyFormat`): the format it was wrapped in.
+  - `wrappedKey` (`BufferSource`): what `wrapKey` returned.
+  - `unwrappingKey` (`CryptoKey`): the AES key or RSA-OAEP private key, with `unwrapKey`.
+  - `unwrapAlgorithm`: the parameters used to wrap.
+  - `unwrappedKeyAlgorithm`, `extractable`, `usages`: as for `importKey`.
+- **returns:** `Promise<CryptoKey>`.
+- **throws:** `OperationError` if the blob was changed or the key is wrong; `DataError` if the result isn't a valid key; otherwise like `importKey`.
+
+Example:
+
+```ts
+const identity = await crypto.subtle.unwrapKey('pkcs8', blob, masterKey, { name: 'AES-GCM', iv }, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign'])
+```
+
+### class CryptoKey
+
+```ts
+declare class CryptoKey {
+  private constructor()
+  readonly type: KeyType
   readonly extractable: boolean
-  readonly algorithm: { name: 'HMAC', hash: { name: HashName } }
-  readonly usages: readonly string[]
+  readonly algorithm: KeyAlgorithm
+  readonly usages: readonly KeyUsage[]
+}
+
+interface KeyAlgorithm {
+  readonly name: string
+  readonly length?: number
+  readonly hash?: { readonly name: HashName }
+  readonly namedCurve?: NamedCurve
+  readonly modulusLength?: number
+  readonly publicExponent?: Uint8Array
+}
+
+interface CryptoKeyPair {
+  publicKey: CryptoKey
+  privateKey: CryptoKey
 }
 ```
 
-the frozen key object `crypto.subtle.importKey` resolves with.
+a key made by `generateKey`, `importKey`, `deriveKey` or `unwrapKey`.
 
 - **grant:** none.
 - **parameters:**
-  - `type` (`'secret'`): always `secret`.
-  - `extractable` (`boolean`): what you passed to `importKey`.
-  - `algorithm` (`{ name: 'HMAC', hash: { name } }`): HMAC and the hash, uppercased.
-  - `usages` (`readonly string[]`): what you passed to `importKey`.
+  - `type`: `secret` for AES/HMAC/PBKDF2/HKDF, `public` or `private` for the halves of a pair.
+  - `extractable`: whether `exportKey`/`wrapKey` work on it.
+  - `algorithm`: frozen; `name` plus `length` (AES and HMAC, bits), `hash` (HMAC, RSA), `namedCurve` (ECDSA, ECDH), `modulusLength` and `publicExponent` (RSA).
+  - `usages`: frozen, in the order `encrypt, decrypt, sign, verify, deriveKey, deriveBits, wrapKey, unwrapKey`.
 - **notes:**
-  - the key bytes live inside tele's runtime and can't be read back. only keys made by this script's `importKey` work with `sign` and `verify`.
+  - `new CryptoKey()` throws `TypeError: Illegal constructor`; `instanceof CryptoKey` works.
+  - the key material lives in tele's native code and can't be read except through `exportKey`; a key only works in the script that made it.
 
 Example:
 
 ```ts
-console.log(key.algorithm.hash.name) // 'SHA-256'
+console.log(key.type, key.algorithm.name, key.algorithm.hash?.name, key.usages.join())
 ```
 
 ### class TextEncoder
@@ -3365,6 +4799,446 @@ tg.storage.set('id', id.toBase64({ alphabet: 'base64url', omitPadding: true }))
 const back = Uint8Array.fromHex(id.toHex())
 ```
 
+### compression.gzip(input, options?)
+
+```ts
+type CompressionInput = Uint8Array | ArrayBuffer | string
+
+interface CompressionOptions {
+  level?: number
+}
+
+gzip(input: CompressionInput, options?: CompressionOptions): Promise<Uint8Array>
+
+declare var compression: {
+  gzip(input: CompressionInput, options?: CompressionOptions): Promise<Uint8Array>
+  gunzip(input: CompressionInput, options?: DecompressionOptions): Promise<Uint8Array>
+  deflate(input: CompressionInput, options?: CompressionOptions): Promise<Uint8Array>
+  inflate(input: CompressionInput, options?: DecompressionOptions): Promise<Uint8Array>
+  deflateRaw(input: CompressionInput, options?: CompressionOptions): Promise<Uint8Array>
+  inflateRaw(input: CompressionInput, options?: DecompressionOptions): Promise<Uint8Array>
+}
+```
+
+compresses bytes into the gzip format (what `.gz` files, `Content-Encoding: gzip` and most web apis use).
+
+- **grant:** none.
+- **parameters:**
+  - `input` (`CompressionInput`): the bytes; a string is compressed as utf-8.
+  - `options.level` (`number`, optional): 0 (no compression) to 9 (smallest, slowest); default zlib's 6.
+- **returns:** `Promise<Uint8Array>` with the gzip stream (a 10-byte header without a file name or time, the deflate data, a crc32 and the size).
+- **throws:** synchronously `TypeError: compression.gzip needs a Uint8Array, an ArrayBuffer or a string`, `compression.gzip: options is an object`, `compression.gzip: level is an integer from 0 to 9`; rejects with `TeleError` `internal` if zlib itself fails.
+- **notes:**
+  - the work runs on a background thread, so big inputs don't freeze tele.
+  - it's not an `async` function: argument errors throw right away instead of rejecting.
+
+Example:
+
+```ts
+const packed = await compression.gzip(JSON.stringify(state), { level: 9 })
+tg.storage.set('state', packed.toBase64())
+```
+
+### compression.gunzip(input, options?)
+
+```ts
+interface DecompressionOptions {
+  maxSize?: number
+}
+
+gunzip(input: CompressionInput, options?: DecompressionOptions): Promise<Uint8Array>
+```
+
+decompresses gzip data.
+
+- **grant:** none.
+- **parameters:**
+  - `input` (`CompressionInput`): the gzip bytes; a string is taken as its utf-8 bytes.
+  - `options.maxSize` (`number`, optional): the most bytes the output may have, 1 to 268435456 (256 MB); default 67108864 (64 MB). protects the script from decompression bombs.
+- **returns:** `Promise<Uint8Array>` with the original bytes; turn them into text with `TextDecoder`.
+- **throws:**
+  - synchronously: `TypeError: compression.gunzip needs a Uint8Array, an ArrayBuffer or a string`, `compression.gunzip: options is an object`, `compression.gunzip: maxSize is an integer from 1 to 268435456`.
+  - rejects with `TeleError` `quota-exceeded` (`compression.gunzip: the output is over maxSize (<n> bytes)`): decompression stops as soon as the output passes `maxSize`.
+  - rejects with `TeleError` `unsupported` for data that isn't gzip: `compression.gunzip: the data isn't valid gzip (<zlib's reason>)`, `compression.gunzip: the data is truncated`, `compression.gunzip: unexpected bytes after the end of the data`.
+- **notes:**
+  - several gzip members one after another (concatenated `.gz` files) come out as one result.
+  - anything else after the end of the stream, including zero padding, is an error.
+  - the output is limited by the script's 256 MB of memory too.
+
+Example:
+
+```ts
+const response = await fetch('https://example.com/data.json.gz')
+const json = JSON.parse(new TextDecoder().decode(await compression.gunzip(await response.bytes(), { maxSize: 8 << 20 })))
+```
+
+### compression.deflate(input, options?)
+
+```ts
+deflate(input: CompressionInput, options?: CompressionOptions): Promise<Uint8Array>
+```
+
+compresses bytes into the zlib format (rfc 1950: a 2-byte header, deflate data and an adler32), what `Content-Encoding: deflate`, png chunks and many file formats use.
+
+- **grant:** none.
+- **parameters:**
+  - `input` (`CompressionInput`): the bytes; a string is compressed as utf-8.
+  - `options.level` (`number`, optional): 0 to 9; default 6.
+- **returns:** `Promise<Uint8Array>` with the zlib stream.
+- **throws:** synchronously `TypeError: compression.deflate needs a Uint8Array, an ArrayBuffer or a string`, `compression.deflate: level is an integer from 0 to 9`; rejects with `TeleError` `internal` if zlib fails.
+
+Example:
+
+```ts
+const packed = await compression.deflate(new Uint8Array(1000))
+console.log(packed.length) // a few bytes
+```
+
+### compression.inflate(input, options?)
+
+```ts
+inflate(input: CompressionInput, options?: DecompressionOptions): Promise<Uint8Array>
+```
+
+decompresses zlib-format data (what `compression.deflate` makes).
+
+- **grant:** none.
+- **parameters:**
+  - `input` (`CompressionInput`): the zlib bytes.
+  - `options.maxSize` (`number`, optional): the output limit, 1 to 268435456; default 64 MB.
+- **returns:** `Promise<Uint8Array>` with the original bytes.
+- **throws:** synchronously the same `TypeError`s as `compression.gunzip` (with `compression.inflate`); rejects with `TeleError` `quota-exceeded` over `maxSize`, `TeleError` `unsupported` for data that isn't zlib (`the data isn't valid zlib (incorrect header check)` for gzip or raw data), truncated data or bytes after the end.
+
+Example:
+
+```ts
+const text = new TextDecoder().decode(await compression.inflate(Uint8Array.fromHex('789ccb48cdc9c90700062c0215')))
+```
+
+### compression.deflateRaw(input, options?)
+
+```ts
+deflateRaw(input: CompressionInput, options?: CompressionOptions): Promise<Uint8Array>
+```
+
+compresses bytes into raw deflate data (rfc 1951) with no header or checksum, what zip entries and some protocols use.
+
+- **grant:** none.
+- **parameters:**
+  - `input` (`CompressionInput`): the bytes; a string is compressed as utf-8.
+  - `options.level` (`number`, optional): 0 to 9; default 6.
+- **returns:** `Promise<Uint8Array>` with the deflate data.
+- **throws:** synchronously `TypeError: compression.deflateRaw needs a Uint8Array, an ArrayBuffer or a string`, `compression.deflateRaw: level is an integer from 0 to 9`; rejects with `TeleError` `internal` if zlib fails.
+
+Example:
+
+```ts
+const entry = await compression.deflateRaw(fileBytes)
+```
+
+### compression.inflateRaw(input, options?)
+
+```ts
+inflateRaw(input: CompressionInput, options?: DecompressionOptions): Promise<Uint8Array>
+```
+
+decompresses raw deflate data (what `compression.deflateRaw` makes, or a zip entry's data).
+
+- **grant:** none.
+- **parameters:**
+  - `input` (`CompressionInput`): the deflate bytes.
+  - `options.maxSize` (`number`, optional): the output limit, 1 to 268435456; default 64 MB.
+- **returns:** `Promise<Uint8Array>` with the original bytes.
+- **throws:** synchronously the same `TypeError`s as `compression.gunzip` (with `compression.inflateRaw`); rejects with `TeleError` `quota-exceeded` over `maxSize`, `TeleError` `unsupported` for invalid or truncated data or bytes after the end.
+- **notes:**
+  - raw deflate has no checksum, so some corruptions decode into wrong bytes instead of failing.
+
+Example:
+
+```ts
+const original = await compression.inflateRaw(entry, { maxSize: 1 << 20 })
+```
+
+### Intl
+
+```ts
+declare namespace Intl {
+  function getCanonicalLocales(locales?: string | readonly string[]): string[]
+  function supportedValuesOf(key: 'calendar' | 'collation' | 'currency' | 'numberingSystem' | 'timeZone' | 'unit'): string[]
+  // NumberFormat, DateTimeFormat, RelativeTimeFormat, PluralRules, Collator, ListFormat, Locale
+}
+```
+
+the ECMA-402 internationalization api. QuickJS has none, so tele builds it from Qt's locale data (`QLocale`, `QCollator`) plus its own CLDR tables. the shapes are the standard ones (typings come from TypeScript's own `lib`), so most `Intl` code and libraries work unchanged; the output is close to a browser but not byte-identical.
+
+- **grant:** none.
+- **parameters:**
+  - `locales` (every constructor, `getCanonicalLocales`, `supportedLocalesOf`): a BCP 47 tag (`'ru'`, `'en-US'`, `'zh-Hant-TW'`, `'de-u-nu-latn'`), an `Intl.Locale`, an array of them, or `undefined` for the default. the first tag whose language Qt knows wins.
+  - `getCanonicalLocales(locales)`: the tags fixed up (`'EN-us'` becomes `'en-US'`), duplicates dropped.
+  - `supportedValuesOf(key)`: what this implementation knows for `key`; `timeZone` is just the local zone and `'UTC'`.
+  - `<Constructor>.supportedLocalesOf(locales, options?)`: the tags whose language Qt has data for.
+- **returns:** see each class.
+- **throws:** `RangeError: Incorrect locale information provided` for malformed tags (`'en_US'`), `RangeError` for option values out of range, `TypeError` for options that contradict each other, like a browser.
+- **notes:**
+  - the default locale is tele's interface language (Settings > Language), with the region taken from the system locale when the languages match (english interface on an `en-GB` system gives `en-GB`, otherwise `en-US`); a custom language pack falls back to the system locale.
+  - numbers, currency symbols, month and day names, date and time patterns, separators and the digits (Arabic, Persian…) come from Qt for every language Qt knows (hundreds). Qt's CLDR data is older than a browser's, so some patterns differ (for example `de` dates are `05.03.2024` where Chrome says `5.3.2024`, `ja` long times use `時分秒`).
+  - tele's own tables (plural rules, list patterns, relative time words, compact suffixes) cover `en`, `ru`, `uk`, `be`, `de`, `fr`, `es`, `it`, `pt`, `pl`, `cs`, `tr`, `ar`, `ja`, `zh`, `ko`, `fa`, `id`, `nl`, `sv`; other languages fall back to English rules for those pieces.
+  - not there: `Intl.Segmenter`, `Intl.DisplayNames`, `Intl.DurationFormat`, calendars other than gregorian, time zones other than `'UTC'`, the computer's own zone and fixed offsets like `'+03:00'`.
+  - `Number.prototype.toLocaleString`, `BigInt.prototype.toLocaleString`, `Date.prototype.toLocaleString` / `toLocaleDateString` / `toLocaleTimeString` and `String.prototype.localeCompare` go through these classes, so they take the same `locales` and `options`.
+
+Example:
+
+```ts
+console.log((1234567.891).toLocaleString('ru-RU')) // 1 234 567,891
+console.log(new Date().toLocaleDateString(undefined, { dateStyle: 'long' })) // in tele's language
+console.log(Intl.DateTimeFormat().resolvedOptions().timeZone) // 'Europe/Moscow'
+```
+
+### class Intl.NumberFormat
+
+```ts
+declare class Intl.NumberFormat {
+  constructor(locales?: string | string[], options?: Intl.NumberFormatOptions)
+  format(value: number | bigint | string): string
+  formatToParts(value: number | bigint | string): Intl.NumberFormatPart[]
+  formatRange(start: number | bigint | string, end: number | bigint | string): string
+  formatRangeToParts(start: number | bigint | string, end: number | bigint | string): Intl.NumberRangeFormatPart[]
+  resolvedOptions(): Intl.ResolvedNumberFormatOptions
+  static supportedLocalesOf(locales: string | string[], options?: { localeMatcher?: string }): string[]
+}
+```
+
+formats numbers, percentages, money and units with the locale's separators, grouping and digits.
+
+- **grant:** none.
+- **parameters:**
+  - `style`: `'decimal'` (default), `'percent'` (multiplies by 100), `'currency'` (needs `currency`, an ISO code like `'USD'`), `'unit'` (needs `unit`, like `'kilobyte'` or `'kilometer-per-hour'`).
+  - `currencyDisplay`: `'symbol'` (default), `'narrowSymbol'`, `'code'`, `'name'`; `currencySign: 'accounting'` uses parentheses where the locale does.
+  - `minimumIntegerDigits`, `minimumFractionDigits`, `maximumFractionDigits`, `minimumSignificantDigits`, `maximumSignificantDigits`, `roundingPriority`, `roundingIncrement`, `roundingMode` (all nine), `trailingZeroDisplay`: the standard rounding options with the standard defaults (0 to 3 fraction digits, the currency's minor units for money, 0 for percent).
+  - `useGrouping`: `'auto'` (default), `'always'`, `'min2'`, `true`, `false`.
+  - `notation`: `'standard'`, `'scientific'`, `'engineering'`, `'compact'` with `compactDisplay: 'short' | 'long'` (`1.2K`, `1.2 million`, `1,2 тыс.`, `5 тысяч`, `1.2万`).
+  - `signDisplay`: `'auto'`, `'never'`, `'always'`, `'exceptZero'`, `'negative'`.
+  - `numberingSystem` or `-u-nu-` in the tag: `'latn'` or another digit set (`'arab'`, `'arabext'`, `'deva'`…).
+- **returns:** `format` gives the string (it's a bound getter, so `list.map(format.format)` works); `formatToParts` the typed pieces (`integer`, `group`, `decimal`, `fraction`, `currency`, `percentSign`, `minusSign`, `compact`, `unit`, `exponent…`); `resolvedOptions` what was actually used.
+- **throws:** `TypeError: Currency code is required with currency style.`, `RangeError: Invalid currency code : <code>`, `RangeError` for digit options out of range.
+- **notes:**
+  - rounding works on the exact decimal value, so `1.005` with two digits is `1.01` like in a browser; bigints and numeric strings (`'1234.5678901234567890'`) are formatted exactly.
+  - partial: compact suffixes exist for the 20 languages above (others use English `K`/`M`/`B`/`T`); currency names (`'name'`) are Qt's singular names (`1.00 US Dollar`, not `US dollars`); `unit` uses English symbols and long names, Russian ones for `ru`, metric symbols elsewhere; `NaN` is spelled `NaN` except in `ru` and `uk`.
+  - a foreign currency's symbol comes from tele's list of well-known symbols (`$`, `€`, `£`, `¥`, `CA$`…), then from another region of the same language, else the ISO code.
+
+Example:
+
+```ts
+const money = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' })
+console.log(money.format(1234.5)) // 1 234,50 ₽
+console.log(new Intl.NumberFormat('en-US', { notation: 'compact' }).format(15300)) // 15K
+```
+
+### class Intl.DateTimeFormat
+
+```ts
+declare class Intl.DateTimeFormat {
+  constructor(locales?: string | string[], options?: Intl.DateTimeFormatOptions)
+  format(date?: Date | number): string
+  formatToParts(date?: Date | number): Intl.DateTimeFormatPart[]
+  formatRange(start: Date | number, end: Date | number): string
+  formatRangeToParts(start: Date | number, end: Date | number): Intl.DateTimeRangeFormatPart[]
+  resolvedOptions(): Intl.ResolvedDateTimeFormatOptions
+  static supportedLocalesOf(locales: string | string[], options?: { localeMatcher?: string }): string[]
+}
+```
+
+formats dates and times with the locale's month and day names and Qt's date and time patterns.
+
+- **grant:** none.
+- **parameters:**
+  - `dateStyle` / `timeStyle`: `'full'`, `'long'`, `'medium'`, `'short'` (can't be mixed with the component options).
+  - components: `weekday`, `era`, `year`, `month` (`'numeric'`, `'2-digit'`, `'short'`, `'long'`, `'narrow'`), `day`, `hour`, `minute`, `second`, `fractionalSecondDigits` (1 to 3), `dayPeriod`, `timeZoneName` (`'short'`, `'long'`, `'shortOffset'`, `'longOffset'`). with none of them you get the numeric date.
+  - `hour12` / `hourCycle` (`'h11'`, `'h12'`, `'h23'`, `'h24'`) or `-u-hc-` in the tag; the default follows the locale (12 hours for `en-US`, 24 for `ru`).
+  - `timeZone`: `'UTC'` (and its aliases like `'Etc/UTC'`, `'GMT'`), the computer's zone (its IANA name, the default) or a fixed offset `'+03:00'`.
+- **returns:** `format` (a bound getter) gives the string, `formatToParts` the typed pieces, `formatRange` both ends (`3/5/2024 – 3/8/2024`, a shared date when only the time differs), `resolvedOptions` the locale, `calendar: 'gregory'`, `timeZone`, the hour cycle and the components or styles used.
+- **throws:** `RangeError: Invalid time zone specified: <zone>` for any other zone, `RangeError: Invalid time value` for invalid dates, `TypeError` when styles and components are mixed.
+- **notes:**
+  - partial: patterns come from Qt's long and short formats with fields taken out or added, not from CLDR's per-skeleton table, so unusual combinations can differ from a browser (spacing, the order of the weekday, `dateStyle: 'medium'` uses abbreviated month names everywhere).
+  - only the gregorian calendar; `era` names exist for `en`, `ru`, `uk`, `de`, `fr`, `es` (English elsewhere).
+  - the local zone's short name is Qt's abbreviation (`MSK`); when Qt only has a long Windows name, `GMT+3` is shown instead.
+  - `Date.prototype.toLocaleString` and friends use this class; an invalid date gives `'Invalid Date'`.
+
+Example:
+
+```ts
+const when = Date.UTC(2024, 2, 5, 15, 4, 5)
+console.log(new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' }).format(when)) // 5 марта 2024 г.
+console.log(new Date(when).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' })) // 3:04 PM
+```
+
+### class Intl.RelativeTimeFormat
+
+```ts
+declare class Intl.RelativeTimeFormat {
+  constructor(locales?: string | string[], options?: Intl.RelativeTimeFormatOptions)
+  format(value: number, unit: Intl.RelativeTimeFormatUnit): string
+  formatToParts(value: number, unit: Intl.RelativeTimeFormatUnit): Intl.RelativeTimeFormatPart[]
+  resolvedOptions(): Intl.ResolvedRelativeTimeFormatOptions
+  static supportedLocalesOf(locales: string | string[], options?: { localeMatcher?: string }): string[]
+}
+```
+
+phrases like "in 3 days", "5 часов назад" or "yesterday".
+
+- **grant:** none.
+- **parameters:**
+  - `value` (`number`): negative (and `-0`) is the past.
+  - `unit`: `'second'`, `'minute'`, `'hour'`, `'day'`, `'week'`, `'month'`, `'quarter'`, `'year'`, singular or plural.
+  - `numeric`: `'always'` (default, `1 day ago`) or `'auto'` (`yesterday`, `next year`, `сейчас`).
+  - `style`: `'long'` (default), `'short'`, `'narrow'`.
+- **returns:** the phrase; `formatToParts` gives the number parts (with `unit`) between literals.
+- **throws:** `RangeError` for a non-finite value or an unknown unit.
+- **notes:**
+  - partial: words for the 20 languages above except `ar` and `fa`, which use English. `short` and `narrow` are real only for `en` and `ru`; other languages use the long words.
+  - the number uses the locale's digits and plural rules (`через 21 день`, `через 1,5 дня`).
+
+Example:
+
+```ts
+const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+console.log(rtf.format(-1, 'day'), '|', rtf.format(3, 'days')) // yesterday | in 3 days
+```
+
+### class Intl.PluralRules
+
+```ts
+declare class Intl.PluralRules {
+  constructor(locales?: string | string[], options?: Intl.PluralRulesOptions)
+  select(n: number): Intl.LDMLPluralRule
+  selectRange(start: number, end: number): Intl.LDMLPluralRule
+  resolvedOptions(): Intl.ResolvedPluralRulesOptions
+  static supportedLocalesOf(locales: string | string[], options?: { localeMatcher?: string }): string[]
+}
+```
+
+tells which plural form a number takes: `'zero'`, `'one'`, `'two'`, `'few'`, `'many'` or `'other'`.
+
+- **grant:** none.
+- **parameters:**
+  - `type`: `'cardinal'` (default, "1 day, 2 days") or `'ordinal'` ("1st, 2nd").
+  - the digit options of `NumberFormat` (`minimumFractionDigits`…): the number is rounded first, so `1` with one fraction digit is `1.0` and takes `'other'` in English.
+- **returns:** the category; `resolvedOptions().pluralCategories` lists the categories the language has.
+- **notes:**
+  - CLDR rules for `en`, `ru`, `uk`, `be`, `de`, `fr`, `es`, `it`, `pt` (`pt-PT` too), `pl`, `cs`, `tr`, `ar`, `ja`, `zh`, `ko`, `fa`, `id`, `nl`, `sv`; other languages use the English rules.
+  - `selectRange` returns the category of the end, which is what most languages do.
+
+Example:
+
+```ts
+const forms: Partial<Record<Intl.LDMLPluralRule, string>> = { one: 'сообщение', few: 'сообщения', many: 'сообщений', other: 'сообщения' }
+const pr = new Intl.PluralRules('ru')
+const label = (n: number) => `${n} ${forms[pr.select(n)] ?? forms.other}`
+console.log(label(1), label(3), label(25)) // 1 сообщение 3 сообщения 25 сообщений
+```
+
+### class Intl.Collator
+
+```ts
+declare class Intl.Collator {
+  constructor(locales?: string | string[], options?: Intl.CollatorOptions)
+  compare(x: string, y: string): number
+  resolvedOptions(): Intl.ResolvedCollatorOptions
+  static supportedLocalesOf(locales: string | string[], options?: { localeMatcher?: string }): string[]
+}
+```
+
+compares strings in the locale's alphabetical order, through Qt's `QCollator`.
+
+- **grant:** none.
+- **parameters:**
+  - `numeric` (or `-u-kn`): compare digit runs as numbers (`item2` before `item10`).
+  - `sensitivity`: `'variant'` (default), `'case'`, `'accent'` (ignores case), `'base'` (ignores case and accents).
+  - `ignorePunctuation`: skip punctuation.
+  - `usage`, `caseFirst`, `collation`: accepted and reported, but they don't change the order.
+- **returns:** `compare` (a bound getter, so `list.sort(collator.compare)` works) returns `-1`, `0` or `1`.
+- **notes:**
+  - the order is the operating system's collation through Qt (ICU on Linux and macOS, the Windows API on Windows), so ties between visually different strings can differ between platforms.
+  - accents are stripped in JavaScript for `'base'` and `'case'`.
+
+Example:
+
+```ts
+const files = ['photo10.jpg', 'Photo2.jpg', 'photo1.jpg']
+files.sort(new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare)
+console.log(files) // ['photo1.jpg', 'Photo2.jpg', 'photo10.jpg']
+```
+
+### class Intl.ListFormat
+
+```ts
+declare class Intl.ListFormat {
+  constructor(locales?: string | string[], options?: Intl.ListFormatOptions)
+  format(list: Iterable<string>): string
+  formatToParts(list: Iterable<string>): { type: 'element' | 'literal', value: string }[]
+  resolvedOptions(): Intl.ResolvedListFormatOptions
+  static supportedLocalesOf(locales: string | string[], options?: { localeMatcher?: string }): string[]
+}
+```
+
+joins a list the way the language does: "a, b, and c", "a, b и c", "a、b和c".
+
+- **grant:** none.
+- **parameters:**
+  - `type`: `'conjunction'` (and, default), `'disjunction'` (or), `'unit'` (`3 ft, 7 in`).
+  - `style`: `'long'` (default), `'short'`, `'narrow'`.
+- **returns:** the joined string; `formatToParts` gives `element` and `literal` pieces.
+- **throws:** `TypeError` when an item isn't a string.
+- **notes:**
+  - CLDR patterns for the 20 languages above (Spanish `y`/`o` become `e`/`u` before the right sounds); other languages use English.
+
+Example:
+
+```ts
+console.log(new Intl.ListFormat('ru').format(['Аня', 'Боря', 'Вика'])) // Аня, Боря и Вика
+```
+
+### class Intl.Locale
+
+```ts
+declare class Intl.Locale {
+  constructor(tag: string | Intl.Locale, options?: Intl.LocaleOptions)
+  readonly baseName: string
+  readonly language: string
+  readonly script: string | undefined
+  readonly region: string | undefined
+  readonly calendar: string | undefined
+  readonly collation: string | undefined
+  readonly hourCycle: string | undefined
+  readonly caseFirst: string | undefined
+  readonly numeric: boolean
+  readonly numberingSystem: string | undefined
+  maximize(): Intl.Locale
+  minimize(): Intl.Locale
+  getTextInfo(): { direction: 'ltr' | 'rtl' }
+  getWeekInfo(): { firstDay: number, weekend: number[], minimalDays: number }
+  toString(): string
+}
+```
+
+a parsed BCP 47 tag.
+
+- **grant:** none.
+- **parameters:**
+  - `tag`: a tag string or another `Intl.Locale`.
+  - `options`: `language`, `script`, `region` and the `-u-` keywords (`calendar`, `collation`, `hourCycle`, `caseFirst`, `numeric`, `numberingSystem`) override the tag.
+- **returns:** the parts; `toString()` the canonical tag with its `-u-` extension.
+- **throws:** `RangeError: Incorrect locale information provided` for malformed tags or options.
+- **notes:**
+  - partial: `maximize()` only adds Qt's default region (no script), `minimize()` drops the script and a default region; `getTextInfo` and `getWeekInfo().firstDay` come from Qt, the weekend is always Saturday and Sunday.
+
+Example:
+
+```ts
+const locale = new Intl.Locale('ru-Cyrl-RU')
+console.log(locale.language, locale.script, locale.region, locale.baseName) // ru Cyrl RU ru-Cyrl-RU
+```
+
 ### performance.now()
 
 ```ts
@@ -3406,6 +5280,164 @@ Example:
 ```ts
 queueMicrotask(() => console.log('second'))
 console.log('first')
+```
+
+### class Worker
+
+```ts
+interface WorkerOptions {
+  name?: string
+}
+
+declare class Worker extends EventTarget {
+  constructor(path: string | URL, options?: WorkerOptions)
+  postMessage(data: unknown, transfer?: Transferable[] | StructuredSerializeOptions): void
+  terminate(): void
+  onmessage: ((this: Worker, event: MessageEvent) => void) | null
+  onmessageerror: ((this: Worker, event: MessageEvent) => void) | null
+  onerror: ((this: Worker, event: ErrorEvent) => void) | null
+  addEventListener(type: 'message' | 'messageerror', listener: (this: Worker, event: MessageEvent) => void, options?: AddEventListenerOptions | boolean): void
+  addEventListener(type: 'error', listener: (this: Worker, event: ErrorEvent) => void, options?: AddEventListenerOptions | boolean): void
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: AddEventListenerOptions | boolean): void
+  removeEventListener(type: 'message' | 'messageerror', listener: (this: Worker, event: MessageEvent) => void, options?: EventListenerOptions | boolean): void
+  removeEventListener(type: 'error', listener: (this: Worker, event: ErrorEvent) => void, options?: EventListenerOptions | boolean): void
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: EventListenerOptions | boolean): void
+}
+```
+
+runs a file of the script in the background: its own QuickJS runtime on its own thread, so heavy computation doesn't freeze tele or the script. the two sides talk only through messages.
+
+- **grant:** none.
+- **parameters:**
+  - `path` (`string | URL`): a `.ts` or `.js` file of the script, relative to the script's folder (the folder of its entry file, not of the module calling `new Worker`); `.ts` and `.js` can be left out. a `file:` url works too. TypeScript is stripped like for imports.
+  - `options.name` (`string`, optional): shown in the worker's log lines and as `self.name` inside; default `''` (logs then use the file name).
+  - `postMessage(data)`: copies `data` to the worker, which gets a `message` event with the copy.
+  - `terminate()`: stops the worker right away, even in the middle of an endless loop, and waits for its thread to end; pending messages are dropped, no more events come.
+  - `onmessage` / `addEventListener('message')`: a `MessageEvent` whose `data` is a copy of what the worker posted.
+  - `onmessageerror` / `addEventListener('messageerror')`: a message that could not be copied back into this script (for example, over the memory limit); `data` is `undefined`.
+  - `onerror` / `addEventListener('error')`: an `ErrorEvent` for an uncaught error inside the worker (a throwing listener or timer, a top-level throw, a syntax error, an import, a file the stripper rejects). call `event.preventDefault()` to keep it out of the log.
+- **returns:** the `Worker`. it starts loading at once; messages posted before it is ready wait in order.
+- **throws:**
+  - `TeleError` `not-found` (`can't find '<path>'`), `forbidden` (`'<path>' is outside the script`), `unsupported` (`a worker starts from a file of the script, not '<url>'`) for anything but a script file.
+  - `TeleError` `quota-exceeded` (`a script runs at most 8 workers at once`).
+  - `postMessage`: `DOMException` `DataCloneError` for values that can't be copied (functions, symbols, `Error` objects, `DataView`, `WeakMap`, promises, objects with getter properties).
+- **notes:**
+  - messages are copied with QuickJS's own serializer, never shared: plain objects, arrays, strings, numbers, booleans, `null`, `undefined`, `bigint`, `Date`, `RegExp`, `Map`, `Set`, `ArrayBuffer`, typed arrays (with their whole buffer), boxed primitives, cycles and repeated references. class instances arrive as plain objects (own enumerable fields only, no prototype).
+  - transferables are not supported: a `transfer` list is accepted and ignored, the data is always copied and the sender keeps its buffers.
+  - the worker gets no `tg`, no `fetch`, no `Worker` and no imports: send it the data it needs. see `type WorkerGlobalScope` for what it has.
+  - each worker has 256 MB of memory and the same stack as a script; there is no time budget inside a worker, endless loops only cost its own thread.
+  - `console.*` inside the worker goes to the script's log as `[worker <name>] ...`.
+  - workers stop when the script stops or reloads. a worker that ends itself with `close()` sends no event; later `postMessage` calls do nothing.
+  - saving only the worker file doesn't reload the script; save the script's own file to restart with the new worker code.
+
+Example:
+
+```ts
+// primes.ts, next to the script
+declare const self: WorkerGlobalScope
+self.onmessage = (event) => {
+  const limit = Number(event.data)
+  const primes: number[] = []
+  for (let n = 2; primes.length < limit; ++n) {
+    if (primes.every((p) => n % p !== 0)) primes.push(n)
+  }
+  self.postMessage(primes)
+}
+
+// index.ts
+const worker = new Worker('./primes.ts', { name: 'primes' })
+worker.onmessage = (event) => console.log('got', (event.data as number[]).length, 'primes')
+worker.onerror = (event) => {
+  event.preventDefault()
+  console.warn('primes failed:', event.message, `${event.filename}:${event.lineno}`)
+}
+worker.postMessage(20_000)
+```
+
+### type WorkerGlobalScope
+
+```ts
+interface WorkerGlobalScope extends EventTarget {
+  readonly self: WorkerGlobalScope
+  readonly name: string
+  postMessage(data: unknown, transfer?: Transferable[] | StructuredSerializeOptions): void
+  close(): never
+  onmessage: ((this: WorkerGlobalScope, event: MessageEvent) => void) | null
+  onmessageerror: ((this: WorkerGlobalScope, event: MessageEvent) => void) | null
+  addEventListener(type: 'message' | 'messageerror', listener: (this: WorkerGlobalScope, event: MessageEvent) => void, options?: AddEventListenerOptions | boolean): void
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: AddEventListenerOptions | boolean): void
+  removeEventListener(type: 'message' | 'messageerror', listener: (this: WorkerGlobalScope, event: MessageEvent) => void, options?: EventListenerOptions | boolean): void
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: EventListenerOptions | boolean): void
+}
+```
+
+the globals inside a worker file. they exist only there: type them with `declare const self: WorkerGlobalScope` at the top of the worker file (the declaration is stripped).
+
+- **grant:** none.
+- **parameters:**
+  - `self` (`WorkerGlobalScope`): `globalThis`; `postMessage`, `close`, `onmessage` and the listener methods are also plain globals.
+  - `name` (`string`): `options.name` from `new Worker`, or `''`.
+  - `postMessage(data)`: copies `data` to the script, which gets a `message` event on its `Worker`. same copy rules and `DataCloneError` as `worker.postMessage`.
+  - `close()`: ends the worker at once: the code after it doesn't run, timers and queued messages are dropped. messages posted before it are still delivered.
+  - `onmessage` / `addEventListener('message')`: a `MessageEvent` with a copy of what the script posted; `messageerror` when it couldn't be copied in.
+- **notes:**
+  - also available: `console.*`, `setTimeout` / `setInterval` / `clearTimeout` / `clearInterval`, `queueMicrotask`, `performance.now()`, `TextEncoder` / `TextDecoder`, `atob` / `btoa`, `crypto.getRandomValues` / `crypto.randomUUID` / `crypto.subtle.digest` and HMAC, `structuredClone`, `URL` / `URLSearchParams`, `EventTarget` / `Event` / `CustomEvent` / `MessageEvent` / `ErrorEvent`, `AbortController`, `DOMException`, `reportError`, `Intl`, `TeleError`, and the whole javascript standard library.
+  - not available: `tg`, `fetch`, `defineScript`, `Worker`, `WebSocket`, imports (static or dynamic: they fail with `a worker can't import modules, ...`; `import type` is fine, it is stripped).
+  - the file runs as a module: top-level `await` works.
+  - an uncaught error (in a listener, a timer, a microtask, or passed to `reportError`) fires `error` on the script's `Worker` with the message, file, line and column; the worker keeps running. an unhandled promise rejection is only logged.
+
+Example:
+
+```ts
+// hash.ts
+declare const self: WorkerGlobalScope
+self.addEventListener('message', async (event) => {
+  const bytes = new TextEncoder().encode(String(event.data))
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  self.postMessage(digest.toHex())
+  if (event.data === 'last') self.close()
+})
+```
+
+### class ErrorEvent
+
+```ts
+interface ErrorEventInit extends EventInit {
+  message?: string
+  filename?: string
+  lineno?: number
+  colno?: number
+  error?: unknown
+}
+
+declare class ErrorEvent extends Event {
+  constructor(type: string, init?: ErrorEventInit)
+  readonly message: string
+  readonly filename: string
+  readonly lineno: number
+  readonly colno: number
+  readonly error: unknown
+}
+```
+
+the event a `Worker` fires for an uncaught error inside it; usable as a plain event class too.
+
+- **grant:** none.
+- **parameters:**
+  - `message` (`string`): `Uncaught <name>: <message>` for errors, `Uncaught <value>` for anything else thrown.
+  - `filename` (`string`): the full path of the worker file (or the first script file in the stack).
+  - `lineno` / `colno` (`number`): where it was thrown, 1-based; `0` when unknown.
+  - `error` (`unknown`): always `undefined` for worker errors: the error object stays in the worker.
+- **notes:**
+  - worker errors are cancelable: without `preventDefault()` they are also written to the script's log as an error.
+
+Example:
+
+```ts
+worker.addEventListener('error', (event) => {
+  event.preventDefault()
+  tg.toast(`worker failed at line ${event.lineno}: ${event.message}`)
+})
 ```
 
 ### defineScript (global)
@@ -3702,6 +5734,35 @@ export interface Tg {
   ): Disposer
   onUnload(callback: () => void): Disposer
 }
+
+export interface Tg {
+  readonly image: Images
+}
+
+export interface Tg {
+  readonly fs: Fs
+}
+
+export interface Tg {
+  readonly notifications: Notifications
+}
+
+export interface Tg {
+  readonly stories: Stories
+}
+
+export interface Tg {
+  readonly gifts: Gifts
+  readonly stars: Stars
+}
+
+export interface Tg {
+  interceptSearch(interceptor: SearchInterceptor): Disposer
+}
+
+export interface Tg {
+  registerInline(answerer: InlineAnswerer): Disposer
+}
 ```
 
 the object passed to `setup`. it lives as long as the script runs on that account; after the script stops, every call on it throws `InternalError: the script was stopped`.
@@ -3710,6 +5771,7 @@ the object passed to `setup`. it lives as long as the script runs on that accoun
 - **notes:**
   - members documented in this part: `selfId`, `scriptName`, `randomId`, `call`, `onUpdate`, `interceptRpc`, `interceptUpdate`, `onUnload`, `onNewMessage`, `onMessageEdited`, `onMessageDeleted` (talking to telegram); `Message`, `resolvePeer`, `resolveUser`, `resolveChannel`, `getMe`, `getUser`, `getChat`, `getFullUser`, `getFullChat`, `getMessages`, `getHistory`, `iterHistory`, `getDialogs`, `iterDialogs`, `sendMessage`, `sendMedia`, `editMessage`, `deleteMessages`, `forwardMessages`, `setReaction`, `readHistory`, `sendTyping`, `setDraft`, `getCachedMessage` (messages); `peers`, `overridePeer` (peers); `storage` (storage); `downloadMedia`, `uploadFile`, `sendFile` (files); `interceptSendMessage` (sending); `addLocalMessage`, `localMessages`, `decorateMessages`, `decorateMessage` (local messages and decorations); `local`, `options`, `tele` (local data and settings); `scripts` (script to script); `connection`, `onConnectionChange`, `onWake`, `schedule` (connection, wake and schedules).
   - the ui, app and platform members (`toast`, `notify`, `openUrl`, `clipboard`, `ui`, `compose`, `app`, `calls`, `accounts`, `unsafe`, the `register*` and `intercept*` surfaces for links, notifications and drops) are documented in their own sections.
+  - the later `export interface Tg` blocks are interface merging: features declared further down in `tele.d.ts` add `image` (images), `fs` (the file area), `notifications` (app and system), `stories` (stories), `gifts` and `stars` (gifts and stars) and `interceptSearch` (search).
   - high-level members are defined as non-writable properties, so a script can't replace `tg.sendMessage` for other code by accident.
 
 Example:
@@ -6871,7 +8933,7 @@ tg.ui.registerMenuItem({ place: 'main', text: 'reset my script', onClick: () => 
 
 ## files
 
-files go through tele's own loaders and uploader: the right data center, cdn files, refreshed file references and tele's download cache all work. small files come in and out as `Uint8Array`s; big downloads go straight to disk.
+files go through tele's own loaders and uploader: the right data center, cdn files, refreshed file references and tele's download cache all work. small files come in and out as `Uint8Array`s; big downloads go straight to disk. to read and write files yourself see [the file area](#the-file-area); to resize or convert pictures, [images](#images).
 
 ### tg.downloadMedia(target, options?)
 
@@ -6992,6 +9054,715 @@ const response = await fetch('https://picsum.photos/800/600')
 await tg.sendFile('me', await response.bytes(), { fileName: 'random.jpg', asPhoto: true, caption: 'a random picture' })
 
 await tg.sendFile('me', JSON.stringify({ ok: true }, null, 2), { fileName: 'state.json', silent: true })
+```
+
+## the file area
+
+`tg.fs` reads and writes real files. every script has its own folder, the file area (`<scripts folder>/.data/<script id>/`), where it works without any grant; relative paths always land there. any other folder needs `fs.read(folder)` / `fs.write(folder)`, and tele's own data stays out of reach even with the bare grants. every method is async and runs off the ui thread.
+
+### tg.fs
+
+```ts
+readonly fs: Fs
+```
+
+the script's file api.
+
+- **grant:** none inside the file area; `fs.read` / `fs.write` (bare or with a folder) outside it, see "paths and grants".
+- **returns:** the `Fs` object (frozen).
+- **notes:**
+  - the area is created on first use and belongs to the script, not to an account: every account running the script shares it.
+  - it's keyed by the script id (its file or folder name): renaming the script starts a new, empty area. removing the script in the Scripts manager offers to delete its area too.
+  - folders starting with `.` are skipped by the script scanner, so `.data` never shows up as a script.
+  - the area is not encrypted: it's plain files, unlike `tg.storage`.
+
+Example:
+
+```ts
+await tg.fs.writeText('notes/today.txt', `started at ${new Date().toISOString()}\n`, { append: true })
+console.log(await tg.fs.readText('notes/today.txt'))
+```
+
+### type Fs
+
+```ts
+export interface Fs {
+  readonly root: string
+  readText(path: string): Promise<string>
+  readBytes(path: string): Promise<Uint8Array>
+  writeText(path: string, text: string, options?: { append?: boolean }): Promise<void>
+  writeBytes(
+    path: string,
+    bytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+    options?: { append?: boolean },
+  ): Promise<void>
+  list(path?: string): Promise<FsEntry[]>
+  stat(path: string): Promise<FsStat | null>
+  exists(path: string): Promise<boolean>
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>
+  remove(path: string, options?: { recursive?: boolean }): Promise<void>
+  rename(from: string, to: string): Promise<void>
+  copy(from: string, to: string): Promise<void>
+}
+```
+
+the type of `tg.fs`.
+
+- **fields:**
+  - `root` (`string`): the absolute path of the file area.
+  - `readText` / `readBytes`: a whole file as text or bytes.
+  - `writeText` / `writeBytes`: create, replace or append to a file.
+  - `list` / `stat` / `exists`: what's there.
+  - `mkdir` / `remove` / `rename` / `copy`: folders and moving things around.
+
+Example:
+
+```ts
+const fs: Fs = tg.fs
+for (const entry of await fs.list()) console.log(entry.kind, entry.name, entry.size)
+```
+
+### type FsEntry
+
+```ts
+export interface FsEntry {
+  name: string
+  kind: 'file' | 'folder'
+  size: number
+  modified: number
+}
+```
+
+one item of `tg.fs.list`.
+
+- **fields:**
+  - `name` (`string`): the file or folder name, without the path.
+  - `kind` (`'file' | 'folder'`): a link counts as what it points to.
+  - `size` (`number`): bytes; `0` for folders.
+  - `modified` (`number`): the last change, ms since 1970 (like `Date.now()`).
+
+Example:
+
+```ts
+const big = (await tg.fs.list('cache')).filter((entry) => entry.kind === 'file' && entry.size > 1_000_000)
+```
+
+### type FsStat
+
+```ts
+export interface FsStat {
+  kind: 'file' | 'folder'
+  size: number
+  modified: number
+  created: number
+}
+```
+
+what `tg.fs.stat` returns for an existing path.
+
+- **fields:**
+  - `kind` (`'file' | 'folder'`): a link counts as what it points to.
+  - `size` (`number`): bytes; `0` for folders.
+  - `modified` (`number`): the last change, ms since 1970.
+  - `created` (`number`): the creation time, ms since 1970; on systems that don't keep it, the same as `modified`.
+
+Example:
+
+```ts
+const stat = await tg.fs.stat('cache/index.json')
+if (stat && Date.now() - stat.modified > 86_400_000) await tg.fs.remove('cache', { recursive: true })
+```
+
+### paths and grants
+
+```ts
+'notes/today.txt'           // the file area
+'documents/exports/a.txt'   // needs fs.read(documents) / fs.write(documents)
+'C:/Users/me/Desktop/x.txt' // needs a grant covering that folder
+```
+
+how a path string becomes a file, and which grant it needs.
+
+- **grant:** none inside the file area. reading outside it (`readText`, `readBytes`, `list`, `stat`, `exists`, the source of `copy`) needs `fs.read` or `fs.read(<folder>)` covering the path; changing outside it (`writeText`, `writeBytes`, `mkdir`, `remove`, both ends of `rename`, the target of `copy`) needs `fs.write` or `fs.write(<folder>)`. `fs.write` doesn't include reading: declare both when the script reads back what it writes.
+- **parameters:**
+  - a relative path (`notes/a.txt`, `./x`, `.`) is inside the file area. `..` is resolved first; a path that ends up outside the area is refused with `forbidden`, never looked up elsewhere.
+  - an absolute path (`C:/Users/me/x.txt`, `/home/me/x.txt`) is used as it is. one inside the file area needs no grant.
+  - named folders, the same names grants use: `~/x` and `home/x`, `documents/x`, `downloads/x`, `desktop/x`, `pictures/x`, `music/x`, `videos/x`, `temp/x` (the system's folders). so a folder in the area that's called `temp` is `./temp/x`.
+  - `\` works like `/`. on windows, names ending in `.` or a space, `:` outside the drive letter, the characters `<>"|?*` and `//./` / `//?/` device paths are refused.
+- **throws:** every method rejects (argument errors too, the methods are `async`):
+  - `TypeError` (`tg.fs.readText: path is a non-empty string`, `tg.fs.readText: '<path>' isn't a valid path`).
+  - `TeleError` `forbidden` (`tg.fs.readText: '../x' leads out of the script's file area`, or one of the protected places, see "what tg.fs never touches").
+  - `TeleError` `not-granted` with `grant` set to `fs.read(<absolute path>)` / `fs.write(<absolute path>)` (`tg.fs.read needs the grant 'fs.read(C:/Users/me/Documents/x.txt)'`); a folder grant covering it works too.
+  - `TeleError` `not-found` (`tg.fs.readText: this system has no 'music' folder`) when the system has no such named folder.
+- **notes:** grants cover a folder and everything inside it, after `..` is resolved: `fs.write(temp/my-app)` doesn't cover `temp/my-app/../other`.
+
+Example:
+
+```ts
+export default defineScript({
+  name: 'exporter',
+  grants: ['fs.read(documents/exports)', 'fs.write(documents/exports)'],
+  async setup(tg) {
+    await tg.fs.mkdir('documents/exports', { recursive: true })
+    await tg.fs.writeText('documents/exports/hello.txt', 'hi')
+    console.log(await tg.fs.list('documents/exports'))
+  },
+})
+```
+
+### what tg.fs never touches
+
+```ts
+// <tele working folder>/tdata/
+// <scripts folder>/.data/<another script>/
+```
+
+places refused with `TeleError` `forbidden` for every script, whatever it was granted (the bare `fs.read` / `fs.write` too).
+
+- **grant:** none unlocks them.
+- **notes:**
+  - tele's data: the `tdata` folder in tele's working folder and everything inside it (sessions, keys, settings, caches), including the account folders where tele keeps the encrypted script storage, local messages and the per-account script state.
+  - other scripts' file areas: everything under `<scripts folder>/.data/` except the script's own area, and the `.data` folder itself (it would list every script's area).
+  - removing, renaming or replacing a folder that contains any of these (tele's working folder, the scripts folder) is refused as a whole.
+  - links are followed for this check: a link or junction that leads into one of these places is refused like the place itself, also inside a folder you `remove`, `rename` or `copy`.
+  - inside the file area, a link that leads out of it is refused too.
+
+Example:
+
+```ts
+try {
+  await tg.fs.list(tg.fs.root + '/..')
+} catch (error) {
+  if (error instanceof TeleError) console.log(error.code)
+}
+```
+
+### tg.fs.root
+
+```ts
+readonly root: string
+```
+
+the absolute path of the script's file area, with `/` separators and no trailing slash.
+
+- **grant:** none.
+- **returns:** `<scripts folder>/.data/<script id>`; it may not exist until the first call creates it.
+
+Example:
+
+```ts
+console.log(`my files are in ${tg.fs.root}`)
+await tg.fs.writeText(`${tg.fs.root}/a.txt`, 'same as writeText("a.txt")')
+```
+
+### tg.fs.readText(path)
+
+```ts
+readText(path: string): Promise<string>
+```
+
+reads a whole file as utf-8 text.
+
+- **grant:** none in the file area; `fs.read` outside it.
+- **parameters:**
+  - `path` (`string`): see "paths and grants".
+- **returns:** the text. a utf-8 byte order mark is dropped; invalid bytes become U+FFFD.
+- **throws:** rejects with `TeleError` `not-found` (`tg.fs.readText: there's nothing at <path>`), `unsupported` (`<path> is a folder`), `quota-exceeded` (`<path> is over 256 MB`), `internal` (`can't read <path>: <reason>`), plus the path errors.
+- **notes:** at most 256 MB per read, but the whole script has 256 MB of memory, so keep big files in pieces.
+
+Example:
+
+```ts
+const config = JSON.parse(await tg.fs.readText('config.json').catch(() => '{}'))
+```
+
+### tg.fs.readBytes(path)
+
+```ts
+readBytes(path: string): Promise<Uint8Array>
+```
+
+reads a whole file as bytes.
+
+- **grant:** none in the file area; `fs.read` outside it.
+- **parameters:**
+  - `path` (`string`): see "paths and grants".
+- **returns:** the bytes.
+- **throws:** like `readText`: `not-found`, `unsupported` for a folder, `quota-exceeded` over 256 MB, `internal`, plus the path errors.
+
+Example:
+
+```ts
+const photo = await tg.fs.readBytes('pictures/cat.jpg')
+await tg.sendFile('me', photo, { fileName: 'cat.jpg', asPhoto: true })
+```
+
+### tg.fs.writeText(path, text, options?)
+
+```ts
+writeText(path: string, text: string, options?: { append?: boolean }): Promise<void>
+```
+
+writes text as utf-8, replacing the file or appending to it.
+
+- **grant:** none in the file area; `fs.write` outside it.
+- **parameters:**
+  - `path` (`string`): the file; missing folders on the way are created.
+  - `text` (`string`): the content.
+  - `options.append` (`boolean`, optional): add to the end instead of replacing.
+- **returns:** nothing.
+- **throws:** rejects with `TypeError: tg.fs.writeText: text is a string`, `TeleError` `quota-exceeded` (`tg.fs.writeText: the script's file area would go over its 256 MB quota`), `unsupported` (`<path> is a folder`), `internal` (`can't write <path>: <reason>`), plus the path errors.
+- **notes:**
+  - replacing writes a temporary file and swaps it in, so a crash never leaves half a file (where the system can't do that, the file is written in place).
+  - in the file area, the quota counts every file in it; the check happens before anything is written. outside it there's no quota.
+
+Example:
+
+```ts
+await tg.fs.writeText('log.txt', `${new Date().toISOString()} started\n`, { append: true })
+```
+
+### tg.fs.writeBytes(path, bytes, options?)
+
+```ts
+writeBytes(
+  path: string,
+  bytes: Uint8Array | ArrayBuffer | ArrayBufferView,
+  options?: { append?: boolean },
+): Promise<void>
+```
+
+writes bytes, replacing the file or appending to it.
+
+- **grant:** none in the file area; `fs.write` outside it.
+- **parameters:**
+  - `path` (`string`): the file; missing folders are created.
+  - `bytes` (`Uint8Array | ArrayBuffer | ArrayBufferView`): the content; for other typed arrays and `DataView`s the bytes they view are written.
+  - `options.append` (`boolean`, optional): add to the end instead of replacing.
+- **returns:** nothing.
+- **throws:** rejects with `TypeError: tg.fs.writeBytes: bytes are a Uint8Array, an ArrayBuffer or an ArrayBuffer view`, otherwise like `writeText`.
+
+Example:
+
+```ts
+const avatar = await tg.downloadMedia(message)
+await tg.fs.writeBytes(`avatars/${message.id}.jpg`, avatar)
+```
+
+### tg.fs.list(path?)
+
+```ts
+list(path?: string): Promise<FsEntry[]>
+```
+
+the files and folders directly inside a folder.
+
+- **grant:** none in the file area; `fs.read` outside it.
+- **parameters:**
+  - `path` (`string`, optional): the folder, `'.'` (the area itself) by default.
+- **returns:** `FsEntry`s sorted by name, hidden files included, without `.` and `..`.
+- **throws:** rejects with `TeleError` `not-found` (`there's nothing at <path>`), `unsupported` (`<path> is a file`), plus the path errors.
+
+Example:
+
+```ts
+for (const entry of await tg.fs.list('downloads')) {
+  if (entry.kind === 'file' && entry.name.endsWith('.torrent')) console.log(entry.name)
+}
+```
+
+### tg.fs.stat(path)
+
+```ts
+stat(path: string): Promise<FsStat | null>
+```
+
+what's at a path.
+
+- **grant:** none in the file area; `fs.read` outside it.
+- **parameters:**
+  - `path` (`string`): a file or folder.
+- **returns:** an `FsStat`, or `null` when nothing is there.
+- **throws:** rejects with the path errors.
+
+Example:
+
+```ts
+const stat = await tg.fs.stat('cache.json')
+console.log(stat ? `${stat.size} bytes, ${new Date(stat.modified)}` : 'no cache yet')
+```
+
+### tg.fs.exists(path)
+
+```ts
+exists(path: string): Promise<boolean>
+```
+
+whether a file or folder is there.
+
+- **grant:** none in the file area; `fs.read` outside it.
+- **parameters:**
+  - `path` (`string`): a file or folder.
+- **returns:** `true` or `false` (a broken link is `false`).
+- **throws:** rejects with the path errors.
+
+Example:
+
+```ts
+if (!(await tg.fs.exists('settings.json'))) await tg.fs.writeText('settings.json', '{}')
+```
+
+### tg.fs.mkdir(path, options?)
+
+```ts
+mkdir(path: string, options?: { recursive?: boolean }): Promise<void>
+```
+
+creates a folder.
+
+- **grant:** none in the file area; `fs.write` outside it.
+- **parameters:**
+  - `path` (`string`): the new folder.
+  - `options.recursive` (`boolean`, optional): create the missing folders above it too.
+- **returns:** nothing; an existing folder is fine.
+- **throws:** rejects with `TeleError` `not-found` (`there's no folder <parent>`, without `recursive`), `unsupported` (`<path> is a file`), `internal` (`can't create <path>`), plus the path errors.
+- **notes:** folders don't count towards the quota.
+
+Example:
+
+```ts
+await tg.fs.mkdir('exports/2026/10', { recursive: true })
+```
+
+### tg.fs.remove(path, options?)
+
+```ts
+remove(path: string, options?: { recursive?: boolean }): Promise<void>
+```
+
+deletes a file, a link or a folder. it doesn't go to the recycle bin.
+
+- **grant:** none in the file area; `fs.write` outside it.
+- **parameters:**
+  - `path` (`string`): what to delete. `'.'` deletes the whole area (it's created again on the next call).
+  - `options.recursive` (`boolean`, optional): delete a folder with everything in it.
+- **returns:** nothing.
+- **throws:** rejects with `TeleError` `not-found` (`there's nothing at <path>`), `unsupported` (`<path> isn't empty, pass { recursive: true }`), `internal` (`can't remove <path>`), `forbidden` when the folder contains a protected place or a link into one, plus the path errors.
+- **notes:** a link is removed itself, never what it points to.
+
+Example:
+
+```ts
+await tg.fs.remove('cache', { recursive: true }).catch(() => {})
+```
+
+### tg.fs.rename(from, to)
+
+```ts
+rename(from: string, to: string): Promise<void>
+```
+
+moves or renames a file or folder, also between the file area and outside folders.
+
+- **grant:** none in the file area; `fs.write` for an end outside it (both ends change).
+- **parameters:**
+  - `from` (`string`): what to move.
+  - `to` (`string`): the new path; missing folders are created. an existing file there is replaced; an existing folder is not.
+- **returns:** nothing.
+- **throws:** rejects with `TeleError` `not-found` (nothing at `from`), `unsupported` (`<to> already exists` for folders, `can't move <from> into itself`), `quota-exceeded` (moving into the area), `internal` (`can't move <from> to <to>`; folders can't move between drives), plus the path errors.
+
+Example:
+
+```ts
+await tg.fs.writeText('report.tmp', text)
+await tg.fs.rename('report.tmp', 'report.txt')
+```
+
+### tg.fs.copy(from, to)
+
+```ts
+copy(from: string, to: string): Promise<void>
+```
+
+copies a file, or a folder with everything in it.
+
+- **grant:** none in the file area; `fs.read` for `from` outside it, `fs.write` for `to` outside it.
+- **parameters:**
+  - `from` (`string`): a file or folder.
+  - `to` (`string`): the new path; missing folders are created. an existing file is replaced; for a folder `to` must not exist.
+- **returns:** nothing.
+- **throws:** rejects with `TeleError` `not-found` (nothing at `from`), `unsupported` (`<to> is a folder`, `<to> already exists`, `can't copy <from> into itself`, `<to> is the same file`), `quota-exceeded` (copying into the area), `internal` (`can't copy <from> to <to>`), plus the path errors.
+
+Example:
+
+```ts
+await tg.fs.copy('documents/template.docx', 'work/today.docx')
+```
+
+## images
+
+`tg.image` reads, changes and writes images in tele's own image code (qt's decoders and encoders): sizes and formats, resizing, cropping, rotating, converting, and raw rgba pixels. it needs no grant. every call decodes the bytes, works on a background thread so big images don't freeze tele, and resolves with new bytes; nothing is cached between calls. useful for avatars, stickers, thumbnails and preparing files for `tg.uploadFile`.
+
+```ts
+const avatar = await tg.image.resize(photo, { width: 512, height: 512, fit: 'cover', format: 'jpeg', quality: 90 })
+```
+
+common rules for every `tg.image` method:
+
+- input bytes are a `Uint8Array` or an `ArrayBuffer`: jpeg, png, webp, gif, bmp and whatever else this tele's qt can read (often also ico, tiff, heif, avif). exif orientation is applied, so a phone photo comes out the way it looks.
+- animated images (gif, animated webp) are read as their first frame.
+- images over 100 megapixels (input or result) reject with `TeleError` `quota-exceeded`.
+- the output `format` defaults to the input's format. tele can write jpeg, png, webp and bmp (and other formats qt has a writer for here, like ico or ppm); a format it can't write, including the default for gif input, rejects with `TeleError` `unsupported`, so pass `format`.
+- `quality` (0 to 100) goes to the encoder: jpeg and webp quality, png compression effort; unset uses the encoder's default.
+- transparent pixels written to jpeg or bmp are put on white (or on `background` in `resize`).
+- bytes that aren't a readable image reject with `TeleError` `unsupported` (`tg.image.<method>: these bytes aren't an image tele can read`, or `can't decode the image (<reason>)`).
+- argument errors throw synchronously: none of these is an `async` function.
+
+### tg.image
+
+```ts
+readonly image: Images
+
+export interface Images {
+  info(bytes: ImageInput): Promise<ImageInfo>
+  resize(bytes: ImageInput, options: ImageResizeOptions): Promise<Uint8Array>
+  crop(bytes: ImageInput, options: ImageCropOptions): Promise<Uint8Array>
+  rotate(bytes: ImageInput, degrees: 90 | 180 | 270, options?: ImageEncodeOptions): Promise<Uint8Array>
+  convert(bytes: ImageInput, options: ImageEncodeOptions & { format: ImageFormat }): Promise<Uint8Array>
+  toPixels(bytes: ImageInput): Promise<ImagePixels>
+  fromPixels(
+    pixels: { width: number, height: number, data: Uint8Array | Uint8ClampedArray },
+    options?: ImageEncodeOptions,
+  ): Promise<Uint8Array>
+}
+```
+
+the script's image tools: read the size and format, resize, crop, rotate, convert and get at the pixels. every member has its own item below.
+
+- **grant:** none.
+- **returns:** the `Images` object (frozen).
+
+Example:
+
+```ts
+const dot = await tg.image.fromPixels({ width: 1, height: 1, data: new Uint8Array([255, 0, 0, 255]) })
+console.log(await tg.image.info(dot)) // { width: 1, height: 1, format: 'png', ... }
+```
+
+### tg.image.info(bytes)
+
+```ts
+export type ImageInput = Uint8Array | ArrayBuffer
+
+export interface ImageInfo {
+  width: number
+  height: number
+  format: string
+  animated: boolean
+  frames: number
+}
+
+info(bytes: ImageInput): Promise<ImageInfo>
+```
+
+reads an image's size and format from its header, without decoding the pixels.
+
+- **grant:** none.
+- **parameters:**
+  - `bytes` (`ImageInput`): the image file.
+- **returns:** `Promise<ImageInfo>`: `width` and `height` as shown (after the exif rotation), `format` in lowercase (`'jpeg'`, `'png'`, `'webp'`, `'gif'`...), `frames` (1 for still images) and `animated` (more than one frame).
+- **throws:** synchronously `TypeError: tg.image.info needs the image as a Uint8Array or an ArrayBuffer`; rejects with `TeleError` `unsupported` for bytes that aren't an image.
+- **notes:**
+  - no size limit: it never decodes the whole image.
+
+Example:
+
+```ts
+const { width, height, format } = await tg.image.info(await tg.downloadMedia(message))
+console.log(`${width}x${height} ${format}`)
+```
+
+### tg.image.resize(bytes, options)
+
+```ts
+export type ImageFormat = 'jpeg' | 'png' | 'webp' | 'bmp'
+export type ImageFit = 'contain' | 'cover' | 'fill' | 'inside' | 'outside'
+
+export interface ImageEncodeOptions {
+  format?: ImageFormat
+  quality?: number
+}
+
+export interface ImageResizeOptions extends ImageEncodeOptions {
+  width?: number
+  height?: number
+  fit?: ImageFit
+  background?: string
+}
+
+resize(bytes: ImageInput, options: ImageResizeOptions): Promise<Uint8Array>
+```
+
+scales an image with smooth filtering, up or down.
+
+- **grant:** none.
+- **parameters:**
+  - `bytes` (`ImageInput`): the image file.
+  - `options.width`, `options.height` (`number`, optional): the target box in pixels, integers from 1 to 1000000. with only one of them the other follows the aspect ratio and `fit` doesn't matter.
+  - `options.fit` (`ImageFit`, optional): how the image goes into a `width` × `height` box; default `'cover'`.
+    - `'cover'`: keeps the aspect ratio, fills the box and crops the overflow from the middle; the result is exactly the box.
+    - `'contain'`: keeps the aspect ratio, fits inside the box and pads the rest with `background`; the result is exactly the box.
+    - `'fill'`: stretches to exactly the box.
+    - `'inside'`: keeps the aspect ratio and fits inside the box; the result can be smaller than the box on one side.
+    - `'outside'`: keeps the aspect ratio and covers the box without cropping; the result can be bigger on one side.
+  - `options.background` (`string`, optional): `'#rgb'`, `'#rgba'`, `'#rrggbb'`, `'#rrggbbaa'` or `'transparent'`: the padding for `'contain'` (default transparent) and the color under transparent pixels when writing jpeg or bmp (default white).
+  - `options.format`, `options.quality`: see the rules above.
+- **returns:** `Promise<Uint8Array>` with the encoded image.
+- **throws:**
+  - synchronously: `TypeError: tg.image.resize needs { width, height, fit }`, `tg.image.resize needs a width, a height or both`, `tg.image.resize: width is an integer from 1 to 1000000` (same for `height`, `quality`), `tg.image.resize: fit is 'contain', 'cover', 'fill', 'inside' or 'outside'`, `tg.image.resize: background is a color like '#ffffff', '#00000080' or 'transparent'`, `tg.image.resize: format is a name like 'jpeg', 'png', 'webp' or 'bmp'`.
+  - rejects with `TeleError` `quota-exceeded` (`tg.image.resize: the result would be over 100 megapixels`, or the input is), `unsupported`.
+
+Example:
+
+```ts
+const thumb = await tg.image.resize(bytes, { width: 320, height: 320, fit: 'inside', format: 'jpeg', quality: 80 })
+const sticker = await tg.image.resize(bytes, { width: 512, height: 512, fit: 'contain', format: 'webp' })
+```
+
+### tg.image.crop(bytes, options)
+
+```ts
+export interface ImageCropOptions extends ImageEncodeOptions {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+crop(bytes: ImageInput, options: ImageCropOptions): Promise<Uint8Array>
+```
+
+cuts out a rectangle of the image, pixel for pixel.
+
+- **grant:** none.
+- **parameters:**
+  - `bytes` (`ImageInput`): the image file.
+  - `options.x`, `options.y` (`number`): the top-left corner, integers from 0, in the image as shown (after the exif rotation).
+  - `options.width`, `options.height` (`number`): the size, integers from 1.
+  - `options.format`, `options.quality`: see the rules above.
+- **returns:** `Promise<Uint8Array>` with the encoded crop.
+- **throws:** synchronously `TypeError: tg.image.crop needs x` (and `y`, `width`, `height`), `tg.image.crop: x is an integer from 0 to 1000000`; rejects with `TypeError: tg.image.crop: the area <x>,<y> <w>x<h> is outside the <W>x<H> image` when the rectangle doesn't lie fully inside the image, `TeleError` `quota-exceeded` or `unsupported`.
+
+Example:
+
+```ts
+const { width, height } = await tg.image.info(bytes)
+const side = Math.min(width, height)
+const square = await tg.image.crop(bytes, { x: (width - side) >> 1, y: (height - side) >> 1, width: side, height: side })
+```
+
+### tg.image.rotate(bytes, degrees, options?)
+
+```ts
+rotate(bytes: ImageInput, degrees: 90 | 180 | 270, options?: ImageEncodeOptions): Promise<Uint8Array>
+```
+
+turns an image clockwise by a quarter, half or three quarters, losslessly in pixels (the encoder may still recompress, as with jpeg).
+
+- **grant:** none.
+- **parameters:**
+  - `bytes` (`ImageInput`): the image file.
+  - `degrees` (`90 | 180 | 270`): the clockwise angle.
+  - `options.format`, `options.quality` (optional): see the rules above.
+- **returns:** `Promise<Uint8Array>` with the rotated image; 90 and 270 swap width and height.
+- **throws:** synchronously `TypeError: tg.image.rotate: degrees is 90, 180 or 270`; rejects with `TeleError` `quota-exceeded` or `unsupported`.
+
+Example:
+
+```ts
+const upright = await tg.image.rotate(bytes, 90, { format: 'png' })
+```
+
+### tg.image.convert(bytes, options)
+
+```ts
+convert(bytes: ImageInput, options: ImageEncodeOptions & { format: ImageFormat }): Promise<Uint8Array>
+```
+
+re-encodes an image in another format or quality, keeping its pixels and size.
+
+- **grant:** none.
+- **parameters:**
+  - `bytes` (`ImageInput`): the image file.
+  - `options.format` (`ImageFormat`): the output format.
+  - `options.quality` (`number`, optional): 0 to 100.
+- **returns:** `Promise<Uint8Array>` with the converted image.
+- **throws:** synchronously `TypeError: tg.image.convert needs { format }`, `tg.image.convert: format is a name like 'jpeg', 'png', 'webp' or 'bmp'`; rejects with `TeleError` `unsupported` (`tg.image.convert: tele can't write <format> images here, pass another format`, or the input isn't an image) or `quota-exceeded`.
+
+Example:
+
+```ts
+const jpeg = await tg.image.convert(await tg.downloadMedia(message), { format: 'jpeg', quality: 85 })
+```
+
+### tg.image.toPixels(bytes)
+
+```ts
+export interface ImagePixels {
+  width: number
+  height: number
+  data: Uint8Array
+}
+
+toPixels(bytes: ImageInput): Promise<ImagePixels>
+```
+
+decodes an image into raw pixels for scripts that analyse or draw themselves.
+
+- **grant:** none.
+- **parameters:**
+  - `bytes` (`ImageInput`): the image file.
+- **returns:** `Promise<ImagePixels>`: `data` holds `width * height * 4` bytes, rows top to bottom, each pixel as red, green, blue, alpha (straight, not premultiplied alpha), like a canvas `ImageData`.
+- **throws:** synchronously `TypeError: tg.image.toPixels needs the image as a Uint8Array or an ArrayBuffer`; rejects with `TeleError` `quota-exceeded` or `unsupported`.
+- **notes:**
+  - the pixels count against the script's 256 MB of memory: a 12 megapixel photo is 48 MB. over the limit the promise rejects with `InternalError: out of memory`.
+
+Example:
+
+```ts
+const { width, height, data } = await tg.image.toPixels(bytes)
+let sum = 0
+for (let i = 0; i < data.length; i += 4) sum += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
+console.log('average brightness', sum / (width * height))
+```
+
+### tg.image.fromPixels(pixels, options?)
+
+```ts
+fromPixels(
+  pixels: { width: number, height: number, data: Uint8Array | Uint8ClampedArray },
+  options?: ImageEncodeOptions,
+): Promise<Uint8Array>
+```
+
+encodes raw rgba pixels into an image file.
+
+- **grant:** none.
+- **parameters:**
+  - `pixels.width`, `pixels.height` (`number`): integers from 1, at most 100 megapixels together.
+  - `pixels.data` (`Uint8Array | Uint8ClampedArray`): exactly `width * height * 4` bytes in the `toPixels` layout (rgba, straight alpha, rows top to bottom).
+  - `options.format` (`ImageFormat`, optional): default `'png'`.
+  - `options.quality` (`number`, optional): 0 to 100.
+- **returns:** `Promise<Uint8Array>` with the encoded image.
+- **throws:** synchronously `TypeError: tg.image.fromPixels needs { width, height, data }`, `tg.image.fromPixels: width is an integer from 1 to 1000000`, `tg.image.fromPixels: data is a Uint8Array of RGBA bytes`, `tg.image.fromPixels: data has <n> bytes, <w>x<h> RGBA needs <m>`, `TeleError` `quota-exceeded` (`tg.image.fromPixels: <w>x<h> is over 100 megapixels`); rejects with `TeleError` `unsupported` for a format tele can't write.
+
+Example:
+
+```ts
+const size = 64
+const data = new Uint8Array(size * size * 4)
+for (let i = 0; i < data.length; i += 4) data.set([0x2a, 0xab, 0xee, 0xff], i)
+const png = await tg.image.fromPixels({ width: size, height: size, data })
 ```
 
 ## sending
@@ -7335,6 +10106,1431 @@ tg.interceptSendMessage(({ message }) => {
 })
 ```
 
+## stories
+
+`tg.stories` reads, posts and manages stories, adds items to the story viewer's menu, reports new stories and decides story by story whether watching one is sent to the server. reads need `account.read(stories)` (neutral), everything that changes something on the server needs `account.write(stories)` (caution): posting, editing, deleting, reacting and marking stories as read. a story is a plain object (see `type Story`); peers in it are marked ids as `bigint`. tele's ghost mode is respected the way tele's own viewer does it: `tg.stories.markRead` doesn't tell the server when ghost mode hides story views for that peer. menu items, listeners and interceptors are removed when the script stops.
+
+### tg.stories
+
+```ts
+readonly stories: Stories
+
+export interface Stories {
+  list(peer: InputPeerLike): Promise<Story[]>
+  get(peer: InputPeerLike, id: number): Promise<Story | null>
+  get(peer: InputPeerLike, ids: number[]): Promise<(Story | null)[]>
+  archive(peer: InputPeerLike, options?: StoryPageOptions): Promise<Story[]>
+  pinned(peer: InputPeerLike, options?: StoryPageOptions): Promise<Story[]>
+  sources(): StorySource[]
+  markRead(peer: InputPeerLike, maxId: number): Promise<boolean>
+  post(options: StoryPostOptions): Promise<Story>
+  edit(id: number, options: StoryEditOptions): Promise<Story>
+  delete(ids: number | number[], options?: { peer?: InputPeerLike }): Promise<number[]>
+  react(
+    peer: InputPeerLike,
+    id: number,
+    reaction: Reaction | null,
+    options?: { addToRecent?: boolean },
+  ): Promise<void>
+  onStory(callback: (story: Story) => unknown): Disposer
+  registerStoryAction(options: StoryActionOptions): Disposer
+  interceptStoryView(interceptor: StoryViewInterceptor): Disposer
+}
+```
+
+the script's handle on stories: reading them, posting and managing your own, the story viewer's menu and story views. every member has its own item below.
+
+- **grant:** `account.read(stories)` to read, listen and intercept views, `account.write(stories)` to post, edit, delete, react and mark as read; `registerStoryAction` needs none.
+- **returns:** the `Stories` object (frozen).
+
+Example:
+
+```ts
+const mine = await tg.stories.list('me')
+console.log(`${mine.length} active stories, ${tg.stories.sources().length} people with stories`)
+```
+
+### type Story
+
+```ts
+export interface Story {
+  id: number
+  peer: bigint
+  from: bigint | null
+  date: number
+  expireDate: number
+  caption: string
+  entities: tl.TypeMessageEntity[]
+  media: StoryMedia
+  views: StoryViewCounts | null
+  privacy: StoryPrivacy | 'other'
+  pinned: boolean
+  closeFriends: boolean
+  out: boolean
+  edited: boolean
+  noForwards: boolean
+  sentReaction: Reaction | null
+  raw: tl.RawStoryItem
+}
+```
+
+one story, built from the server's `storyItem`.
+
+- **fields:**
+  - `id` (`number`): the story id, unique per peer.
+  - `peer` (`bigint`): the marked id of the user or channel the story belongs to.
+  - `from` (`bigint | null`): who posted it when that's not `peer` (a channel story posted by an admin), else `null`.
+  - `date`, `expireDate` (`number`): unix seconds of posting and of leaving the active list.
+  - `caption` (`string`) and `entities` (`tl.TypeMessageEntity[]`): the caption, `''` and `[]` without one.
+  - `media` (`StoryMedia`): what's shown, see `type StoryMedia`.
+  - `views` (`StoryViewCounts | null`): view, reaction and forward counts with the recent viewers; the server sends them for your own stories and channels you manage, `null` otherwise.
+  - `privacy` (`StoryPrivacy | 'other'`): who can see it, as far as the server tells; `'other'` when it doesn't say.
+  - `pinned` (`boolean`): kept on the profile after it expires.
+  - `closeFriends` (`boolean`): visible to close friends only.
+  - `out` (`boolean`): posted by you.
+  - `edited`, `noForwards` (`boolean`): edited after posting; forwarding and saving are off.
+  - `sentReaction` (`Reaction | null`): your reaction.
+  - `raw` (`tl.RawStoryItem`): the server's object.
+
+Example:
+
+```ts
+const [story] = await tg.stories.list('durov')
+if (story) console.log(story.id, story.media.type, new Date(story.expireDate * 1000))
+```
+
+### type StoryMedia
+
+```ts
+export type StoryMedia =
+  | { type: 'photo', photo: tl.TypePhoto | null, raw: tl.TypeMessageMedia }
+  | {
+    type: 'video'
+    document: tl.TypeDocument | null
+    duration: number | null
+    raw: tl.TypeMessageMedia
+  }
+  | { type: 'live', raw: tl.TypeMessageMedia }
+  | { type: 'other', raw: tl.TypeMessageMedia }
+```
+
+the media of a story, by `type`.
+
+- **values:**
+  - `'photo'`: `photo` is the server's photo.
+  - `'video'`: `document` is the video, `duration` its length in seconds (`null` when the server didn't say).
+  - `'live'`: a live stream story.
+  - `'other'`: anything else; look at `raw`.
+- **notes:** pass `photo`, `document` or `raw` to `tg.downloadMedia` to get the bytes (that has its own grant).
+
+Example:
+
+```ts
+for (const story of await tg.stories.list('me')) {
+  if (story.media.type === 'video') console.log(story.id, `${story.media.duration ?? '?'} s`)
+}
+```
+
+### type StoryViewCounts
+
+```ts
+export interface StoryViewCounts {
+  count: number
+  reactions: number
+  forwards: number
+  recentViewers: bigint[]
+}
+```
+
+the counters of a story you can see the statistics of.
+
+- **fields:**
+  - `count` (`number`): views.
+  - `reactions` (`number`): reactions.
+  - `forwards` (`number`): forwards and reposts.
+  - `recentViewers` (`bigint[]`): user ids of the last few viewers.
+
+Example:
+
+```ts
+const own = await tg.stories.list('me')
+console.log(own.map((story) => `${story.id}: ${story.views?.count ?? 0} views`).join('\n'))
+```
+
+### type StoryPrivacy
+
+```ts
+export type StoryPrivacy = 'everyone' | 'contacts' | 'close' | 'selected'
+```
+
+who can see a story you post or edit.
+
+- **values:**
+  - `'everyone'`: everybody; `users` are the people it's hidden from.
+  - `'contacts'`: your contacts; `users` are the contacts it's hidden from.
+  - `'close'`: your close friends list (managed in telegram's privacy settings); `users` is ignored.
+  - `'selected'`: only `users`, which can't be empty.
+
+Example:
+
+```ts
+await tg.stories.post({ media: bytes, privacy: 'contacts', users: ['@boss'] })
+```
+
+### tg.stories.list(peer)
+
+```ts
+list(peer: InputPeerLike): Promise<Story[]>
+```
+
+the active (not expired) stories of a user or channel, in the server's order, fresh from the server.
+
+- **grant:** `account.read(stories)`.
+- **parameters:**
+  - `peer` (`InputPeerLike`): whose stories; `'me'` for yours.
+- **returns:** the stories, `[]` when there are none.
+- **throws:** `TeleError` `not-granted` without the grant; `TeleError` `not-found` for a peer tele doesn't know; `RpcError` from the server.
+- **notes:** the server sometimes sends only the ids of close-friends stories; these are fetched in a second request so every entry is complete. listing doesn't mark anything as viewed.
+
+Example:
+
+```ts
+const stories = await tg.stories.list('telegram')
+console.log(`${stories.length} active, newest ${stories.at(-1)?.id ?? 'none'}`)
+```
+
+### tg.stories.get(peer, ids)
+
+```ts
+get(peer: InputPeerLike, id: number): Promise<Story | null>
+get(peer: InputPeerLike, ids: number[]): Promise<(Story | null)[]>
+```
+
+stories by id, active, pinned or (for your own) archived.
+
+- **grant:** `account.read(stories)`.
+- **parameters:**
+  - `peer` (`InputPeerLike`): whose stories.
+  - `id` / `ids` (`number | number[]`): story ids.
+- **returns:** the story or `null`; for an array, one entry per id in the same order, `null` for ids that don't exist or you can't see.
+- **throws:** `TypeError: tg.stories.get: story ids are positive integers`; `TeleError` `not-granted`; `RpcError`.
+- **notes:** doesn't mark anything as viewed.
+
+Example:
+
+```ts
+const [first, second] = await tg.stories.get('me', [1, 2])
+console.log(first?.caption, second?.caption)
+```
+
+### tg.stories.archive(peer, options?)
+
+```ts
+archive(peer: InputPeerLike, options?: StoryPageOptions): Promise<Story[]>
+```
+
+one page of the story archive: every story ever posted that's still kept, newest first. works for you and for channels you manage.
+
+- **grant:** `account.read(stories)`.
+- **parameters:**
+  - `peer` (`InputPeerLike`): `'me'` or a channel you manage.
+  - `options.offsetId` (`number`, optional): start below this story id; `0` (the default) starts at the newest.
+  - `options.limit` (`number`, optional): 1 to 100, default 100.
+- **returns:** up to `limit` stories; pass the last one's `id` as `offsetId` for the next page, an empty page is the end.
+- **throws:** `TypeError: tg.stories.archive: limit is 1 to 100`, `TypeError: tg.stories.archive: offsetId is a story id or 0`; `TeleError` `not-granted`; `RpcError` (`CHAT_ADMIN_REQUIRED` for a channel you don't manage).
+
+Example:
+
+```ts
+let offsetId = 0
+for (;;) {
+  const page = await tg.stories.archive('me', { offsetId, limit: 100 })
+  if (!page.length) break
+  console.log(page.map((story) => story.id).join(', '))
+  offsetId = page[page.length - 1].id
+}
+```
+
+### tg.stories.pinned(peer, options?)
+
+```ts
+pinned(peer: InputPeerLike, options?: StoryPageOptions): Promise<Story[]>
+```
+
+one page of the stories kept on a profile (the "posts" of a user or channel), newest first.
+
+- **grant:** `account.read(stories)`.
+- **parameters:** like `tg.stories.archive`: `peer`, `options.offsetId`, `options.limit` (1 to 100, default 100).
+- **returns:** up to `limit` stories.
+- **throws:** like `tg.stories.archive`, with `tg.stories.pinned` in the messages.
+
+Example:
+
+```ts
+const posts = await tg.stories.pinned('durov', { limit: 10 })
+console.log(posts.map((story) => story.caption).filter(Boolean))
+```
+
+### type StoryPageOptions
+
+```ts
+export interface StoryPageOptions {
+  offsetId?: number
+  limit?: number
+}
+```
+
+paging for `tg.stories.archive` and `tg.stories.pinned`.
+
+- **fields:**
+  - `offsetId` (`number`, optional): only stories with a smaller id; `0` from the newest.
+  - `limit` (`number`, optional): 1 to 100, default 100.
+
+Example:
+
+```ts
+const older = await tg.stories.pinned('me', { offsetId: 120, limit: 20 })
+```
+
+### tg.stories.sources()
+
+```ts
+sources(): StorySource[]
+```
+
+the peers in tele's stories bar right now, from tele's cache: who has active stories, how many and how many you haven't seen. shown ones first, then the hidden (archived) ones.
+
+- **grant:** `account.read(stories)`.
+- **returns:** `StorySource[]`, see `type StorySource`; `[]` before tele loaded the list or with tele's "hide stories" option on.
+- **throws:** `TeleError` `not-granted`.
+- **notes:** synchronous, no request.
+
+Example:
+
+```ts
+const unread = tg.stories.sources().filter((source) => source.unread > 0 && !source.hidden)
+console.log(`${unread.length} people have stories you haven't seen`)
+```
+
+### type StorySource
+
+```ts
+export interface StorySource {
+  peer: bigint
+  count: number
+  unread: number
+  last: number
+  hidden: boolean
+  live: boolean
+}
+```
+
+one peer of the stories bar.
+
+- **fields:**
+  - `peer` (`bigint`): its marked id; pass it to `tg.stories.list`.
+  - `count` (`number`): active stories.
+  - `unread` (`number`): those you haven't seen.
+  - `last` (`number`): unix seconds of the newest one.
+  - `hidden` (`boolean`): in the hidden (archived) part of the bar.
+  - `live` (`boolean`): streaming live now.
+
+Example:
+
+```ts
+for (const source of tg.stories.sources()) console.log(source.peer, `${source.unread}/${source.count}`)
+```
+
+### tg.stories.markRead(peer, maxId)
+
+```ts
+markRead(peer: InputPeerLike, maxId: number): Promise<boolean>
+```
+
+marks a peer's stories up to `maxId` as seen. the server then lists you among the viewers of these stories: the author sees that you watched them.
+
+- **grant:** `account.write(stories)` (caution).
+- **parameters:**
+  - `peer` (`InputPeerLike`): whose stories.
+  - `maxId` (`number`): the newest story id to mark.
+- **returns:** `true` when the server was told; `false` when tele's ghost mode hides story views for this peer: the stories are marked seen in tele only (the bar's ring turns grey), exactly like tele's own viewer does it, and nobody is told.
+- **throws:** `TypeError: tg.stories.markRead(peer, maxId): maxId is a story id`; `TeleError` `not-granted`; `RpcError`.
+- **notes:** this is the only way scripts mark stories read; reacting (`tg.stories.react`) also tells the author you saw the story, ghost mode or not.
+
+Example:
+
+```ts
+const stories = await tg.stories.list(friend)
+const last = stories.at(-1)
+if (last && !(await tg.stories.markRead(friend, last.id))) console.log('ghost mode kept it quiet')
+```
+
+### tg.stories.post(options)
+
+```ts
+post(options: StoryPostOptions): Promise<Story>
+```
+
+posts a story to your profile or to a channel you can post stories to.
+
+- **grant:** `account.write(stories)` (caution).
+- **parameters:**
+  - `options` (`StoryPostOptions`): the media and how it's shown, see `type StoryPostOptions`.
+- **returns:** the new story.
+- **throws:**
+  - `TypeError: tg.stories.post needs an options object`.
+  - `TypeError: tg.stories.post: media must be a Uint8Array or an InputMedia`, `TypeError: tg.stories.post: the media is empty`.
+  - `TypeError: tg.stories.post: unknown privacy '<privacy>', expected everyone, contacts, close, selected`, `TypeError: tg.stories.post: privacy 'selected' needs users`.
+  - `TypeError: tg.stories.post: period is a number of seconds`, `TypeError: tg.stories.post: caption is a string or { text, entities }`.
+  - `TeleError` `quota-exceeded` for media over 10 MB, `network` / `timed-out` when the upload fails, `not-granted` without the grant.
+  - `RpcError` from the server: `PREMIUM_ACCOUNT_REQUIRED` for a `period` other than a day without Premium, `STORIES_TOO_MUCH` over the daily limit, `MEDIA_INVALID`…
+- **notes:** bytes are uploaded with tele's uploader and sent as a photo (JPEG, PNG or WebP; the server converts it). for a video, upload it yourself and pass an `inputMediaUploadedDocument` with a `documentAttributeVideo`. everything is checked before the upload starts.
+
+Example:
+
+```ts
+const bytes = await (await fetch('https://picsum.photos/720/1280')).bytes()
+const story = await tg.stories.post({ media: bytes, caption: 'from a script', privacy: 'close' })
+console.log(`posted ${story.id}, gone at ${new Date(story.expireDate * 1000)}`)
+```
+
+### type StoryPostOptions
+
+```ts
+export interface StoryPostOptions {
+  media: Uint8Array | tl.TypeInputMedia
+  caption?: InputText
+  privacy?: StoryPrivacy
+  users?: InputPeerLike[]
+  period?: number
+  pinned?: boolean
+  protect?: boolean
+  peer?: InputPeerLike
+  fileName?: string
+}
+```
+
+what `tg.stories.post` posts.
+
+- **fields:**
+  - `media` (`Uint8Array | tl.TypeInputMedia`): image bytes (uploaded and posted as a photo) or a ready TL input media.
+  - `caption` (`InputText`, optional): text or `{ text, entities }`, e.g. from `md`.
+  - `privacy` (`StoryPrivacy`, optional): who sees it, `'everyone'` by default.
+  - `users` (`InputPeerLike[]`, optional): the excluded people for `'everyone'` / `'contacts'`, the allowed ones for `'selected'`.
+  - `period` (`number`, optional): seconds it stays active: 21600, 43200, 86400 (the default) or 172800; anything but a day needs Premium.
+  - `pinned` (`boolean`, optional): also keep it on the profile.
+  - `protect` (`boolean`, optional): no forwarding or saving.
+  - `peer` (`InputPeerLike`, optional): a channel to post to; `'me'` by default.
+  - `fileName` (`string`, optional): the upload's file name, `story.jpg` by default.
+
+Example:
+
+```ts
+await tg.stories.post({ media: bytes, caption: md`**hello**`, period: 6 * 3600, pinned: true, protect: true })
+```
+
+### tg.stories.edit(id, options)
+
+```ts
+edit(id: number, options: StoryEditOptions): Promise<Story>
+```
+
+changes the caption or the privacy of one of your stories (or of a channel's you manage).
+
+- **grant:** `account.write(stories)` (caution).
+- **parameters:**
+  - `id` (`number`): the story.
+  - `options` (`StoryEditOptions`): what to change; fields left out stay as they are.
+- **returns:** the edited story.
+- **throws:** `TypeError: tg.stories.edit(id, options): id is a story id`, `TypeError: tg.stories.edit(id, options)`, the caption and privacy `TypeError`s of `tg.stories.post`; `TeleError` `not-granted`; `RpcError` (`STORY_NOT_MODIFIED`, `STORY_ID_INVALID`…).
+
+Example:
+
+```ts
+await tg.stories.edit(story.id, { caption: 'updated', privacy: 'contacts' })
+```
+
+### type StoryEditOptions
+
+```ts
+export interface StoryEditOptions {
+  caption?: InputText
+  privacy?: StoryPrivacy
+  users?: InputPeerLike[]
+  peer?: InputPeerLike
+}
+```
+
+what `tg.stories.edit` changes.
+
+- **fields:**
+  - `caption` (`InputText`, optional): the new caption; `''` removes it.
+  - `privacy` (`StoryPrivacy`, optional) with `users` (`InputPeerLike[]`, optional): the new audience, like in `type StoryPostOptions`.
+  - `peer` (`InputPeerLike`, optional): the channel the story belongs to; `'me'` by default.
+
+Example:
+
+```ts
+await tg.stories.edit(12, { privacy: 'selected', users: ['@alice', '@bob'] })
+```
+
+### tg.stories.delete(ids, options?)
+
+```ts
+delete(ids: number | number[], options?: { peer?: InputPeerLike }): Promise<number[]>
+```
+
+deletes your stories (or a channel's you manage), active or archived. tele's stories bar and profile update right away.
+
+- **grant:** `account.write(stories)` (caution).
+- **parameters:**
+  - `ids` (`number | number[]`): the stories.
+  - `options.peer` (`InputPeerLike`, optional): the channel; `'me'` by default.
+- **returns:** the ids the server deleted.
+- **throws:** `TypeError: tg.stories.delete: story ids are positive integers`; `TeleError` `not-granted`; `RpcError`.
+
+Example:
+
+```ts
+const old = (await tg.stories.archive('me')).filter((story) => story.date < Date.now() / 1000 - 365 * 86400)
+console.log('deleted', await tg.stories.delete(old.map((story) => story.id)))
+```
+
+### tg.stories.react(peer, id, reaction, options?)
+
+```ts
+react(
+  peer: InputPeerLike,
+  id: number,
+  reaction: Reaction | null,
+  options?: { addToRecent?: boolean },
+): Promise<void>
+```
+
+sets your reaction on a story, `null` removes it.
+
+- **grant:** `account.write(stories)` (caution).
+- **parameters:**
+  - `peer` (`InputPeerLike`): whose story.
+  - `id` (`number`): the story.
+  - `reaction` (`Reaction | null`): an emoji or `{ customEmojiId }`, see `type Reaction`.
+  - `options.addToRecent` (`boolean`, optional): add it to your recent reactions.
+- **returns:** resolves when done.
+- **throws:** `TypeError: tg.stories.react(peer, id, reaction): id is a story id`, `TypeError: tg.stories.react: a reaction is an emoji string, { customEmojiId } or null`; `TeleError` `not-granted`; `RpcError` (`REACTION_INVALID`…).
+- **notes:** a reaction shows the author that you saw the story, even with tele's ghost mode on (tele's own viewer asks first; a script doesn't).
+
+Example:
+
+```ts
+const [story] = await tg.stories.list(friend)
+if (story) await tg.stories.react(friend, story.id, '🔥')
+```
+
+### tg.stories.onStory(callback)
+
+```ts
+onStory(callback: (story: Story) => unknown): Disposer
+```
+
+calls `callback` with every story posted after the call that tele learns about: contacts' new stories as they arrive, channels' when tele loads them, and your own.
+
+- **grant:** `account.read(stories)`.
+- **parameters:**
+  - `callback` (`(story: Story) => unknown`): may be async.
+- **returns:** `Disposer` that stops it.
+- **throws:** `TypeError: tg.stories.onStory(function)`; `TeleError` `not-granted`.
+- **notes:** each story is reported once, after it's fetched by id (a story deleted in between is skipped, a failed fetch is logged as a warning). stories tele hides with its "hide stories" option don't arrive. loading a story doesn't mark it viewed.
+
+Example:
+
+```ts
+tg.stories.onStory((story) => {
+  if (story.peer !== tg.selfId) console.log(`new story ${story.id} from ${story.peer}: ${story.caption || story.media.type}`)
+})
+```
+
+### tg.stories.registerStoryAction(options)
+
+```ts
+registerStoryAction(options: StoryActionOptions): Disposer
+```
+
+adds an item to the ⋮ menu of the story viewer, for every story of this account.
+
+- **grant:** none.
+- **parameters:**
+  - `options` (`StoryActionOptions`): `text`, an optional `emoji` shown before it, and `onClick(ctx)` with the story's `peer` and `storyId`, see `type StoryActionOptions`.
+- **returns:** `Disposer` that removes the item.
+- **throws:**
+  - `TypeError: tg.stories.registerStoryAction needs an options object`.
+  - `TypeError: tg.stories.registerStoryAction needs a text` for an empty or whitespace-only `text`.
+  - `TypeError: tg.stories.registerStoryAction: emoji must be a string`, `TypeError: tg.stories.registerStoryAction: onClick must be a function`.
+- **notes:** items appear below tele's own ones, in registration order, script by script. `onClick` runs on the next event-loop turn after the click; reading the story needs `account.read(stories)`.
+
+Example:
+
+```ts
+tg.stories.registerStoryAction({
+  text: 'copy link',
+  emoji: '🔗',
+  onClick: ({ peer, storyId }) => {
+    const name = tg.peers.get(peer)?.username
+    if (name) tg.clipboard.write(`https://t.me/${name}/s/${storyId}`)
+  },
+})
+```
+
+### type StoryActionOptions
+
+```ts
+export interface StoryActionOptions {
+  text: string
+  emoji?: string
+  onClick(context: StoryActionContext): unknown
+}
+
+export interface StoryActionContext {
+  peer: bigint
+  storyId: number
+}
+```
+
+a story viewer menu item.
+
+- **fields:**
+  - `text` (`string`): the item's text.
+  - `emoji` (`string`, optional): shown before the text.
+  - `onClick` (`(context: StoryActionContext) => unknown`): runs on click, may be async; `context.peer` is the story's marked peer id, `context.storyId` its id.
+
+Example:
+
+```ts
+tg.stories.registerStoryAction({ text: 'log', onClick: ({ peer, storyId }) => console.log(peer, storyId) })
+```
+
+### tg.stories.interceptStoryView(interceptor)
+
+```ts
+interceptStoryView(interceptor: StoryViewInterceptor): Disposer
+```
+
+asks the script each time tele's story viewer is about to count a story as watched (after a few seconds of it, or when you move on), before tele tells the server. `'skip'` keeps that one story quiet, like ghost mode does for a whole chat.
+
+- **grant:** `account.read(stories)`.
+- **parameters:**
+  - `interceptor` (`StoryViewInterceptor`): `(view) => 'view' | 'skip'`, may be async, see `type StoryViewInterceptor`.
+- **returns:** `Disposer` that removes the interceptor.
+- **throws:** `TypeError: tg.stories.interceptStoryView(function)`; `TeleError` `not-granted`.
+- **notes:**
+  - `'skip'`: no read request and no view count is sent for this story; tele marks it seen locally (the ring turns grey) and remembers it like a ghost-mode read. the read state is a "seen up to" id per peer, so watching a newer story of the same peer normally later still tells the server about everything up to it.
+  - `'view'`, `null` or nothing: tele goes on as usual, which with ghost mode on for that peer still means nothing is sent.
+  - with several interceptors (of this script, then of later scripts in folder order) the first `'skip'` wins.
+  - fails open: a throw or another value is logged as an error and counts as `'view'`; an interceptor that doesn't answer within 2 s counts as `'view'` too. your own stories aren't asked about.
+
+Example:
+
+```ts
+const quiet = new Set([123456789n])
+tg.stories.interceptStoryView((view) => (quiet.has(view.peer) ? 'skip' : 'view'))
+```
+
+### type StoryViewInterceptor
+
+```ts
+export type StoryViewInterceptor = (
+  view: StoryViewInfo,
+) => StoryViewVerdict | null | void | Promise<StoryViewVerdict | null | void>
+
+export type StoryViewVerdict = 'view' | 'skip'
+
+export interface StoryViewInfo {
+  peer: bigint
+  storyId: number
+  date: number
+  expireDate: number
+  pinned: boolean
+  privacy: StoryPrivacy | 'other'
+  caption: string
+  media: 'photo' | 'video' | 'live' | 'other'
+}
+```
+
+what an interceptor gets and answers. the info comes from tele's cache, no request.
+
+- **fields:**
+  - `peer` (`bigint`), `storyId` (`number`): the story.
+  - `date`, `expireDate` (`number`): unix seconds of posting and expiry.
+  - `pinned` (`boolean`): kept on the profile.
+  - `privacy` (`StoryPrivacy | 'other'`): its audience as tele knows it.
+  - `caption` (`string`): the caption text.
+  - `media` (`'photo' | 'video' | 'live' | 'other'`): the kind of media.
+- **values:** `'view'` lets tele send the view, `'skip'` keeps it local.
+
+Example:
+
+```ts
+tg.stories.interceptStoryView((view) => (view.privacy === 'close' ? 'skip' : 'view'))
+```
+
+## gifts and stars
+
+`tg.gifts` reads and manages star gifts: the gifts on your profile (or a channel's), unique (upgraded) gifts by their slug, the catalog of gifts on sale and what a unique gift is worth. `tg.stars` reads your stars balance and its history. reading needs `account.read(gifts)`; every action that changes a gift needs the dangerous grant `account.write(gifts)`, which only an exact `account.write(gifts)` gives (a bare `account.write` doesn't). transferring and upgrading a gift can spend your stars: tele asks the server for the price and pays it from your balance without a confirmation box, so only grant `account.write(gifts)` to scripts you trust with your stars. every gift comes normalized (`Gift`, `SavedGift`) with the TL object in `raw`.
+
+### the gifts grants
+
+```ts
+grants: ['account.read(gifts)', 'account.write(gifts)']
+```
+
+what the two gift grants allow, also for the raw API.
+
+- **grant:** `account.read(gifts)` (neutral, "read your gifts") covers `tg.gifts.list`, `get`, `catalog`, `value`, `tg.stars.balance`, `history`, and the raw methods `payments.getSavedStarGifts`, `payments.getSavedStarGift`, `payments.getUniqueStarGift`, `payments.getStarGifts`, `payments.getUniqueStarGiftValueInfo`, `payments.getStarsStatus`, `payments.getStarsTransactions` in `tg.call`.
+- **grant:** `account.write(gifts)` (dangerous, "transfer, sell, convert and upgrade your gifts") covers the write members and the raw methods `payments.saveStarGift`, `payments.convertStarGift`, `payments.upgradeStarGift`, `payments.transferStarGift`, `payments.updateStarGiftPrice`, `payments.toggleStarGiftsPinnedToTop`, plus `payments.getPaymentForm` and `payments.sendStarsForm` when the invoice is a gift upgrade (`inputInvoiceStarGiftUpgrade`) or a gift transfer (`inputInvoiceStarGiftTransfer`).
+- **notes:** paying any other invoice (bots, subscriptions, buying gifts) isn't a gift action: it still needs `call(payments.sendStarsForm)`. a glob like `call(payments.*)` covers the reads and `payments.saveStarGift` / `payments.toggleStarGiftsPinnedToTop`, never the [dangerous](#dangerous-methods) `payments.transferStarGift`, `convertStarGift`, `upgradeStarGift`, `updateStarGiftPrice` or `sendStarsForm`.
+
+Example:
+
+```ts
+export default defineScript({
+  name: 'gift shelf',
+  version: '1',
+  grants: ['account.read(gifts)'],
+  async setup(tg) {
+    const { count } = await tg.gifts.list()
+    tg.toast(`${count} gifts on your profile`)
+  },
+})
+```
+
+### tg.gifts
+
+```ts
+readonly gifts: Gifts
+```
+
+star gifts: reads (`list`, `get`, `catalog`, `value`) and actions (`transfer`, `convert`, `upgrade`, `sell`, `unlist`, `setPinned`, `setVisible`).
+
+- **grant:** `account.read(gifts)` for the reads, the exact `account.write(gifts)` (dangerous) for the actions.
+- **notes:** the actions are real: they change your profile for everyone, and `transfer` and `upgrade` may spend stars.
+
+Example:
+
+```ts
+const { gifts } = await tg.gifts.list()
+for (const gift of gifts) console.log(gift.title ?? 'gift', gift.unique ? `#${gift.number}` : `${gift.stars} stars`)
+```
+
+### type Gifts
+
+```ts
+export interface Gifts {
+  list(peer?: InputPeerLike | null, options?: GiftListOptions): Promise<SavedGiftsPage>
+  get(slug: string): Promise<Gift>
+  catalog(): Promise<Gift[]>
+  value(slug: string): Promise<GiftValueInfo>
+  transfer(gift: GiftLike, to: InputPeerLike): Promise<GiftActionResult>
+  convert(gift: GiftLike): Promise<void>
+  upgrade(gift: GiftLike, options?: { keepDetails?: boolean }): Promise<GiftActionResult>
+  sell(gift: GiftLike, options: { price: bigint | number }): Promise<void>
+  unlist(gift: GiftLike): Promise<void>
+  setPinned(gifts: GiftLike[], peer?: InputPeerLike): Promise<void>
+  setVisible(gift: GiftLike, visible: boolean): Promise<void>
+}
+```
+
+the type of `tg.gifts`.
+
+- **fields:**
+  - `list` (`(peer?, options?) => Promise<SavedGiftsPage>`): gifts on a profile.
+  - `get` (`(slug) => Promise<Gift>`): a unique gift by its slug.
+  - `catalog` (`() => Promise<Gift[]>`): the gifts you can send.
+  - `value` (`(slug) => Promise<GiftValueInfo>`): what a unique gift is worth.
+  - `transfer` (`(gift, to) => Promise<GiftActionResult>`): give a unique gift away.
+  - `convert` (`(gift) => Promise<void>`): turn a regular gift into stars.
+  - `upgrade` (`(gift, options?) => Promise<GiftActionResult>`): make a regular gift unique.
+  - `sell` / `unlist` (`(gift, options) => Promise<void>`, `(gift) => Promise<void>`): put a unique gift on resale or take it off.
+  - `setPinned` (`(gifts, peer?) => Promise<void>`): choose the pinned gifts.
+  - `setVisible` (`(gift, visible) => Promise<void>`): show or hide a gift on the profile.
+
+Example:
+
+```ts
+const gifts: Gifts = tg.gifts
+```
+
+### tg.gifts.list(peer?, options?)
+
+```ts
+list(peer?: InputPeerLike | null, options?: GiftListOptions): Promise<SavedGiftsPage>
+
+export interface GiftListOptions {
+  limit?: number
+  offset?: string
+}
+```
+
+reads one page of the gifts on a profile, newest first, like the Gifts tab of a profile (`payments.getSavedStarGifts`).
+
+- **grant:** `account.read(gifts)` (and `account.read(peers)` when `peer` is a username).
+- **parameters:**
+  - `peer` (`InputPeerLike | null`, optional): whose gifts; default `'me'`. a channel shows the channel's gifts.
+  - `options.limit` (`number`, optional): gifts per page, 1 to 100; default 50.
+  - `options.offset` (`string`, optional): the `nextOffset` of the previous page.
+- **returns:** `Promise<SavedGiftsPage>`: `{ gifts, count, nextOffset }`; `nextOffset` is `null` on the last page.
+- **throws:**
+  - rejects with `TeleError` `not-granted` without the grant.
+  - rejects with `TypeError` for a bad `limit` or `offset`, or a value that isn't a peer.
+  - rejects with `TeleError` `not-found` for an unknown id or username; `RpcError` from the server.
+- **notes:** your own gifts and a channel's come with an `input`, so you can pass them to the actions; another user's gifts have `input: null` and every `can...` flag `false`. hidden gifts (`visible: false`) are listed only to their owner.
+
+Example:
+
+```ts
+let offset: string | undefined
+let unique = 0
+do {
+  const page = await tg.gifts.list('me', { limit: 100, offset })
+  unique += page.gifts.filter((gift) => gift.unique).length
+  offset = page.nextOffset ?? undefined
+} while (offset)
+console.log(unique, 'unique gifts')
+```
+
+### tg.gifts.get(slug)
+
+```ts
+get(slug: string): Promise<Gift>
+```
+
+looks up a unique gift by its slug, the part after `t.me/nft/` (`payments.getUniqueStarGift`).
+
+- **grant:** `account.read(gifts)`.
+- **parameters:**
+  - `slug` (`string`): the slug (`'PlushPepe-1'`) or the whole link (`'https://t.me/nft/PlushPepe-1'`).
+- **returns:** `Promise<Gift>` with `unique: true`, its model, pattern, backdrop, owner and number.
+- **throws:**
+  - rejects with `TeleError` `not-granted` without the grant.
+  - rejects with `TypeError` for an empty slug.
+  - rejects with `TeleError` `not-found` when there's no such gift (`STARGIFT_SLUG_INVALID`); other `RpcError`s as they come.
+
+Example:
+
+```ts
+const gift = await tg.gifts.get('https://t.me/nft/PlushPepe-1')
+console.log(`${gift.title} #${gift.number} owned by ${gift.ownerName ?? gift.owner}`)
+```
+
+### tg.gifts.catalog()
+
+```ts
+catalog(): Promise<Gift[]>
+```
+
+the gifts you can send right now, as the gift picker shows them (`payments.getStarGifts`).
+
+- **grant:** `account.read(gifts)`.
+- **returns:** `Promise<Gift[]>`: regular gifts with their price (`stars`), conversion value, upgrade price, and availability for limited ones.
+- **throws:** rejects with `TeleError` `not-granted` without the grant; `RpcError`.
+
+Example:
+
+```ts
+const limited = (await tg.gifts.catalog()).filter((gift) => gift.limited && !gift.soldOut)
+console.log(limited.map((gift) => `${gift.stars}⭐ ${gift.availability?.remains} left`).join('\n'))
+```
+
+### tg.gifts.value(slug)
+
+```ts
+value(slug: string): Promise<GiftValueInfo>
+```
+
+what a unique gift is worth: its estimated value, first sale, last sale and floor price (`payments.getUniqueStarGiftValueInfo`).
+
+- **grant:** `account.read(gifts)`.
+- **parameters:**
+  - `slug` (`string`): the slug or the `t.me/nft/` link.
+- **returns:** `Promise<GiftValueInfo>`; prices are in the smallest units of `currency` (cents for USD).
+- **throws:**
+  - rejects with `TeleError` `not-granted` without the grant.
+  - rejects with `TypeError` for an empty slug.
+  - rejects with `TeleError` `not-found` for an unknown slug; `RpcError` when the server has no value for the gift.
+
+Example:
+
+```ts
+const info = await tg.gifts.value('PlushPepe-1')
+console.log(`about ${Number(info.value) / 100} ${info.currency}`)
+```
+
+### tg.gifts.transfer(gift, to)
+
+```ts
+transfer(gift: GiftLike, to: InputPeerLike): Promise<GiftActionResult>
+```
+
+gives one of your unique gifts to someone else, like Transfer in the gift box. when the transfer costs stars, tele pays it from your balance.
+
+- **grant:** `account.write(gifts)` (dangerous, exact).
+- **parameters:**
+  - `gift` (`GiftLike`): a unique gift you own (a `SavedGift` from `list`, its slug, or a TL input saved star gift).
+  - `to` (`InputPeerLike`): the new owner, a user or a channel.
+- **returns:** `Promise<GiftActionResult>`: `stars` is what was spent (`0n` for a free transfer).
+- **throws:**
+  - rejects with `TeleError` `not-granted` without the exact grant.
+  - rejects with `TypeError` for a value that isn't a gift or a missing `to`.
+  - rejects with `TeleError` `unsupported` when the price isn't in stars (TON) or the payment needs a browser confirmation.
+  - rejects with `RpcError` from the server, for example `STARGIFT_TRANSFER_TOO_EARLY_<seconds>` (see `canTransferAt`) or `BALANCE_TOO_LOW`.
+- **notes:** tele asks the server for a payment form (`payments.getPaymentForm` with `inputInvoiceStarGiftTransfer`); when the server answers `NO_PAYMENT_NEEDED` it transfers for free (`payments.transferStarGift`), otherwise it pays the form's price with `payments.sendStarsForm`. there's no confirmation box: check `gift.transferStars` first if you care about the price. never run this from an automatic test.
+
+Example:
+
+```ts
+const { gifts } = await tg.gifts.list()
+const gift = gifts.find((item) => item.canTransfer && item.transferStars === null)
+if (gift) await tg.gifts.transfer(gift, '@friend')
+```
+
+### tg.gifts.convert(gift)
+
+```ts
+convert(gift: GiftLike): Promise<void>
+```
+
+turns a regular gift you received into stars, like Convert in the gift box; the gift leaves your profile for good.
+
+- **grant:** `account.write(gifts)` (dangerous, exact).
+- **parameters:**
+  - `gift` (`GiftLike`): a regular gift you own; `canConvert` tells whether it can still be converted, `convertStars` how much you get.
+- **returns:** `Promise<void>` once it's converted.
+- **throws:** rejects with `TeleError` `not-granted` without the exact grant; `TypeError` for a value that isn't a gift; `RpcError` from the server (a unique gift, or the conversion period is over).
+
+Example:
+
+```ts
+const { gifts } = await tg.gifts.list()
+for (const gift of gifts.filter((item) => item.canConvert && !item.visible)) await tg.gifts.convert(gift)
+```
+
+### tg.gifts.upgrade(gift, options?)
+
+```ts
+upgrade(gift: GiftLike, options?: { keepDetails?: boolean }): Promise<GiftActionResult>
+```
+
+makes a regular gift unique, like Upgrade in the gift box. a prepaid upgrade is free; otherwise tele pays the upgrade price in stars from your balance.
+
+- **grant:** `account.write(gifts)` (dangerous, exact).
+- **parameters:**
+  - `gift` (`GiftLike`): a regular gift you own that can be upgraded (`canUpgrade`).
+  - `options.keepDetails` (`boolean`, optional): keep the sender, recipient, date and message on the unique gift (its `originalDetails`).
+- **returns:** `Promise<GiftActionResult>`: `stars` spent and the new unique gift in `gift` (when the server's answer has it).
+- **throws:**
+  - rejects with `TeleError` `not-granted` without the exact grant.
+  - rejects with `TypeError` for a value that isn't a gift.
+  - rejects with `TeleError` `unsupported` when the price isn't in stars or the payment needs a browser confirmation.
+  - rejects with `RpcError` from the server, for example `BALANCE_TOO_LOW`.
+- **notes:** a `SavedGift` with `upgradePrepaid: true` goes straight to `payments.upgradeStarGift`; anything else asks for a payment form first (`inputInvoiceStarGiftUpgrade`) and pays it with `payments.sendStarsForm`, falling back to the free upgrade on `NO_PAYMENT_NEEDED`. the price is the gift's `upgradeStars`.
+
+Example:
+
+```ts
+const { gifts } = await tg.gifts.list()
+const prepaid = gifts.find((gift) => gift.canUpgrade && gift.upgradePrepaid)
+if (prepaid) {
+  const { gift } = await tg.gifts.upgrade(prepaid, { keepDetails: true })
+  if (gift) tg.toast(`now ${gift.title} #${gift.number}`)
+}
+```
+
+### tg.gifts.sell(gift, options)
+
+```ts
+sell(gift: GiftLike, options: { price: bigint | number }): Promise<void>
+```
+
+puts one of your unique gifts on resale for a price in stars, or changes its price (`payments.updateStarGiftPrice`).
+
+- **grant:** `account.write(gifts)` (dangerous, exact).
+- **parameters:**
+  - `gift` (`GiftLike`): a unique gift you own; `canResellAt` tells when it can be put on sale.
+  - `options.price` (`bigint | number`): the price in whole stars, above 0.
+- **returns:** `Promise<void>` once it's listed; the gift's `resaleStars` shows the price.
+- **throws:** rejects with `TeleError` `not-granted` without the exact grant; `TypeError` for a bad price or a value that isn't a gift; `RpcError` from the server (too early, a price out of the allowed range).
+
+Example:
+
+```ts
+await tg.gifts.sell('PlushPepe-1', { price: 5000n })
+```
+
+### tg.gifts.unlist(gift)
+
+```ts
+unlist(gift: GiftLike): Promise<void>
+```
+
+takes a unique gift off resale.
+
+- **grant:** `account.write(gifts)` (dangerous, exact).
+- **parameters:**
+  - `gift` (`GiftLike`): a unique gift of yours that is on sale.
+- **returns:** `Promise<void>`.
+- **throws:** rejects with `TeleError` `not-granted` without the exact grant; `TypeError` for a value that isn't a gift; `RpcError`.
+
+Example:
+
+```ts
+const { gifts } = await tg.gifts.list()
+for (const gift of gifts.filter((item) => item.resaleStars !== null)) await tg.gifts.unlist(gift)
+```
+
+### tg.gifts.setPinned(gifts, peer?)
+
+```ts
+setPinned(gifts: GiftLike[], peer?: InputPeerLike): Promise<void>
+```
+
+makes exactly these gifts the pinned ones at the top of the profile, in this order (`payments.toggleStarGiftsPinnedToTop`).
+
+- **grant:** `account.write(gifts)` (dangerous, exact).
+- **parameters:**
+  - `gifts` (`GiftLike[]`): the gifts to pin; `[]` unpins all. the server allows only a few pinned gifts.
+  - `peer` (`InputPeerLike`, optional): whose profile; default the channel of the first channel gift, else you.
+- **returns:** `Promise<void>`.
+- **throws:** rejects with `TeleError` `not-granted` without the exact grant; `TypeError` for something that isn't an array of gifts; `RpcError` (too many pinned gifts).
+- **notes:** this replaces the pinned list; to pin one more, pass the current pinned gifts plus the new one.
+
+Example:
+
+```ts
+const { gifts } = await tg.gifts.list('me', { limit: 100 })
+const pinned = gifts.filter((gift) => gift.pinned)
+const best = gifts.find((gift) => gift.unique && !gift.pinned)
+if (best) await tg.gifts.setPinned([...pinned, best])
+```
+
+### tg.gifts.setVisible(gift, visible)
+
+```ts
+setVisible(gift: GiftLike, visible: boolean): Promise<void>
+```
+
+shows a gift on your profile or hides it, like Show on my page / Hide in the gift box (`payments.saveStarGift`).
+
+- **grant:** `account.write(gifts)` (dangerous, exact).
+- **parameters:**
+  - `gift` (`GiftLike`): one of your gifts.
+  - `visible` (`boolean`): `false` hides it; anything else shows it.
+- **returns:** `Promise<void>`.
+- **throws:** rejects with `TeleError` `not-granted` without the exact grant; `TypeError` for a value that isn't a gift; `RpcError`.
+
+Example:
+
+```ts
+const { gifts } = await tg.gifts.list()
+for (const gift of gifts.filter((item) => !item.unique && item.visible)) await tg.gifts.setVisible(gift, false)
+```
+
+### type Gift
+
+```ts
+export interface Gift {
+  unique: boolean
+  id: bigint
+  giftId: bigint
+  slug: string | null
+  link: string | null
+  title: string | null
+  number: number | null
+  owner: bigint | null
+  ownerName: string | null
+  model: GiftModel | null
+  pattern: GiftPattern | null
+  backdrop: GiftBackdrop | null
+  originalDetails: GiftOriginalDetails | null
+  attributes: tl.TypeStarGiftAttribute[]
+  sticker: tl.TypeDocument | null
+  stars: bigint | null
+  convertStars: bigint | null
+  upgradeStars: bigint | null
+  resaleStars: bigint | null
+  limited: boolean
+  soldOut: boolean
+  availability: GiftAvailability | null
+  value: GiftValue | null
+  raw: tl.TypeStarGift
+}
+
+export type GiftRarity = number | 'uncommon' | 'rare' | 'epic' | 'legendary'
+
+export interface GiftModel {
+  name: string
+  rarity: GiftRarity | null
+  document: tl.TypeDocument
+  crafted: boolean
+}
+
+export interface GiftPattern {
+  name: string
+  rarity: GiftRarity | null
+  document: tl.TypeDocument
+}
+
+export interface GiftBackdrop {
+  name: string
+  rarity: GiftRarity | null
+  centerColor: number
+  edgeColor: number
+  patternColor: number
+  textColor: number
+}
+
+export interface GiftOriginalDetails {
+  sender: bigint | null
+  recipient: bigint | null
+  date: number
+  message: TextWithEntities | null
+}
+
+export interface GiftValue {
+  amount: bigint
+  currency: string
+  usd: bigint | null
+}
+
+export interface GiftAvailability {
+  total: number
+  remains: number | null
+  issued: number | null
+}
+```
+
+a star gift, regular (`starGift`) or unique (`starGiftUnique`), from `get`, `catalog`, the stars history and inside `SavedGift`.
+
+- **fields:**
+  - `unique` (`boolean`): an upgraded, collectible gift with its own number, model, pattern and backdrop.
+  - `id` (`bigint`): the gift's id (for a unique gift, the id of this collectible).
+  - `giftId` (`bigint`): the id of the regular gift it belongs to (the same as `id` for a regular gift).
+  - `slug`, `link` (`string | null`): a unique gift's slug and its `https://t.me/nft/<slug>` link; `null` for regular gifts.
+  - `title` (`string | null`): the gift's name (regular gifts often have none).
+  - `number` (`number | null`): a unique gift's number in its collection.
+  - `owner` (`bigint | null`): a unique gift's owner as a marked id; `null` when hidden or kept outside Telegram.
+  - `ownerName` (`string | null`): the owner's name, from the server's answer or the gift (hidden owners and blockchain wallets).
+  - `model`, `pattern` (`{ name, rarity, document }`): the 3D model (also `crafted`) and the symbol pattern, with their sticker documents.
+  - `backdrop` (`{ name, rarity, centerColor, edgeColor, patternColor, textColor }`): the background; colors are `0xRRGGBB` numbers.
+  - `rarity` of those: per mille (`number`, 15 = 1.5% of the collection) or a level `'uncommon' | 'rare' | 'epic' | 'legendary'`, `null` when unknown.
+  - `originalDetails` (`{ sender, recipient, date, message } | null`): who gave it to whom, kept on upgrade; ids are marked ids.
+  - `attributes` (`tl.TypeStarGiftAttribute[]`): all attributes as TL objects.
+  - `sticker` (`tl.TypeDocument | null`): the sticker to show (a unique gift's model).
+  - `stars` (`bigint | null`): a regular gift's price in stars.
+  - `convertStars` (`bigint | null`): stars you get by converting it.
+  - `upgradeStars` (`bigint | null`): the upgrade price, `null` when it can't be upgraded.
+  - `resaleStars` (`bigint | null`): a unique gift's resale price in stars while it's on sale.
+  - `limited`, `soldOut` (`boolean`): a limited edition, and whether it's sold out.
+  - `availability` (`{ total, remains, issued } | null`): a limited gift's total and remaining count, or a unique gift's total and issued count.
+  - `value` (`{ amount, currency, usd } | null`): a unique gift's estimated value in the smallest currency units (see `tg.gifts.value` for details).
+  - `raw` (`tl.TypeStarGift`): the TL object.
+
+Example:
+
+```ts
+const gift = await tg.gifts.get('PlushPepe-1')
+if (gift.backdrop) tg.toast(`${gift.model?.name} on ${gift.backdrop.name} (#${gift.backdrop.centerColor.toString(16)})`)
+```
+
+### type SavedGift
+
+```ts
+export interface SavedGift extends Gift {
+  input: tl.TypeInputSavedStarGift | null
+  from: bigint | null
+  fromName: string | null
+  date: number
+  message: TextWithEntities | null
+  visible: boolean
+  pinned: boolean
+  nameHidden: boolean
+  canUpgrade: boolean
+  upgradePrepaid: boolean
+  canConvert: boolean
+  canTransfer: boolean
+  transferStars: bigint | null
+  canTransferAt: number | null
+  canResellAt: number | null
+  saved: tl.RawSavedStarGift
+}
+```
+
+a gift on a profile, from `tg.gifts.list`: the `Gift` plus what belongs to this copy.
+
+- **fields:**
+  - `input` (`tl.TypeInputSavedStarGift | null`): what the actions send for it; `null` on another user's profile.
+  - `from`, `fromName` (`bigint | null`, `string | null`): the sender's marked id and name; `null` when anonymous.
+  - `date` (`number`): when it was received, in unix seconds.
+  - `message` (`TextWithEntities | null`): the sender's message.
+  - `visible` (`boolean`): shown on the profile.
+  - `pinned` (`boolean`): pinned at the top.
+  - `nameHidden` (`boolean`): the sender asked to hide their name from others.
+  - `canUpgrade`, `upgradePrepaid` (`boolean`): it can be upgraded, and the sender already paid for that.
+  - `canConvert` (`boolean`): it can still be converted to `convertStars` stars.
+  - `canTransfer` (`boolean`): a unique gift of yours you can transfer now.
+  - `transferStars` (`bigint | null`): what a transfer costs, `null` when it's free.
+  - `canTransferAt`, `canResellAt` (`number | null`): unix seconds from which transfer and resale are allowed.
+  - `saved` (`tl.RawSavedStarGift`): the TL object; `raw` is still the gift itself.
+  - `convertStars` here is this copy's value (it can differ from the catalog's).
+
+Example:
+
+```ts
+const { gifts } = await tg.gifts.list()
+const fromFriends = gifts.filter((gift) => gift.from !== null).map((gift) => `${gift.fromName}: ${gift.message?.text ?? ''}`)
+```
+
+### type GiftLike
+
+```ts
+export type GiftLike = SavedGift | Gift | string | tl.TypeInputSavedStarGift
+```
+
+what the actions accept as a gift.
+
+- **fields:**
+  - `SavedGift`: its `input` is used (the best choice: it works for regular gifts too).
+  - `Gift`: a unique gift, by its slug.
+  - `string`: a unique gift's slug or `t.me/nft/` link.
+  - `tl.TypeInputSavedStarGift`: `inputSavedStarGiftUser` (by the gift message id), `inputSavedStarGiftChat` (a channel's gift) or `inputSavedStarGiftSlug`.
+
+Example:
+
+```ts
+await tg.gifts.setVisible({ _: 'inputSavedStarGiftSlug', slug: 'PlushPepe-1' }, true)
+```
+
+### type SavedGiftsPage
+
+```ts
+export interface SavedGiftsPage {
+  gifts: SavedGift[]
+  count: number
+  nextOffset: string | null
+}
+```
+
+one page of `tg.gifts.list`.
+
+- **fields:**
+  - `gifts` (`SavedGift[]`): this page.
+  - `count` (`number`): how many gifts the profile has in total.
+  - `nextOffset` (`string | null`): pass it as `options.offset` for the next page; `null` on the last one.
+
+Example:
+
+```ts
+const { count } = await tg.gifts.list('me', { limit: 1 })
+```
+
+### type GiftValueInfo
+
+```ts
+export interface GiftValueInfo {
+  currency: string
+  value: bigint
+  isAverage: boolean
+  lastSaleOnFragment: boolean
+  initialSaleDate: number
+  initialSaleStars: bigint
+  initialSalePrice: bigint
+  lastSaleDate: number | null
+  lastSalePrice: bigint | null
+  floorPrice: bigint | null
+  raw: tl.payments.RawUniqueStarGiftValueInfo
+}
+```
+
+from `tg.gifts.value`. prices are in the smallest units of `currency`.
+
+- **fields:**
+  - `currency` (`string`): the currency code, e.g. `'USD'`.
+  - `value` (`bigint`): the estimated value; `isAverage` when it's the average of the collection.
+  - `lastSaleOnFragment` (`boolean`): the last sale happened on Fragment.
+  - `initialSaleDate`, `initialSaleStars`, `initialSalePrice`: when the regular gift was first sold, for how many stars, and that in `currency`.
+  - `lastSaleDate`, `lastSalePrice` (`number | null`, `bigint | null`): the last resale.
+  - `floorPrice` (`bigint | null`): the cheapest gift of the collection on sale.
+  - `raw`: the TL object.
+
+Example:
+
+```ts
+const info = await tg.gifts.value('PlushPepe-1')
+if (info.floorPrice !== null && info.value < info.floorPrice) console.log('worth less than the floor')
+```
+
+### type GiftActionResult
+
+```ts
+export interface GiftActionResult {
+  stars: bigint
+  gift: Gift | null
+  updates: tl.TypeUpdates | null
+}
+```
+
+what `transfer` and `upgrade` resolve with.
+
+- **fields:**
+  - `stars` (`bigint`): stars spent from your balance, `0n` when it was free.
+  - `gift` (`Gift | null`): the unique gift from the server's answer (the upgraded gift), when there is one.
+  - `updates` (`tl.TypeUpdates | null`): the server's updates, already applied to tele.
+
+Example:
+
+```ts
+const { stars } = await tg.gifts.transfer('PlushPepe-1', '@friend')
+if (stars > 0n) tg.toast(`the transfer cost ${stars} stars`)
+```
+
+### tg.stars
+
+```ts
+readonly stars: Stars
+```
+
+your stars: the balance and its history.
+
+- **grant:** `account.read(gifts)`.
+
+Example:
+
+```ts
+tg.toast(`${(await tg.stars.balance()).stars} ⭐`)
+```
+
+### type Stars
+
+```ts
+export interface Stars {
+  balance(): Promise<StarsBalance>
+  history(options?: { limit?: number, offset?: string }): Promise<StarsHistoryPage>
+}
+```
+
+the type of `tg.stars`.
+
+- **fields:**
+  - `balance` (`() => Promise<StarsBalance>`): the current balance.
+  - `history` (`(options?) => Promise<StarsHistoryPage>`): transactions, newest first.
+
+Example:
+
+```ts
+const stars: Stars = tg.stars
+```
+
+### tg.stars.balance()
+
+```ts
+balance(): Promise<StarsBalance>
+
+export interface StarsBalance {
+  stars: bigint
+  nanos: number
+  raw: tl.payments.RawStarsStatus
+}
+```
+
+reads your stars balance (`payments.getStarsStatus`).
+
+- **grant:** `account.read(gifts)`.
+- **returns:** `Promise<StarsBalance>`: `{ stars, nanos, raw }`; `stars` is the whole stars (`bigint`), `nanos` the fraction in billionths, `raw` the `payments.starsStatus` (with your subscriptions and the first page of history).
+- **throws:** rejects with `TeleError` `not-granted` without the grant; `RpcError`.
+
+Example:
+
+```ts
+const { stars } = await tg.stars.balance()
+if (stars < 100n) tg.ui.notice('fewer than 100 stars left')
+```
+
+### tg.stars.history(options?)
+
+```ts
+history(options?: { limit?: number, offset?: string }): Promise<StarsHistoryPage>
+
+export interface StarsHistoryPage {
+  transactions: StarsTransaction[]
+  nextOffset: string | null
+}
+```
+
+reads one page of your stars transactions, newest first (`payments.getStarsTransactions`).
+
+- **grant:** `account.read(gifts)`.
+- **parameters:**
+  - `options.limit` (`number`, optional): transactions per page, 1 to 100; default 50.
+  - `options.offset` (`string`, optional): the `nextOffset` of the previous page.
+- **returns:** `Promise<StarsHistoryPage>`: `{ transactions: StarsTransaction[], nextOffset: string | null }`.
+- **throws:** rejects with `TeleError` `not-granted` without the grant; `TypeError` for a bad `limit` or `offset`; `RpcError`.
+
+Example:
+
+```ts
+const { transactions } = await tg.stars.history({ limit: 20 })
+const spent = transactions.filter((entry) => entry.stars < 0n).reduce((sum, entry) => sum - entry.stars, 0n)
+console.log(`spent ${spent} stars recently`)
+```
+
+### type StarsTransaction
+
+```ts
+export interface StarsTransaction {
+  id: string
+  stars: bigint
+  nanos: number
+  date: number
+  source: StarsSource
+  peer: bigint | null
+  peerName: string | null
+  title: string | null
+  description: string | null
+  refund: boolean
+  pending: boolean
+  failed: boolean
+  gift: Gift | null
+  raw: tl.RawStarsTransaction
+}
+
+export type StarsSource =
+  | 'peer'
+  | 'appStore'
+  | 'playMarket'
+  | 'premiumBot'
+  | 'fragment'
+  | 'ads'
+  | 'api'
+  | 'unsupported'
+```
+
+one entry of `tg.stars.history`.
+
+- **fields:**
+  - `id` (`string`): the transaction id.
+  - `stars`, `nanos` (`bigint`, `number`): the amount, negative when stars left your balance.
+  - `date` (`number`): unix seconds.
+  - `source` (`StarsSource`): `'peer'` (a user, bot or channel), `'appStore'`, `'playMarket'`, `'premiumBot'`, `'fragment'`, `'ads'`, `'api'` or `'unsupported'`.
+  - `peer`, `peerName` (`bigint | null`, `string | null`): the other side for `'peer'`, as a marked id and its name.
+  - `title`, `description` (`string | null`): the bot's product, when there is one.
+  - `refund`, `pending`, `failed` (`boolean`): the transaction's state.
+  - `gift` (`Gift | null`): the gift it was about (bought, converted, upgraded, transferred, resold).
+  - `raw` (`tl.RawStarsTransaction`): the TL object, with every other flag.
+
+Example:
+
+```ts
+const { transactions } = await tg.stars.history()
+for (const entry of transactions.filter((item) => item.gift)) console.log(entry.stars, entry.gift?.title)
+```
+
 ## local messages and decorations
 
 scripts can put messages into chats that exist only in this tele, and change how real messages look, without touching the server. both disappear when the script stops (persisted local messages come back when it starts again). both need the [`display`](#grant-display) grant: `display(local)` for local messages, `display(messages)` for decorations.
@@ -7523,7 +11719,7 @@ decorateMessages(
 ): Disposer
 ```
 
-changes how real messages look in this tele: shown text, a footer, opacity, hiding, a badge. the decorator decides per message.
+changes how real messages look in this tele: shown text, a footer, opacity, hiding, a badge, buttons under them. the decorator decides per message.
 
 - **grant:** `display(messages)` and `account.read(messages)`.
 - **parameters:**
@@ -7569,7 +11765,7 @@ decorates one message by id, without a decorator function.
   - `id` (`number`): the message id.
   - `decoration` (`MessageDecoration | null`): the decoration; `null` removes this script's explicit decoration of that message.
 - **returns:** a promise of a `Disposer` that removes it.
-- **throws:** `TypeError: needs a chat and a message id`; `TypeError: tg.decorateMessage: <problem>` for a bad decoration (`a decoration is an object`, `text is a string or { text, entities }`, `footer.entities are wrong: …`, `opacity is a number from 0 to 1`, `hidden is a boolean`, `badge is a string`); the peer errors of `InputPeerLike`; `TeleError` `not-granted`: `tg.decorateMessage needs the grant 'display(messages)'`. all of these reject the promise.
+- **throws:** `TypeError: needs a chat and a message id`; `TypeError: tg.decorateMessage: <problem>` for a bad decoration (`a decoration is an object`, `text is a string or { text, entities }`, `footer.entities are wrong: …`, `opacity is a number from 0 to 1`, `hidden is a boolean`, `badge is a string`, and the `buttons` problems listed under [type MessageDecoration](#type-messagedecoration)); the peer errors of `InputPeerLike`; `TeleError` `not-granted`: `tg.decorateMessage needs the grant 'display(messages)'`. all of these reject the promise.
 - **notes:** one explicit decoration per script per message: calling again replaces it. it works for messages tele hasn't loaded yet and applies when they appear.
 
 Example:
@@ -7589,6 +11785,7 @@ export interface MessageDecoration {
   opacity?: number
   hidden?: boolean
   badge?: string
+  buttons?: MessageDecorationButton[][]
 }
 ```
 
@@ -7601,12 +11798,50 @@ how a message should look. every field is optional; missing ones keep the real l
   - `opacity` (`number`, optional): 0..1, multiplied with a local message's own opacity.
   - `hidden` (`boolean`, optional): the message leaves the chat view; it's still there for the server and for search.
   - `badge` (`string`, optional): a short text shown before the time, after a channel signature.
-- **notes:** decorations live in layers (each decorator, plus each script's explicit ones); later layers win per field. disposing, `null`, or stopping the script removes a layer and the real look comes back.
+  - `buttons` (`MessageDecorationButton[][]`, optional): rows of buttons drawn under the bubble like a bot's inline keyboard, after the message's real inline keyboard. up to 8 rows of 1 to 8 buttons; `[]` shows no script rows (it hides the rows of an earlier layer).
+- **throws:** a bad `buttons` value is a `TypeError` from `tg.decorateMessage` (`tg.decorateMessage: buttons is an array of up to 8 rows`, `buttons[i] is an array of 1 to 8 buttons`, `buttons[i][j] is { text, onClick, style? }`, `buttons[i][j].text is a non-empty string`, `buttons[i][j].onClick is a function`, `buttons[i][j].style is 'default', 'primary' or 'danger'`) and a fault in `tg.decorateMessages`.
+- **notes:** decorations live in layers (each decorator, plus each script's explicit ones); later layers win per field, so `buttons` of a later layer replace the rows of an earlier one. disposing, `null`, or stopping the script removes a layer and the real look comes back.
 
 Example:
 
 ```ts
 const look: MessageDecoration = { footer: md`__translated from german__`, badge: 'de→en' }
+```
+
+### type MessageDecorationButton
+
+```ts
+export interface MessageDecorationButton {
+  text: string
+  onClick(context: { chatId: bigint, messageId: number }): unknown
+  style?: 'default' | 'primary' | 'danger'
+}
+```
+
+one button of `MessageDecoration.buttons`. it lives only in this tele: nothing is sent to telegram, no bot gets a callback and no text is sent when it's clicked.
+
+- **grant:** `display(messages)` (the decoration's).
+- **fields:**
+  - `text` (`string`): the label, one line, plain text (emoji work); cut with an ellipsis when the row is narrow.
+  - `onClick` (`(context) => unknown`, may be async): called on a left click with the message's `chatId` (marked id) and `messageId`.
+  - `style` (`'default' | 'primary' | 'danger'`, optional): the look of a bot button: `'default'` (the usual translucent one), `'primary'` (accent blue) or `'danger'` (red).
+- **notes:**
+  - a message with a real bot keyboard keeps it working; the script rows come after the bot's rows.
+  - the rows follow the decoration: server edits of the message keep them (`decorateMessage` keeps its decoration, a decorator runs again), and disposing it, `decorateMessage(peer, id, null)` or stopping the script removes them.
+  - `onClick` runs with the listener budget (200 ms for the synchronous part); a throw is a fault (logged, counts toward the switch-off), an async `onClick`'s rejection is an unhandled rejection (logged, not counted).
+  - the function stays alive while the decoration does; each run of a decorator makes new buttons and frees the old ones.
+  - hidden in tele's screenshots when they hide inline buttons; not shown in the admin log.
+
+Example:
+
+```ts
+const sent = await tg.sendMessage('me', 'deploy v2.4?')
+await tg.decorateMessage('me', sent.id, {
+  buttons: [[
+    { text: '✅ deploy', style: 'primary', onClick: () => tg.toast('deploying') },
+    { text: '✖ cancel', style: 'danger', onClick: ({ messageId }) => tg.decorateMessage('me', messageId, null) },
+  ]],
+})
 ```
 
 ### the message cache
@@ -7636,7 +11871,7 @@ tg.onMessageDeleted(async ({ chatId, ids }) => {
 
 ## local data and settings
 
-tele's own state, read without network: the chat list as tele has it, unread counters, folders, drafts, tele's settings, and tele's per-person features.
+tele's own state, read without network: the chat list as tele has it, unread counters, folders, drafts, tele's settings, and tele's own features: ignored users, ghost mode, local names, bookmarks, local pins and folders, hidden words, edit history and kept deleted messages.
 
 ### tg.local
 
@@ -8074,9 +12309,9 @@ tg.options.onChange((change: OptionChange) => console.log(change.id, '->', chang
 readonly tele: TeleFeatures
 ```
 
-tele's own per-person features: ignored users, per-chat ghost mode and local names.
+tele's own features: ignored users, per-chat ghost mode, local names, bookmarks, local pins, folders, hidden words, edit history and kept deleted messages.
 
-- **grant:** `account.read(peers)` to read, `options` to change.
+- **grant:** `account.read(peers)` to read ignored users, ghost modes and local names; `account.read(messages)` for bookmarks, edit history and kept messages; `account.read(dialogs)` for pins; `options` for every change. each member's item names its grant.
 - **returns:** the `TeleFeatures` object (frozen).
 
 Example:
@@ -8103,14 +12338,59 @@ export interface TeleFeatures {
     set(user: InputPeerLike, name: string | null): Promise<void>
   }
 }
+
+export interface TeleFeatures {
+  readonly bookmarks: {
+    list(): TeleBookmark[]
+    add(message: Message, name?: string): Promise<void>
+    add(chat: InputPeerLike, messageId: number, name?: string): Promise<void>
+    remove(message: Message): Promise<boolean>
+    remove(chat: InputPeerLike, messageId: number): Promise<boolean>
+    onChange(callback: () => unknown): Disposer
+  }
+  readonly pins: {
+    list(folder?: number): bigint[]
+    pin(chat: InputPeerLike, folder?: number): Promise<void>
+    unpin(chat: InputPeerLike, folder?: number): Promise<void>
+  }
+  readonly folders: {
+    list(): TeleFolder[]
+    create(folder: TeleFolderChanges & { title: string }): Promise<number>
+    edit(id: number, changes: TeleFolderChanges): Promise<void>
+    delete(id: number): Promise<void>
+    reorder(ids: number[]): Promise<void>
+  }
+  readonly hiddenWords: {
+    list(chat?: InputPeerLike): Promise<string[]>
+    add(rule: string, chat?: InputPeerLike): Promise<boolean>
+    remove(rule: string, chat?: InputPeerLike): Promise<boolean>
+  }
+  editHistory(message: Message): Promise<TeleEditVersion[]>
+  editHistory(chat: InputPeerLike, messageId: number): Promise<TeleEditVersion[]>
+  readonly deleted: {
+    list(chat: InputPeerLike): Promise<Message[]>
+    onKept(callback: (kept: TeleKeptMessage) => unknown): Disposer
+    interceptKeep(
+      interceptor: (
+        kept: TeleKeptMessage,
+      ) => TeleKeepVerdict | void | Promise<TeleKeepVerdict | void>,
+    ): Disposer
+  }
+}
 ```
 
-the type of `tg.tele`.
+the type of `tg.tele`. the second block is interface merging: it comes with the bookmarks, pins, folders, hidden words, edit history and kept messages features.
 
 - **fields:**
   - `ignored` (`{ list, set }`): ignored users.
   - `ghost` (`{ get, set, list }`): per-chat ghost mode.
   - `localNames` (`{ list, set }`): your local names for users.
+  - `bookmarks` (`{ list, add, remove, onChange }`): messages bookmarked in tele.
+  - `pins` (`{ list, pin, unpin }`): chats tele pins locally, past Telegram's pin limit.
+  - `folders` (`{ list, create, edit, delete, reorder }`): chat folders, tele's local ones included.
+  - `hiddenWords` (`{ list, add, remove }`): words that hide messages, globally or in one chat.
+  - `editHistory` (`(message) => Promise<TeleEditVersion[]>`): the earlier versions of an edited message.
+  - `deleted` (`{ list, onKept, interceptKeep }`): deleted messages tele kept.
 
 Example:
 
@@ -8277,6 +12557,600 @@ Example:
 
 ```ts
 await tg.tele.localNames.set('@durov', 'pavel')
+```
+
+### tg.tele.bookmarks.list()
+
+```ts
+list(): TeleBookmark[]
+```
+
+every message you bookmarked in tele (the message menu's "bookmark"), in every chat of this account.
+
+- **grant:** `account.read(messages)`.
+- **returns:** `TeleBookmark[]`, fresh each call; empty when bookmarks are off in tele's settings (`tele-bookmarks`).
+- **throws:** `TeleError` `not-granted`: `tg.tele.bookmarks.list needs the grant 'account.read(messages)'`.
+
+Example:
+
+```ts
+for (const bookmark of tg.tele.bookmarks.list()) console.log(bookmark.chatId, bookmark.messageId, bookmark.name || bookmark.preview)
+```
+
+### type TeleBookmark
+
+```ts
+export interface TeleBookmark {
+  chatId: bigint
+  messageId: number
+  topicId: number | null
+  name: string
+  preview: string
+  date: number
+}
+```
+
+one bookmark.
+
+- **fields:**
+  - `chatId` (`bigint`): the chat's marked id.
+  - `messageId` (`number`): the bookmarked message.
+  - `topicId` (`number | null`): the forum topic it's in, `null` outside forums.
+  - `name` (`string`): the name you gave it, `''` when unnamed.
+  - `preview` (`string`): the message text tele saved when you bookmarked it (one line, up to 256 characters).
+  - `date` (`number`): when you bookmarked it, unix seconds.
+
+Example:
+
+```ts
+const recent = tg.tele.bookmarks.list().filter((bookmark: TeleBookmark) => bookmark.date > Date.now() / 1000 - 86_400)
+```
+
+### tg.tele.bookmarks.add(message, name?)
+
+```ts
+add(message: Message, name?: string): Promise<void>
+add(chat: InputPeerLike, messageId: number, name?: string): Promise<void>
+```
+
+bookmarks a message, like the message menu does; bookmarking it again replaces the name.
+
+- **grant:** `options`.
+- **parameters:**
+  - `message` (`Message`): the message; or `chat` (`InputPeerLike`) and `messageId` (`number`).
+  - `name` (`string`, optional): a name shown in tele's bookmark list instead of the preview.
+- **returns:** resolves when the bookmark is saved. tele loads the message from the server when it isn't loaded.
+- **throws:** `TeleError` `not-granted`: `tg.tele.bookmarks.add needs the grant 'options'`; `TeleError` `unsupported`: `tg.tele.bookmarks.add: bookmarks are off in tele's settings` and `tg.tele.bookmarks.add: this message can't be bookmarked` (local, scheduled or unsent messages); `TeleError` `not-found`: `tg.tele.bookmarks.add: no message 42 in that chat`; `TypeError`: `tg.tele.bookmarks.add(message) or tg.tele.bookmarks.add(chat, messageId)`, `tg.tele.bookmarks.add: name is a string`, `tg.tele.bookmarks.add needs a chat in tele's cache and a message id`; the errors of `InputPeerLike`.
+
+Example:
+
+```ts
+tg.onNewMessage(async (message) => {
+  if (message.text.includes('#todo')) await tg.tele.bookmarks.add(message, 'todo')
+})
+```
+
+### tg.tele.bookmarks.remove(message)
+
+```ts
+remove(message: Message): Promise<boolean>
+remove(chat: InputPeerLike, messageId: number): Promise<boolean>
+```
+
+removes a bookmark.
+
+- **grant:** `options`.
+- **parameters:**
+  - `message` (`Message`): the message; or `chat` (`InputPeerLike`) and `messageId` (`number`).
+- **returns:** `true` when there was a bookmark to remove.
+- **throws:** `TeleError` `not-granted`; `TypeError`: `tg.tele.bookmarks.remove(message) or tg.tele.bookmarks.remove(chat, messageId)`, `tg.tele.bookmarks.remove needs a chat and a message id`; the errors of `InputPeerLike`.
+
+Example:
+
+```ts
+for (const bookmark of tg.tele.bookmarks.list()) {
+  if (bookmark.date < Date.now() / 1000 - 30 * 86_400) await tg.tele.bookmarks.remove(bookmark.chatId, bookmark.messageId)
+}
+```
+
+### tg.tele.bookmarks.onChange(callback)
+
+```ts
+onChange(callback: () => unknown): Disposer
+```
+
+calls `callback` after bookmarks change: added, renamed, removed (by you, a script, or a deleted message), or the feature turned on or off.
+
+- **grant:** none (read the list with `list()`, which needs `account.read(messages)`).
+- **parameters:**
+  - `callback` (`() => unknown`): called with no arguments, after the change.
+- **returns:** a `Disposer` that stops it; it also stops with the script.
+- **throws:** `TypeError: tg.tele.bookmarks.onChange(callback)`.
+
+Example:
+
+```ts
+tg.tele.bookmarks.onChange(() => console.log(tg.tele.bookmarks.list().length, 'bookmarks'))
+```
+
+### tg.tele.pins.list(folder?)
+
+```ts
+list(folder?: number): bigint[]
+```
+
+the chats tele pins locally (past Telegram's pin limit, shown with a hollow pin) in the main list and the archive, or in one chat folder.
+
+- **grant:** `account.read(dialogs)`.
+- **parameters:**
+  - `folder` (`number`, optional): a folder id from `tg.tele.folders.list()`; `0` or nothing for the main list and the archive.
+- **returns:** the chats' marked ids, in pin order; empty when local pins are off in tele's settings (`tele-local-pins`).
+- **throws:** `TeleError` `not-granted`: `tg.tele.pins.list needs the grant 'account.read(dialogs)'`; `TypeError: tg.tele.pins.list: folder is a folder id from tg.tele.folders.list() or 0`.
+- **notes:** server pins aren't listed: they're in `tg.local.dialogs()` (`pinned`).
+
+Example:
+
+```ts
+console.log(tg.tele.pins.list().length, 'chats pinned locally')
+```
+
+### tg.tele.pins.pin(chat, folder?)
+
+```ts
+pin(chat: InputPeerLike, folder?: number): Promise<void>
+```
+
+pins a chat locally (only on this device, any number of chats), in the main list (or the archive, for an archived chat) or in a chat folder.
+
+- **grant:** `options`.
+- **parameters:**
+  - `chat` (`InputPeerLike`): a chat in tele's cache.
+  - `folder` (`number`, optional): a folder id; `0` or nothing for the main list.
+- **returns:** resolves when pinned; the new pin goes last.
+- **throws:** `TeleError` `not-granted`: `tg.tele.pins.pin needs the grant 'options'`; `TeleError` `unsupported`: `tg.tele.pins.pin: local pins are off in tele's settings`, `tg.tele.pins.pin: tele can't pin this chat in that list` (tele doesn't know its list yet); `TypeError`: `tg.tele.pins.pin needs a chat in tele's cache`, `tg.tele.pins.pin: folder is a folder id from tg.tele.folders.list() or 0`; the errors of `InputPeerLike`.
+
+Example:
+
+```ts
+await tg.tele.pins.pin('@durov')
+```
+
+### tg.tele.pins.unpin(chat, folder?)
+
+```ts
+unpin(chat: InputPeerLike, folder?: number): Promise<void>
+```
+
+removes a local pin. a chat also pinned on the server stays pinned there.
+
+- **grant:** `options`.
+- **parameters:**
+  - `chat` (`InputPeerLike`): a chat in tele's cache.
+  - `folder` (`number`, optional): the folder id the pin is in; `0` or nothing for the main list.
+- **returns:** resolves when done; unpinning a chat that isn't pinned locally does nothing.
+- **throws:** the errors of `pin`, with `tg.tele.pins.unpin` in the messages.
+
+Example:
+
+```ts
+for (const chatId of tg.tele.pins.list()) await tg.tele.pins.unpin(chatId)
+```
+
+### tg.tele.folders.list()
+
+```ts
+list(): TeleFolder[]
+```
+
+the chat folders with their rules, in tele's order, without "all chats". tele's local folders (past Telegram's folder limit) are included.
+
+- **grant:** none; the chats in the rules (`include`, `exclude`, `pinned`) only with `account.read(dialogs)`.
+- **returns:** `TeleFolder[]`, fresh each call.
+
+Example:
+
+```ts
+const empty = tg.tele.folders.list().filter((folder) => folder.include?.length === 0 && !Object.values(folder.flags).some(Boolean))
+```
+
+### type TeleFolder
+
+```ts
+export interface TeleFolder {
+  id: number
+  title: string
+  emoji: string
+  color: number | null
+  flags: TeleFolderFlags
+  shared: boolean
+  local: boolean
+  include?: bigint[]
+  exclude?: bigint[]
+  pinned?: bigint[]
+}
+```
+
+one chat folder.
+
+- **fields:**
+  - `id` (`number`): the folder id (`tg.local.dialogs({ folder: id })` lists its chats).
+  - `title` (`string`): the name (custom emoji in it come back as their text).
+  - `emoji` (`string`): its icon emoji, or `''`.
+  - `color` (`number | null`): its tag color index, `null` without one.
+  - `flags` (`TeleFolderFlags`): which kinds of chats it takes in and leaves out.
+  - `shared` (`boolean`): a shared folder (a chat folder link you joined or made).
+  - `local` (`boolean`): one of tele's local folders, kept only on this device.
+  - `include` (`bigint[]`, optional): chats always in it, besides the pinned ones; only with `account.read(dialogs)`.
+  - `exclude` (`bigint[]`, optional): chats never in it; only with `account.read(dialogs)`.
+  - `pinned` (`bigint[]`, optional): chats pinned in it, in order (they're in the folder too); only with `account.read(dialogs)`.
+
+Example:
+
+```ts
+const work = tg.tele.folders.list().find((folder: TeleFolder) => folder.title === 'work')
+```
+
+### type TeleFolderFlags
+
+```ts
+export interface TeleFolderFlags {
+  contacts: boolean
+  nonContacts: boolean
+  groups: boolean
+  channels: boolean
+  bots: boolean
+  excludeMuted: boolean
+  excludeRead: boolean
+  excludeArchived: boolean
+}
+```
+
+a folder's rules by chat kind, like the folder editor's "included chats" types and "exclude" toggles.
+
+- **fields:**
+  - `contacts`, `nonContacts`, `groups`, `channels`, `bots` (`boolean`): take in every chat of that kind.
+  - `excludeMuted`, `excludeRead`, `excludeArchived` (`boolean`): leave out muted, read or archived chats.
+
+Example:
+
+```ts
+const flags: Partial<TeleFolderFlags> = { groups: true, excludeMuted: true }
+```
+
+### tg.tele.folders.create(folder)
+
+```ts
+create(folder: TeleFolderChanges & { title: string }): Promise<number>
+```
+
+creates a chat folder, saved to your account like the folder editor does (a local tele folder when you're at Telegram's folder limit and tele's local folders are on).
+
+- **grant:** `options`.
+- **parameters:**
+  - `folder` (`TeleFolderChanges & { title: string }`): the new folder; `title` is required, everything else defaults to empty.
+- **returns:** the new folder's id, once the server saved it. the folder goes last.
+- **throws:** `TeleError` `not-granted`: `tg.tele.folders.create needs the grant 'options'`; `TypeError`: `tg.tele.folders.create: the folder is an object`, `tg.tele.folders.create: a new folder needs a title`, `tg.tele.folders.create: title can't be empty`, `tg.tele.folders.create: title is a string`, `tg.tele.folders.create: emoji is a string`, `tg.tele.folders.create: color is a color index (0 to 255) or null`, `tg.tele.folders.create: flags is an object of booleans`, `tg.tele.folders.create: flags.groups is a boolean`, `tg.tele.folders.create: include is an array of chats` / `include is an array of chats in tele's cache` (same for `exclude` and `pinned`); `TeleError` `forbidden` (or `quota-exceeded` for `..._TOO_MUCH` and flood waits): `tg.tele.folders.create: the server refused: FILTER_INCLUDE_EMPTY`, and the folder is removed again; the errors of `InputPeerLike`.
+- **notes:** the server wants at least one chat or kind of chat in a folder, and a title of up to 12 characters.
+
+Example:
+
+```ts
+const id = await tg.tele.folders.create({ title: 'bots', emoji: '🤖', flags: { bots: true } })
+```
+
+### type TeleFolderChanges
+
+```ts
+export interface TeleFolderChanges {
+  title?: string
+  emoji?: string
+  color?: number | null
+  flags?: Partial<TeleFolderFlags>
+  include?: InputPeerLike[]
+  exclude?: InputPeerLike[]
+  pinned?: InputPeerLike[]
+}
+```
+
+the parts of a folder to set; a missing field keeps its value (or is empty in a new folder).
+
+- **fields:**
+  - `title` (`string`, optional): the name.
+  - `emoji` (`string`, optional): the icon emoji, `''` for none.
+  - `color` (`number | null`, optional): the tag color index, `null` for none.
+  - `flags` (`Partial<TeleFolderFlags>`, optional): only the flags given change.
+  - `include` (`InputPeerLike[]`, optional): replaces the chats always in it.
+  - `exclude` (`InputPeerLike[]`, optional): replaces the chats never in it.
+  - `pinned` (`InputPeerLike[]`, optional): replaces the pinned chats, in order (they're included too).
+- **notes:** in shared folders the server ignores `flags` and `exclude`.
+
+Example:
+
+```ts
+const changes: TeleFolderChanges = { exclude: ['@spam_channel'], flags: { excludeRead: true } }
+```
+
+### tg.tele.folders.edit(id, changes)
+
+```ts
+edit(id: number, changes: TeleFolderChanges): Promise<void>
+```
+
+changes a folder, like saving it in the folder editor: tele shows the change at once and puts the old folder back if the server refuses.
+
+- **grant:** `options`.
+- **parameters:**
+  - `id` (`number`): a folder id from `list()`.
+  - `changes` (`TeleFolderChanges`): what to change.
+- **returns:** resolves when saved.
+- **throws:** the `TypeError`s and server refusals of `create`, with `tg.tele.folders.edit` in the messages; `TypeError: tg.tele.folders.edit: id is a folder id from tg.tele.folders.list()`; `TeleError` `not-found`: `tg.tele.folders.edit: no folder 7`; `TeleError` `unsupported`: `tg.tele.folders.edit: tele's unsorted folder can't be edited`.
+
+Example:
+
+```ts
+const work = tg.tele.folders.list().find((folder) => folder.title === 'work')
+if (work) await tg.tele.folders.edit(work.id, { include: [...(work.include ?? []), '@newcolleague'] })
+```
+
+### tg.tele.folders.delete(id)
+
+```ts
+delete(id: number): Promise<void>
+```
+
+deletes a folder (the chats stay). deleting a shared folder keeps its chats too.
+
+- **grant:** `options`.
+- **parameters:**
+  - `id` (`number`): a folder id from `list()`.
+- **returns:** resolves when the server deleted it.
+- **throws:** `TeleError` `not-granted`; `TypeError: tg.tele.folders.delete: id is a folder id from tg.tele.folders.list()`; `TeleError` `not-found`: `tg.tele.folders.delete: no folder 7`; `TeleError` `unsupported`: `tg.tele.folders.delete: tele's unsorted folder is a setting`; `TeleError` `forbidden`: `tg.tele.folders.delete: the server refused: ...` (the folder comes back).
+
+Example:
+
+```ts
+const id = await tg.tele.folders.create({ title: 'temp', flags: { groups: true } })
+await tg.tele.folders.delete(id)
+```
+
+### tg.tele.folders.reorder(ids)
+
+```ts
+reorder(ids: number[]): Promise<void>
+```
+
+puts the folders in this order, like dragging them in the folder settings.
+
+- **grant:** `options`.
+- **parameters:**
+  - `ids` (`number[]`): every id from `list()` exactly once; add `0` to place "all chats" too (moving it needs Premium), otherwise it keeps its place.
+- **returns:** resolves at once; tele saves the order in the background.
+- **throws:** `TeleError` `not-granted`; `TypeError: tg.tele.folders.reorder needs every folder id from tg.tele.folders.list() exactly once`.
+
+Example:
+
+```ts
+const sorted = tg.tele.folders.list().sort((a, b) => a.title.localeCompare(b.title)).map((folder) => folder.id)
+await tg.tele.folders.reorder(sorted)
+```
+
+### tg.tele.hiddenWords.list(chat?)
+
+```ts
+list(chat?: InputPeerLike): Promise<string[]>
+```
+
+tele's hidden words: messages containing one of them are hidden (your own messages never are). the global list, or one chat's extra rules.
+
+- **grant:** none.
+- **parameters:**
+  - `chat` (`InputPeerLike`, optional): a chat in tele's cache; its rules apply on top of the global ones.
+- **returns:** the rules, one per entry: a word or phrase (matched anywhere, ignoring case), or a `/regex/` (`/regex/i` works too, matching always ignores case).
+- **throws:** `TypeError: tg.tele.hiddenWords.list needs a chat in tele's cache`; the errors of `InputPeerLike`.
+
+Example:
+
+```ts
+console.log(await tg.tele.hiddenWords.list())
+```
+
+### tg.tele.hiddenWords.add(rule, chat?)
+
+```ts
+add(rule: string, chat?: InputPeerLike): Promise<boolean>
+```
+
+adds a rule to the global list or to one chat's rules; matching messages hide at once.
+
+- **grant:** `options`.
+- **parameters:**
+  - `rule` (`string`): one line: a word or phrase, or a `/regex/`; surrounding spaces are trimmed.
+  - `chat` (`InputPeerLike`, optional): a chat in tele's cache, for a rule only there.
+- **returns:** `true` when added, `false` when the rule was already there.
+- **throws:** `TeleError` `not-granted`: `tg.tele.hiddenWords.add needs the grant 'options'`; `TypeError`: `tg.tele.hiddenWords.add(rule, chat?): rule is a string`, `tg.tele.hiddenWords.add: a rule is one line of text or a valid /regex/` (also for a regex that doesn't compile), `tg.tele.hiddenWords.add needs a chat in tele's cache`; the errors of `InputPeerLike`.
+
+Example:
+
+```ts
+await tg.tele.hiddenWords.add('/\\bcrypto\\s+giveaway\\b/')
+```
+
+### tg.tele.hiddenWords.remove(rule, chat?)
+
+```ts
+remove(rule: string, chat?: InputPeerLike): Promise<boolean>
+```
+
+removes a rule (exactly as `list()` shows it).
+
+- **grant:** `options`.
+- **parameters:**
+  - `rule` (`string`): the rule.
+  - `chat` (`InputPeerLike`, optional): the chat whose rules to change; the global list without it.
+- **returns:** `true` when removed, `false` when it wasn't there.
+- **throws:** the errors of `add`, with `tg.tele.hiddenWords.remove` in the messages.
+
+Example:
+
+```ts
+for (const rule of await tg.tele.hiddenWords.list()) if (rule.startsWith('/')) await tg.tele.hiddenWords.remove(rule)
+```
+
+### tg.tele.editHistory(message)
+
+```ts
+editHistory(message: Message): Promise<TeleEditVersion[]>
+editHistory(chat: InputPeerLike, messageId: number): Promise<TeleEditVersion[]>
+```
+
+the versions of an edited message tele kept (the message menu's "edit history"), oldest first, the current one last.
+
+- **grant:** `account.read(messages)`.
+- **parameters:**
+  - `message` (`Message`): the message; or `chat` (`InputPeerLike`) and `messageId` (`number`).
+- **returns:** `TeleEditVersion[]`; empty when tele kept no edits of it, hasn't loaded it, or edit history is off in tele's settings (`tele-edit-history`).
+- **throws:** `TeleError` `not-granted`: `tg.tele.editHistory needs the grant 'account.read(messages)'`; `TypeError`: `tg.tele.editHistory(message) or tg.tele.editHistory(chat, messageId)`, `tg.tele.editHistory needs a chat and a message id`; the errors of `InputPeerLike`.
+
+Example:
+
+```ts
+tg.onMessageEdited(async (message) => {
+  const versions = await tg.tele.editHistory(message)
+  if (versions.length > 1) console.log('was:', versions[versions.length - 2].message.text)
+})
+```
+
+### type TeleEditVersion
+
+```ts
+export interface TeleEditVersion {
+  date: number
+  original: boolean
+  current: boolean
+  message: Message
+}
+```
+
+one version of an edited message.
+
+- **fields:**
+  - `date` (`number`): since when the message read like this, unix seconds.
+  - `original` (`boolean`): the text before the first edit.
+  - `current` (`boolean`): the text it has now.
+  - `message` (`Message`): the message as it was: its id, chat, sender and date, this version's `text` and `entities`, and `editDate` (missing on the original). media isn't kept per version, so `media` is `null`.
+
+Example:
+
+```ts
+const texts = (await tg.tele.editHistory('@channel', 42)).map((version: TeleEditVersion) => version.message.text)
+```
+
+### tg.tele.deleted.list(chat)
+
+```ts
+list(chat: InputPeerLike): Promise<Message[]>
+```
+
+the deleted messages tele kept in a chat ("keep deleted messages" in tele's settings), oldest first.
+
+- **grant:** `account.read(messages)`.
+- **parameters:**
+  - `chat` (`InputPeerLike`): a chat in tele's cache.
+- **returns:** `Message[]`: the full message when tele saw it arrive while scripts were running, otherwise its id, chat, sender, date, text and entities (no media); empty when keeping is off.
+- **throws:** `TeleError` `not-granted`: `tg.tele.deleted.list needs the grant 'account.read(messages)'`; `TypeError: tg.tele.deleted.list needs a chat in tele's cache`; the errors of `InputPeerLike`.
+
+Example:
+
+```ts
+const kept = await tg.tele.deleted.list('@friend')
+console.log(kept.map((message) => message.text))
+```
+
+### tg.tele.deleted.onKept(callback)
+
+```ts
+onKept(callback: (kept: TeleKeptMessage) => unknown): Disposer
+```
+
+calls `callback` for every message tele keeps after it was deleted, a moment after it's kept.
+
+- **grant:** `account.read(messages)`.
+- **parameters:**
+  - `callback` (`(kept: TeleKeptMessage) => unknown`): called once per message.
+- **returns:** a `Disposer` that stops it; it also stops with the script.
+- **throws:** `TeleError` `not-granted`: `tg.tele.deleted.onKept needs the grant 'account.read(messages)'`; `TypeError: tg.tele.deleted.onKept(callback)`.
+- **notes:** `tg.onMessageDeleted` sees every deletion; this sees the ones tele kept (not in bots or Saved Messages unless tele's settings say so, not self-destructing ones).
+
+Example:
+
+```ts
+tg.tele.deleted.onKept(({ message }) => tg.toast(`deleted: ${message.text.slice(0, 40)}`))
+```
+
+### tg.tele.deleted.interceptKeep(interceptor)
+
+```ts
+interceptKeep(
+  interceptor: (
+    kept: TeleKeptMessage,
+  ) => TeleKeepVerdict | void | Promise<TeleKeepVerdict | void>,
+): Disposer
+```
+
+lets the script decide which deleted messages tele keeps: `'discard'` removes a kept message (gone from the chat and from tele's store), `'keep'` or nothing keeps it.
+
+- **grant:** `account.read(messages)` and `options`.
+- **parameters:**
+  - `interceptor` (`(kept) => TeleKeepVerdict | void | Promise<...>`): called once per kept message.
+- **returns:** a `Disposer` that stops it; it also stops with the script.
+- **throws:** `TeleError` `not-granted`: `tg.tele.deleted.interceptKeep needs the grant 'account.read(messages)'` or `... needs the grant 'options'`; `TypeError: tg.tele.deleted.interceptKeep(callback)`.
+- **notes:** tele keeps the message first and asks right after, so a discarded message can flash for a moment. an answer after 2 seconds, an error or any other value keeps it. when several scripts intercept, one `'discard'` is enough. it can only drop what tele keeps: it can't keep a message tele's settings wouldn't.
+
+Example:
+
+```ts
+tg.tele.deleted.interceptKeep(({ message }) => (message.mediaType === 'sticker' ? 'discard' : 'keep'))
+```
+
+### type TeleKeptMessage
+
+```ts
+export interface TeleKeptMessage {
+  chatId: bigint
+  own: boolean
+  message: Message
+}
+```
+
+a deleted message tele just kept.
+
+- **fields:**
+  - `chatId` (`bigint`): the chat's marked id.
+  - `own` (`boolean`): you deleted it yourself (kept when "keep your own deleted messages" is on).
+  - `message` (`Message`): the message, like `tg.tele.deleted.list` gives it.
+
+Example:
+
+```ts
+tg.tele.deleted.onKept((kept: TeleKeptMessage) => { if (!kept.own) console.log(kept.chatId, kept.message.id) })
+```
+
+### type TeleKeepVerdict
+
+```ts
+export type TeleKeepVerdict = 'keep' | 'discard'
+```
+
+an `interceptKeep` answer.
+
+- **fields:**
+  - `'keep'`: keep the deleted message (also what no answer means).
+  - `'discard'`: remove it for good.
+
+Example:
+
+```ts
+const verdict: TeleKeepVerdict = 'discard'
 ```
 
 ## script to script
@@ -8722,6 +13596,27 @@ export interface Ui {
     subtitle?: string
     onChange(value: string): unknown
   }): UiElement
+  text(options: { id?: string, text: string } | string): UiElement
+  image(options: {
+    id?: string
+    bytes: Uint8Array | ArrayBuffer
+    height?: number
+    subtitle?: string
+    onClick?(): unknown
+  }): UiElement
+  progress(options: {
+    id?: string
+    text?: string
+    value: number
+    subtitle?: string
+  }): UiElement
+  peer(options: {
+    id?: string
+    peer: bigint | number | 'me' | PeerInfo
+    text?: string
+    subtitle?: string
+    onClick?(): unknown
+  }): UiElement
   settingsPage(options: { title?: string, items(): UiElement[] }): Page
   readonly widgets: Widgets
   registerMenuItem(options: { place: 'main' | 'tray', text: string, emoji?: string, onClick(): unknown }): Disposer
@@ -8753,17 +13648,58 @@ export interface Ui {
     options?: { title?: string, filter?: string, name?: string },
   ): Promise<string | null>
 }
+
+export interface Ui {
+  webview(options: WebviewOptions): WebviewPanel
+}
+
+export interface Ui {
+  openMedia(
+    message: Message | { peer: InputPeerLike, id: number },
+    options?: { index?: number },
+  ): Promise<void>
+  onMediaOpened(callback: (event: MediaViewerEvent) => unknown): Disposer
+  registerMediaAction(options: MediaActionOptions): Disposer
+  mediaViewer(): MediaViewerItem | null
+}
+
+export interface Ui {
+  banner(options: BannerOptions): Disposer
+  selection(): MessageSelection | null
+  onSelectionChanged(callback: (selection: MessageSelection | null) => unknown): Disposer
+}
+
+export interface Ui {
+  registerSearchProvider(provider: SearchProvider): Disposer
+}
+
+export interface Ui {
+  registerStickerSet(options: PanelStickerSetOptions): Disposer
+  registerGifSource(options: PanelGifSourceOptions): Disposer
+  registerEmojiSet(options: PanelEmojiSetOptions): Disposer
+}
+
+export interface Ui {
+  openWebApp(bot: InputPeerLike, options?: WebAppOptions): Promise<void>
+  webApps(): WebAppInfo[]
+  onWebAppEvent(callback: (event: WebAppEvent) => unknown): Disposer
+}
 ```
 
-`tg.ui` is the script's handle on tele's interface: boxes, settings pages and their rows, menu entries, navigation and file pickers. tele.d.ts declares it in two parts, the second adds navigation and files.
+`tg.ui` is the script's handle on tele's interface: boxes, settings pages and their rows, menu entries, navigation and file pickers. tele.d.ts declares it in several parts: the second adds navigation and files, the later ones come with the features that extend it.
 
-- **grant:** none for most members; `tg.ui.widgets` needs `ui.read`, `ui.write` and `unsafe.automate`, see "the widget layer".
+- **grant:** none for most members; `tg.ui.widgets` needs `ui.read`, `ui.write` and `unsafe.automate`, see "the widget layer"; `webApps` and `onWebAppEvent` need `ui.read`.
 - **notes:** every member is documented below under its own name. members that show something need a window showing this account; when there is none (typically a logged-in account that isn't the active one and has no separate window), they throw `TeleError` `unsupported` or quietly return `false`, as noted per member.
 - **members:**
   - `toast`, `notice`, `dialog`, `prompt`, `chooser`: this section.
-  - `settingsPage`, `header`, `separator`, `button`, `check`, `select`, `slider`, `input`, `item`, `color`, `keybind`, `openPage`, `openSection`, `registerSettingsEntry`, `openFile`, `saveFile`: "pages and settings".
+  - `settingsPage`, `header`, `separator`, `button`, `check`, `select`, `slider`, `input`, `item`, `color`, `keybind`, `text`, `image`, `progress`, `peer`, `openPage`, `openSection`, `registerSettingsEntry`, `openFile`, `saveFile`: "pages and settings".
   - `registerMenuItem`: "menus, buttons and commands".
-  - `openChat`, `openProfile`, `openSettings`, `back`, `current`, `onChatOpened`: "navigation and compose".
+  - `openChat`, `openProfile`, `openSettings`, `back`, `current`, `onChatOpened`, `banner`, `selection`, `onSelectionChanged`: "navigation and compose".
+  - `webview`: "webviews".
+  - `registerSearchProvider`: "search".
+  - `registerStickerSet`, `registerGifSource`, `registerEmojiSet`: "sticker and gif panels".
+  - `openMedia`, `onMediaOpened`, `registerMediaAction`, `mediaViewer`: "media viewer".
+  - `openWebApp`, `webApps`, `onWebAppEvent`: "mini apps".
   - `widgets`: "the widget layer".
 
 Example:
@@ -9379,20 +14315,20 @@ tg.ui.openPage(wizard)
 
 ```ts
 export interface UiElement {
-  readonly type: 'header' | 'button' | 'check' | 'select' | 'slider' | 'input' | 'separator' | 'item' | 'color' | 'keybind'
+  readonly type: 'header' | 'button' | 'check' | 'select' | 'slider' | 'input' | 'separator' | 'item' | 'color' | 'keybind' | 'text' | 'image' | 'progress' | 'peer'
 }
 ```
 
 one row of a settings page, made by a row builder. it's a frozen copy of the options you passed plus `type`; tele reads it when the page renders.
 
 - **fields:**
-  - `type` (`'header' | 'button' | 'check' | 'select' | 'slider' | 'input' | 'separator' | 'item' | 'color' | 'keybind'`): which row it is. set by the builder, can't be overridden.
+  - `type` (`'header' | 'button' | 'check' | 'select' | 'slider' | 'input' | 'separator' | 'item' | 'color' | 'keybind' | 'text' | 'image' | 'progress' | 'peer'`): which row it is. set by the builder, can't be overridden.
   - every option given to the builder, as given (`text`, `value`, `onChange`, ...).
 - **notes:**
   - only rows returned from `items()` count; building a row doesn't show it.
   - every builder takes `id?: string`. tele doesn't use it; it's there for your own bookkeeping (finding a row in a list, keys in tests).
-  - `subtitle` (on every row except `header` and `separator`) is a small grey line of text under the row.
-  - the builders accept a plain string as a shorthand for `{ text }` (typed only for `header` and `separator`).
+  - `subtitle` (on every row except `header`, `separator` and `text`) is a small grey line of text under the row.
+  - the builders accept a plain string as a shorthand for `{ text }` (typed only for `header`, `separator` and `text`).
 
 Example:
 
@@ -9750,6 +14686,142 @@ tg.ui.keybind({
 })
 ```
 
+### tg.ui.text(options)
+
+```ts
+text(options: { id?: string, text: string } | string): UiElement
+```
+
+a paragraph of text on a page. it understands the composer's markdown (`**bold**`, `__italic__`, `` `code` ``, `~~strike~~`, `||spoiler||`) and links (`[label](https://example.com)` and bare urls), so a page can explain itself or point somewhere.
+
+- **grant:** none.
+- **parameters:**
+  - `options` (`string`): the text; a string is the same as `{ text }`.
+  - `options.id` (`string`, optional): your own name for the row.
+  - `options.text` (`string`): the paragraph.
+- **returns:** `UiElement` with `type: 'text'`.
+- **notes:**
+  - links open like any link in tele: through `tg.interceptLink` interceptors and tele's own handlers.
+  - the paragraph wraps to the page's width; long text makes the page scroll.
+
+Example:
+
+```ts
+tg.ui.text('this script mirrors your **saved messages** to [notion](https://notion.so). nothing leaves this computer otherwise.')
+```
+
+### tg.ui.image(options)
+
+```ts
+image(options: {
+  id?: string
+  bytes: Uint8Array | ArrayBuffer
+  height?: number
+  subtitle?: string
+  onClick?(): unknown
+}): UiElement
+```
+
+a picture on a page: png, jpeg, webp, bmp or gif (the first frame), scaled down to the page's width and to `height`, keeping its proportions, centred.
+
+- **grant:** none.
+- **parameters:**
+  - `options.bytes` (`Uint8Array | ArrayBuffer`): the image file.
+  - `options.height` (`number`, optional): the largest height in pixels at 100% interface scale (scaled with the interface); default 240.
+  - `options.subtitle` (`string`, optional): a small line under the picture.
+  - `options.onClick` (`() => unknown`, optional): runs when the picture is clicked.
+- **returns:** `UiElement` with `type: 'image'`.
+- **notes:**
+  - bytes that aren't an image leave an empty row (no error).
+  - pages re-render when `invalidate()` is called; a new `bytes` value replaces the picture in place.
+  - there is no url form: download the picture with `fetch` (and its grant) and pass the bytes.
+
+Example:
+
+```ts
+const response = await fetch('https://picsum.photos/600/300')
+const photo = await response.bytes()
+const page = tg.ui.settingsPage({
+  title: 'photo of the day',
+  items: () => [tg.ui.image({ bytes: photo, height: 180, onClick: () => tg.openUrl('https://picsum.photos') })],
+})
+```
+
+### tg.ui.progress(options)
+
+```ts
+progress(options: {
+  id?: string
+  text?: string
+  value: number
+  subtitle?: string
+}): UiElement
+```
+
+a progress bar with an optional label above and a small line under it.
+
+- **grant:** none.
+- **parameters:**
+  - `options.text` (`string`, optional): the label above the bar.
+  - `options.value` (`number`): how far along, from 0 to 1 (clamped); a negative value draws an empty track (unknown progress).
+  - `options.subtitle` (`string`, optional): a small line under the bar, e.g. "12 of 40".
+- **returns:** `UiElement` with `type: 'progress'`.
+- **notes:**
+  - call the page's `invalidate()` after changing the value: the bar updates in place without rebuilding the page.
+
+Example:
+
+```ts
+let done = 0
+const page = tg.ui.settingsPage({
+  title: 'export',
+  items: () => [tg.ui.progress({ text: 'exporting your chats', value: done / chats.length, subtitle: `${done} of ${chats.length}` })],
+})
+for (const chat of chats) {
+  await exportChat(chat)
+  done += 1
+  page.invalidate()
+}
+```
+
+### tg.ui.peer(options)
+
+```ts
+peer(options: {
+  id?: string
+  peer: bigint | number | 'me' | PeerInfo
+  text?: string
+  subtitle?: string
+  onClick?(): unknown
+}): UiElement
+```
+
+a row with a user's or chat's userpic and name, like the rows in tele's member lists.
+
+- **grant:** none (only peers tele already has loaded are drawn with their picture and name).
+- **parameters:**
+  - `options.peer` (`bigint | number | 'me' | PeerInfo`): a marked id, `'me'`, or a `PeerInfo` from `tg.peers.get` / `tg.resolvePeer`.
+  - `options.text` (`string`, optional): replaces the shown name.
+  - `options.subtitle` (`string`, optional): the grey line under the name (a status, a count, a date).
+  - `options.onClick` (`() => unknown`, optional): runs when the row is clicked (e.g. `tg.ui.openChat(peer)`).
+- **returns:** `UiElement` with `type: 'peer'`.
+- **notes:**
+  - a peer tele hasn't loaded shows its id instead of a name and no picture; the userpic appears when its photo finishes downloading.
+
+Example:
+
+```ts
+const top = await tg.getDialogs({ limit: 5 })
+const page = tg.ui.settingsPage({
+  title: 'recent chats',
+  items: () => top.flatMap(({ peer, unreadCount }) => peer ? [tg.ui.peer({
+    peer,
+    subtitle: `${unreadCount} unread`,
+    onClick: () => tg.ui.openChat(peer),
+  })] : []),
+})
+```
+
 ### tg.registerSettings(page)
 
 ```ts
@@ -9925,6 +14997,163 @@ const history = await tg.getHistory(ctx.chat, { limit: 100 })
 const text = history.reverse().map((message) => `${message.sender?.name ?? '?'}: ${message.text}`).join('\n')
 const path = await tg.ui.saveFile(text, { name: `${ctx.chat.name}.txt`, filter: 'Text (*.txt)' })
 if (path) tg.toast(`saved to ${path}`)
+```
+
+## webviews
+
+a webview panel is a separate window with a web page in it, for ui that page rows can't do: charts, editors, galleries, little games. the page is html you pass as a string or an https url. it talks to the script only through a json message bridge (`window.tele` inside the page), gets tele's theme colours as css variables, and has no other access to tele or the account. a script can have any number of panels; all of them close when the script stops.
+
+```ts
+const panel = tg.ui.webview({
+  title: 'counter',
+  html: `<button id="b" style="background: var(--tele-accent)">0</button>
+<script>
+  const b = document.getElementById('b')
+  b.onclick = () => tele.postMessage({ clicked: Number(b.textContent) })
+  tele.onMessage = (data) => { b.textContent = data.count }
+</script>`,
+})
+panel.onMessage<{ clicked: number }>((data) => panel.postMessage({ count: data.clicked + 1 }))
+```
+
+### tg.ui.webview(options)
+
+```ts
+webview(options: WebviewOptions): WebviewPanel
+
+export type WebviewOptions = WebviewCommonOptions & (
+  | { html: string, url?: undefined }
+  | { url: string, html?: undefined }
+)
+
+export interface WebviewCommonOptions {
+  title: string
+  width?: number
+  height?: number
+  resizable?: boolean
+}
+```
+
+opens a panel over this account's window, the same kind of window as the mtproto console, and loads `html` or `url` in it. returns right away; the page loads in the background.
+
+- **grant:** none for `html`. `url` needs `fetch(<host>)` for the url's host, the same grant `fetch` uses (so `fetch(example.com)` covers `www.example.com`, and `fetch` without a host covers every host).
+- **parameters:**
+  - `options.title` (`string`): the panel's title.
+  - `options.html` (`string`): a whole html document (or a fragment), served from memory. give either `html` or `url`.
+  - `options.url` (`string`): an `https://` page to load.
+  - `options.width` (`number`, optional): the page width in pixels at 100% interface scale, 120 to 4096; tele scales it like its own windows. 480 by default.
+  - `options.height` (`number`, optional): the page height, same rules. 600 by default; a panel taller than the screen is cut to fit.
+  - `options.resizable` (`boolean`, optional): whether the user can resize the panel (down to 120×120). `true` by default.
+- **returns:** `WebviewPanel`, the handle for messages, the title and closing.
+- **throws:**
+  - `TypeError: tg.ui.webview needs { title, html | url }` without an options object, `tg.ui.webview needs a title` for a missing or empty title, `tg.ui.webview needs either html or url` for neither or both, `tg.ui.webview: html is a string` / `url is a string`, `tg.ui.webview: width is a number from 120 to 4096` (same for `height`), `tg.ui.webview: resizable is a boolean`.
+  - `TypeError: tg.ui.webview only takes https urls` for any other url.
+  - `TeleError` `not-granted` with `grant` set to `fetch(<host>)` for an url whose host isn't granted.
+  - `TeleError` `unsupported`: `tg.ui.webview: <reason>` when this system has no usable webview (the same check as mini apps and the mtproto console: WebView2 on windows, WebKitGTK on linux), `tg.ui.webview: this account has no window`, `tg.ui.webview: could not start the webview`.
+- **notes:**
+  - `html` is served as `index.html` from tele's internal origin. nothing else is served there, so relative links to other files don't load: inline your css and scripts, use `data:` urls for images, or load from hosts you have `fetch` grants for.
+  - `html` pages run under a content security policy: the page itself, `data:` and `blob:` urls, inline scripts and styles and `eval` are allowed; images, scripts, styles, fonts, `fetch`, `XMLHttpRequest` and websockets reach only the hosts covered by the script's `fetch` grants (none for a script without them). webrtc is turned off. a page can't send data anywhere the script itself couldn't.
+  - `url` pages load their own resources like a browser would, but the panel only navigates to `https` hosts covered by the script's `fetch` grants. other navigations, `target="_blank"` links and `window.open` are blocked silently; to open a link in the browser, post it to the script and call `tg.openUrl` (grant `openUrl`).
+  - `localStorage`, cookies and other site data persist per script per account, apart from other scripts and from tele's own webviews.
+  - the panel gets keyboard focus when it opens and whenever its window is activated. Escape goes to the page and doesn't close the panel; the close button and tele's close-window shortcut (Ctrl+W) do.
+  - several panels can be open at once, from one script or many. they aren't restored after a restart.
+
+Example:
+
+```ts
+tg.registerChatAction({
+  id: 'stats',
+  text: 'chat stats',
+  onClick: async (ctx) => {
+    const history = await tg.getHistory(ctx.chat, { limit: 100 })
+    const panel = tg.ui.webview({ title: `stats: ${ctx.chat.name}`, html: statsPage, width: 640, height: 420 })
+    panel.postMessage(history.map((message) => ({ date: message.date, length: message.text.length })))
+  },
+})
+```
+
+### type WebviewPanel
+
+```ts
+export interface WebviewPanel {
+  postMessage(data: unknown): void
+  onMessage<T = unknown>(callback: (data: T) => unknown): Disposer
+  setTitle(text: string): void
+  close(): void
+  onClose(callback: () => unknown): Disposer
+  readonly closed: boolean
+}
+```
+
+the frozen handle `tg.ui.webview` returns.
+
+- **grant:** none.
+- **parameters:**
+  - `postMessage(data)`: sends `data` to the page as json (`JSON.stringify` on the script side, parsed again in the page). messages sent before the page has loaded wait and are delivered right after it loads, in order; for `url` pages that's only the first load, messages sent while a later navigation is in progress are lost. does nothing after the panel closed.
+  - `onMessage(callback)`: calls `callback(data)` with every message the page sends through `tele.postMessage`, already parsed. any number of callbacks; messages that arrive while none is registered are dropped. the type parameter only types `data`, nothing is checked.
+  - `setTitle(text)`: changes the panel's title. does nothing after the panel closed.
+  - `close()`: closes the panel, then runs the `onClose` callbacks right away. does nothing if it's already closed.
+  - `onClose(callback)`: runs `callback()` once when the panel closes, by the user (close button, Ctrl+W), by `close()`, or because the webview process died. not called when the script stops.
+  - `closed` (`boolean`): `true` once the panel has closed.
+- **returns:** `onMessage` and `onClose` return a `Disposer` that removes that callback.
+- **throws:**
+  - `TypeError: WebviewPanel.postMessage needs JSON-serializable data` for `undefined`, functions, symbols, bigints and cyclic objects.
+  - `TypeError: WebviewPanel.onMessage needs a function` / `WebviewPanel.onClose needs a function`.
+  - `TypeError: WebviewPanel.setTitle needs a non-empty string`.
+- **notes:**
+  - callbacks run with the listener budget like other events; a throwing callback is a fault (logged, counts toward "5 in a row"), the other callbacks still run. a callback that throws inside `close()` makes `close()` throw after all of them ran.
+  - the page can send messages at any rate; a script that does heavy work per message should debounce in the page.
+
+Example:
+
+```ts
+const panel = tg.ui.webview({ title: 'notes', html: notesPage })
+panel.postMessage({ text: tg.storage.get<string>('notes') ?? '' })
+const stop = panel.onMessage<{ text: string }>((data) => tg.storage.set('notes', data.text))
+panel.onClose(() => {
+  stop()
+  tg.toast('notes saved')
+})
+```
+
+### the page side: window.tele
+
+```ts
+interface Window {
+  readonly tele: {
+    postMessage(data: unknown): void
+    onMessage: ((data: unknown) => void) | null
+  }
+}
+```
+
+what the page gets: a `window.tele` bridge and tele's colours. it's injected into every page the panel loads (also into `url` pages), in the top frame only, before the page's own scripts run.
+
+- **grant:** none.
+- **parameters:**
+  - `tele.postMessage(data)`: sends `data` to the script's `onMessage` callbacks. `data` must be json-serializable, otherwise it throws `TypeError: tele.postMessage needs JSON-serializable data`.
+  - `tele.onMessage`: set it to a function to receive the script's `postMessage` data, already parsed. messages that arrived before it was set are kept (up to 1000) and handed over as soon as it is. set it to `null` to stop.
+  - `window` also fires a `tele-message` event (a `CustomEvent`, the data in `event.detail`) for every message, for pages that prefer `addEventListener('tele-message', ...)`. events aren't kept for listeners added later.
+  - css variables on `:root` (as inline styles of the `<html>` element), updated live when tele's theme changes: `--tele-bg` (window background), `--tele-text` (text), `--tele-accent` (buttons and accents), `--tele-secondary-bg` (hovered rows, secondary surfaces), `--tele-hint` (secondary text), `--tele-link` (links and active text). each is `#rrggbb` or `rgba(...)`.
+- **returns:** nothing.
+- **throws:** nothing beyond `tele.postMessage`'s TypeError.
+- **notes:**
+  - errors thrown by `tele.onMessage` or `tele-message` listeners show up in the page's console, they don't stop the bridge.
+  - the page has no other way into tele: no `tg`, no account, no files. anything it needs comes through the script.
+
+Example:
+
+```html
+<style>
+  body { background: var(--tele-bg); color: var(--tele-text); font: 14px system-ui, sans-serif; }
+  button { background: var(--tele-accent); color: var(--tele-bg); border: 0; border-radius: 8px; padding: 8px 14px; }
+</style>
+<textarea id="notes" style="width: 100%; height: 80vh"></textarea>
+<script>
+  const notes = document.getElementById('notes')
+  tele.onMessage = (data) => { notes.value = data.text }
+  notes.addEventListener('input', () => tele.postMessage({ text: notes.value }))
+</script>
 ```
 
 ## menus, buttons and commands
@@ -10451,9 +15680,171 @@ tg.ui.registerMenuItem({ place: 'main', emoji: '📊', text: 'chat stats', onCli
 tg.ui.registerMenuItem({ place: 'tray', emoji: '🌙', text: 'toggle night mode', onClick: () => tg.app.theme.setDark(!tg.app.theme.get().dark) })
 ```
 
+## inline answers
+
+a script can answer inline queries the way an inline bot does: the user types `@<trigger> <query>` in the message field and tele shows the script's results in its own inline results panel, with no network involved. choosing a result sends a normal message from the user (text, a TL media or a file), so sending needs `account.write(send)`; registering needs no grant. inline queries to real bots work as before. what a script registers here goes away when its disposer runs or the script stops.
+
+### tg.registerInline(answerer)
+
+```ts
+registerInline(answerer: InlineAnswerer): Disposer
+```
+
+registers `@<answerer.trigger>` on this account: when the message field starts with `@<trigger>` and a space, tele calls `answerer.results` with the rest of the text and shows what it returns in the inline results panel above the field. clicking a result (or its thumbnail, or right-click > a send option) sends its `message` to the open chat and clears the field.
+
+- **grant:** none to register; `account.write(send)` to send, checked when the user picks a result: without it tele shows a toast and sends nothing.
+- **parameters:**
+  - `answerer` (`InlineAnswerer`): `{ trigger, title?, results }`, see `type InlineAnswerer`.
+- **returns:** `Disposer` that removes the trigger (an open panel for it closes).
+- **throws:**
+  - `TypeError: tg.registerInline({ trigger, title?, results })` without an object with a `results` function.
+  - `TypeError: tg.registerInline: trigger is 2-32 characters of a-z, 0-9 and _, starting with a letter`.
+  - `TypeError: tg.registerInline: title must be a string`.
+  - `TeleError` `forbidden` (`the trigger @calc is taken by "<script>"`) when a running script on this account already registered the trigger.
+- **notes:**
+  - who wins `@calc`: tele first parses the field like it does for bots (`@`, a username that starts with a letter, a space). if tele already knows an inline bot with that username (a bot you used or saw, so it's in tele's cache, including tele's username aliases), the bot answers and the script isn't asked. otherwise the script answers and tele never looks the username up on the server. so a bot you actually use is never hijacked, typing a trigger leaks nothing to Telegram, and a bot you never used with the same name can't be reached while the script runs: pick triggers that aren't bot names (bot usernames end in `bot`).
+  - the trigger is matched case-insensitively (`@Calc 1+1` works); it must be typed with a space after it, `@calc` alone does nothing. message editing doesn't show inline results.
+  - `title` becomes the field's placeholder after `@<trigger> `, like a bot's inline placeholder.
+  - tele waits 400 ms after the last keystroke (like for bots) and asks again for every new query; a query that changes meanwhile is cancelled: `context.signal` aborts and whatever the old call returns is ignored. answers are cached per query until the trigger or the chat changes, so typing a previous query again shows its results at once.
+  - an answer has 2 s. a `results` that throws, returns something that isn't an array or doesn't answer in time shows an empty panel with `@<trigger>: <the error message>` (or `@<trigger>: didn't answer in time`); the error is in the script's log. an empty array (or `null`) hides the panel, like a bot without results.
+  - up to 50 results are shown as rows (title, description, thumbnail); a result that isn't valid (no id, a repeated id, no title, a bad `message`, a `thumb` that isn't bytes) is skipped and logged.
+  - the message is sent with `tg.sendMessage`, `tg.sendMedia` or `tg.sendFile` to the open chat, as a reply when the user is replying to a message of that chat, silent or scheduled when picked from the right-click menu. a send that fails shows a toast with the error. in the scheduled messages section a plain click sends right away.
+  - the panel is the one inline bots use: in a chat and in topics, replies and other compose fields of a window.
+
+Example:
+
+```ts
+// grants: ['account.write(send)']
+tg.registerInline({
+  trigger: 'shrug',
+  title: 'text to shrug at',
+  results: (query) => [
+    { id: 'plain', title: '¯\\_(ツ)_/¯', description: query, message: `${query} ¯\\_(ツ)_/¯`.trim() },
+    { id: 'bold', title: 'bold', description: query, message: md`**${query}** ¯\\_(ツ)_/¯` },
+  ],
+})
+```
+
+### type InlineAnswerer
+
+```ts
+export interface InlineAnswerer {
+  trigger: string
+  title?: string
+  results(
+    query: string,
+    context: InlineQueryContext,
+  ):
+    | readonly InlineResult[]
+    | null
+    | void
+    | Promise<readonly InlineResult[] | null | void>
+}
+```
+
+what `tg.registerInline` takes.
+
+- **parameters:**
+  - `trigger` (`string`): the word after `@`, 2 to 32 characters of `a-z`, `0-9` and `_`, starting with a letter; unique per account.
+  - `title` (`string`, optional): the field placeholder shown after `@<trigger> `.
+  - `results` (`(query, context) => results`): gets the text after `@<trigger> ` (possibly empty) and an `InlineQueryContext`, returns the results (an empty array, `null` or nothing for none), may be async. it's called as a method of `answerer`.
+- **returns:** `InlineResult[]`, see `type InlineResult`.
+
+Example:
+
+```ts
+const notes: InlineAnswerer = {
+  trigger: 'note',
+  title: 'name of a saved note',
+  results(query) {
+    const saved = tg.storage.get<Record<string, string>>('notes') ?? {}
+    return Object.entries(saved)
+      .filter(([name]) => name.startsWith(query))
+      .map(([name, text]) => ({ id: name, title: name, description: text, message: text }))
+  },
+}
+tg.registerInline(notes)
+```
+
+### type InlineQueryContext
+
+```ts
+export interface InlineQueryContext {
+  readonly chat: bigint
+  readonly signal: AbortSignal
+}
+```
+
+the second argument of `InlineAnswerer.results`.
+
+- **values:**
+  - `chat` (`bigint`): the marked id of the chat whose field is being typed in; an `InputPeerLike`.
+  - `signal` (`AbortSignal`): aborts when the query changes, the trigger is erased or the 2 s run out. pass it to `fetch` or check `signal.aborted` in long work.
+
+Example:
+
+```ts
+// grants: ['account.write(send)', 'fetch(api.example.com)']
+tg.registerInline({
+  trigger: 'wiki',
+  async results(query, { signal }) {
+    if (!query) return []
+    const response = await fetch(`https://api.example.com/search?q=${encodeURIComponent(query)}`, { signal })
+    const pages = (await response.json()) as { title: string, url: string }[]
+    return pages.map((page) => ({ id: page.url, title: page.title, description: page.url, message: page.url }))
+  },
+})
+```
+
+### type InlineResult
+
+```ts
+export interface InlineMediaMessage {
+  media: Uint8Array | tl.TypeInputMedia
+  caption?: InputText
+}
+
+export interface InlineResult {
+  id: string
+  title: string
+  description?: string
+  thumb?: Uint8Array
+  message: InputText | InlineMediaMessage
+}
+```
+
+one row of the panel and what it sends.
+
+- **values:**
+  - `id` (`string`): non-empty, unique within one answer.
+  - `title` (`string`): the bold first line (up to two lines shown).
+  - `description` (`string`, optional): the grey text under the title.
+  - `thumb` (`Uint8Array`, optional): image bytes in any format tele reads (png, jpeg, webp, gif, bmp...), up to 4 MB; scaled down to 160 px and shown from memory. without it the row has no picture.
+  - `message` (`InputText | InlineMediaMessage`): what choosing the row sends: a string or `TextWithEntities` (`md`/`html`) as a text message; `{ media, caption? }` with a TL `InputMedia` (sent with `tg.sendMedia`) or raw bytes (uploaded with `tg.sendFile`: jpeg and png go as a photo, gif as `animation.gif`, mp4 as `video.mp4`, anything else as a file named `file`). a text must not be empty.
+
+Example:
+
+```ts
+// grants: ['account.write(send)']
+tg.registerInline({
+  trigger: 'roll',
+  title: 'dice, darts or a picture',
+  async results() {
+    const pixels = new Uint8Array(32 * 32 * 4).fill(200)
+    const square = await tg.image.fromPixels({ width: 32, height: 32, data: pixels })
+    const list: InlineResult[] = [
+      { id: 'dice', title: '🎲', message: { media: { _: 'inputMediaDice', emoticon: '🎲' } } },
+      { id: 'darts', title: '🎯', message: { media: { _: 'inputMediaDice', emoticon: '🎯' } } },
+      { id: 'square', title: 'a grey square', thumb: square, message: { media: square, caption: 'grey' } },
+    ]
+    return list
+  },
+})
+```
+
 ## navigation and compose
 
-moving around this account's window and working with the text the user is typing. navigation needs no grant; the compose field is a draft, so it uses the `draft` scopes of `account.read` and `account.write`.
+moving around this account's window and working with the text the user is typing. navigation, banners and the message selection need no grant; the compose field's text is a draft, so reading and changing it uses the `draft` scopes of `account.read` and `account.write`, while its reply, attachments and send options have their own rules (see each item).
 
 a note on peers: these methods take any `InputPeerLike`. a `PeerInfo` (like `ctx.chat` in menus and buttons), a `Message`, `'me'` or a TL input peer work without extra grants; a bare marked id or a username is looked up through `tg.peers` and so needs `account.read(peers)`.
 
@@ -10639,15 +16030,206 @@ tg.ui.onChatOpened(({ chat }) => {
 })
 ```
 
+### tg.ui.banner(options)
+
+```ts
+banner(options: BannerOptions): Disposer
+```
+
+shows a bar above the messages of a chat, like tele's own "add contact" or join-requests bars: an optional emoji, the text, up to three buttons and a close button. several banners in one chat stack in the order they were made. with `place: 'chats'` the bar goes above the chat list instead, see `tg.ui.banner({ place: 'chats' })`.
+
+- **grant:** none.
+- **parameters:**
+  - `options` (`BannerOptions`): `place: 'chat'`, the `chat`, the `text`, and optionally `icon`, `buttons`, `closable`, `onClose`. see `type BannerOptions`.
+- **returns:** `Disposer` that removes the banner (without calling `onClose`).
+- **throws:**
+  - `TypeError: tg.ui.banner(options)` for a non-object.
+  - `TypeError: tg.ui.banner: place must be 'chat' or 'chats'`.
+  - `TypeError: tg.ui.banner: place 'chat' needs a chat`.
+  - `TypeError: tg.ui.banner: text must be a non-empty string`.
+  - `TypeError: tg.ui.banner: icon must be a string`.
+  - `TypeError: tg.ui.banner: buttons must be an array of { text, onClick }` (more than three buttons, an empty text or a missing `onClick` included).
+  - `TypeError: tg.ui.banner: onClose must be a function`.
+- **notes:**
+  - the banner shows wherever that chat's messages are on screen in this account: the main chat view and the chat's topic, replies and saved-sublist views (not the scheduled messages view). it appears as soon as the chat is opened and stays until it's disposed, closed or the script stops; it doesn't need the chat to be open when you make it.
+  - `chat` takes any `InputPeerLike`. a marked id, `'me'`, a `PeerInfo`, a `Message` or a TL peer work without a lookup and without grants; a username is resolved in the background (which needs `account.read(peers)`), and a failure is logged instead of thrown.
+  - the text is plain (no markdown) and wraps. a button click doesn't close the banner; the close button (shown unless `closable: false`) removes it and then calls `onClose`.
+  - button and close callbacks run on the next event-loop turn with the 200 ms budget.
+
+Example:
+
+```ts
+tg.registerChatAction({
+  id: 'remind',
+  text: 'pin a reminder bar',
+  onClick: (ctx) => {
+    const hide = tg.ui.banner({
+      place: 'chat',
+      chat: ctx.chat,
+      icon: '⏰',
+      text: 'reply to the invoice before friday',
+      buttons: [
+        { text: 'open settings', onClick: () => tg.ui.openSettings('tele') },
+        { text: 'done', onClick: () => hide() },
+      ],
+      onClose: () => tg.toast('reminder dismissed'),
+    })
+  },
+})
+```
+
+### type BannerOptions
+
+```ts
+export interface BannerButton {
+  text: string
+  onClick(): unknown
+}
+
+export interface BannerOptions {
+  place: 'chat' | 'chats'
+  chat?: InputPeerLike
+  text: string
+  icon?: string
+  buttons?: BannerButton[]
+  closable?: boolean
+  onClose?(): unknown
+}
+```
+
+what `tg.ui.banner` takes, for both places.
+
+- **fields:**
+  - `place` (`'chat' | 'chats'`): `'chat'` puts the bar above a chat's messages, `'chats'` above the chat list.
+  - `chat` (`InputPeerLike`, optional): which chat, required for `'chat'`, ignored for `'chats'`.
+  - `text` (`string`): the text, plain, trimmed, not empty.
+  - `icon` (`string`, optional): an emoji drawn before the text.
+  - `buttons` (`BannerButton[]`, optional): up to three buttons on the right, each `{ text, onClick }`. `onClick` gets no arguments; return a promise if you like, nothing waits for it.
+  - `closable` (`boolean`, optional): `false` hides the close button. `true` by default.
+  - `onClose` (`() => unknown`, optional): called after the user closed the banner with its close button. disposing it yourself doesn't call it.
+
+Example:
+
+```ts
+const options: BannerOptions = { place: 'chat', chat: 'me', text: 'notes to self live here', closable: false }
+tg.ui.banner(options)
+```
+
+### tg.ui.banner({ place: 'chats' })
+
+```ts
+banner(options: BannerOptions): Disposer
+```
+
+with `place: 'chats'`, shows a bar above the chat list of this account's windows: an optional emoji, the text, up to three buttons and a close button. see `tg.ui.banner(options)` for the in-chat bar and `type BannerOptions` for the fields.
+
+- **grant:** none.
+- **parameters:**
+  - `options` (`BannerOptions`): `place: 'chats'`, `text`, and optionally `icon`, `buttons`, `closable`, `onClose`. `chat` is ignored.
+- **returns:** `Disposer` that removes the banner (without calling `onClose`).
+- **throws:**
+  - `TypeError: tg.ui.banner: text must be a non-empty string`.
+  - `TypeError: tg.ui.banner: icon must be a string`.
+  - `TypeError: tg.ui.banner: buttons must be an array of { text, onClick }` (more than three buttons, an empty text or a missing `onClick` included).
+  - `TypeError: tg.ui.banner: onClose must be a function`.
+- **notes:**
+  - the text is plain (no markdown) and wraps; the buttons wrap to more lines when the list is narrow.
+  - a button click doesn't close the banner. the close button (shown unless `closable: false`) removes it and then calls `onClose`.
+  - the banners hide while a search is open in the chat list and come back when it closes. several banners stack in the order they were made, above tele's own list (and below tele's suggestion bars).
+  - every window of the account shows the banner, the chat lists of folders and forums too; a narrow chat list beside a forum doesn't.
+
+Example:
+
+```ts
+const banner = tg.ui.banner({
+  place: 'chats',
+  icon: '🧹',
+  text: 'you have 12 unread channels older than a month',
+  buttons: [{ text: 'review', onClick: () => tg.ui.openChat('me') }],
+  onClose: () => tg.storage.set('cleanupDismissed', true),
+})
+setTimeout(() => banner(), 3_600_000)
+```
+
+### tg.ui.selection()
+
+```ts
+selection(): MessageSelection | null
+```
+
+tells which messages the user has selected (with a click on a message's check, or by dragging across messages) in this account's window.
+
+- **grant:** none.
+- **returns:** `{ chatId, ids }` (see `type MessageSelection`) for the selection in the chat on screen, or `null` when nothing is selected.
+- **notes:**
+  - only whole-message selection counts; text selected inside one message isn't reported.
+  - ids only: read the messages with `tg.getMessages` / `tg.getCachedMessage` (which need `account.read(messages)`).
+  - secret chats are never reported.
+
+Example:
+
+```ts
+tg.registerShortcut('Ctrl+Shift+C', async () => {
+  const selected = tg.ui.selection()
+  if (!selected) return tg.toast('select some messages first')
+  const messages = await tg.getMessages(selected.chatId, selected.ids)
+  tg.clipboard.write(messages.map((message) => message?.text ?? '').join('\n'))
+})
+```
+
+### tg.ui.onSelectionChanged(callback)
+
+```ts
+onSelectionChanged(callback: (selection: MessageSelection | null) => unknown): Disposer
+```
+
+calls `callback` when the message selection in this account's window changes: messages selected or unselected, the selection cleared, or the view holding it closed.
+
+- **grant:** none.
+- **parameters:**
+  - `callback` (`(selection) => unknown`): gets the selection after the change, like `tg.ui.selection()` returns it, `null` once nothing is selected. runs on the next event-loop turn with the 200 ms budget; quick changes (dragging across messages) are merged into one call.
+- **returns:** `Disposer` that stops the calls.
+- **throws:** `TypeError: tg.ui.onSelectionChanged(function)`.
+
+Example:
+
+```ts
+tg.ui.onSelectionChanged((selection) => {
+  tg.app.window.setBadge(selection ? selection.ids.length : null)
+})
+```
+
+### type MessageSelection
+
+```ts
+export interface MessageSelection {
+  chatId: bigint
+  ids: number[]
+}
+```
+
+a selection of messages in one chat.
+
+- **fields:**
+  - `chatId` (`bigint`): the chat (marked id).
+  - `ids` (`number[]`): the selected message ids, ascending, never empty.
+
+Example:
+
+```ts
+const selection: MessageSelection | null = tg.ui.selection()
+if (selection) console.log(`${selection.ids.length} selected in ${selection.chatId}`)
+```
+
 ### tg.compose
 
 ```ts
 readonly compose: Compose
 ```
 
-the compose field (the message input at the bottom of a chat). see `type Compose` and the four methods below.
+the compose field (the message input at the bottom of a chat). see `type Compose` and the methods below.
 
-- **grant:** `account.read(draft)` to read and listen, `account.write(draft)` to change.
+- **grant:** `account.read(draft)` to read the text and listen to it, `account.write(draft)` to change it. the field's state, reply, attachments and `sendAs` need nothing, `silent` needs `account.write(notify)` and `interceptPaste` needs `interceptDrop`.
 - **notes:**
   - without a `peer` argument the methods work on the open chat's field. with one, they work on that chat's field if it's open somewhere (the main chat view, a topic or another section); otherwise there's no field and they return `null` / `false`.
   - this is the live field, not the cloud draft. for saved drafts of chats that aren't open see `tg.local.draft` and `tg.setDraft`.
@@ -10668,15 +16250,33 @@ export interface Compose {
   insert(text: InputText, peer?: InputPeerLike): Promise<boolean>
   onInput(callback: (input: { chatId: bigint, text: string }) => unknown): Disposer
 }
+
+export interface Compose {
+  state(peer?: InputPeerLike): Promise<ComposeState | null>
+  onStateChange(callback: (state: ComposeState) => unknown): Disposer
+  setReply(messageId: number | null, peer?: InputPeerLike): Promise<boolean>
+  attach(files: AttachFile[], peer?: InputPeerLike): Promise<boolean>
+  setSendOptions(
+    options: { silent?: boolean, sendAs?: InputPeerLike },
+    peer?: InputPeerLike,
+  ): Promise<boolean>
+  interceptPaste(interceptor: PasteInterceptor): Disposer
+}
 ```
 
-the type of `tg.compose`.
+the type of `tg.compose`; the second block is interface merging, added with the reply, attachment, send-option and paste members.
 
 - **fields:**
   - `get` (`(peer?) => Promise<{ chatId, text } | null>`): read the field, see `tg.compose.get`.
   - `set` (`(text, peer?) => Promise<boolean>`): replace the field's text, see `tg.compose.set`.
   - `insert` (`(text, peer?) => Promise<boolean>`): insert at the cursor, see `tg.compose.insert`.
   - `onInput` (`(callback) => Disposer`): listen to changes, see `tg.compose.onInput`.
+  - `state` (`(peer?) => Promise<ComposeState | null>`): the field's reply, edit, forward and send options, see `tg.compose.state`.
+  - `onStateChange` (`(callback) => Disposer`): follow that state, see `tg.compose.onStateChange`.
+  - `setReply` (`(messageId, peer?) => Promise<boolean>`): set or clear the reply, see `tg.compose.setReply`.
+  - `attach` (`(files, peer?) => Promise<boolean>`): open the send box with files, see `tg.compose.attach`.
+  - `setSendOptions` (`(options, peer?) => Promise<boolean>`): silent posting and the send-as peer, see `tg.compose.setSendOptions`.
+  - `interceptPaste` (`(interceptor) => Disposer`): handle what is pasted into the field, see `tg.compose.interceptPaste`.
 
 Example:
 
@@ -10787,6 +16387,1078 @@ tg.compose.onInput(async ({ chatId, text }) => {
   let next = text
   for (const [key, value] of Object.entries(snippets)) next = next.replaceAll(key, value)
   if (next !== text) await tg.compose.set(next, chatId)
+})
+```
+
+### tg.compose.state(peer?)
+
+```ts
+state(peer?: InputPeerLike): Promise<ComposeState | null>
+```
+
+reads what the compose field is set up to do: the message it replies to or edits, the forwarded messages waiting under it, silent sending and the "send as" choice.
+
+- **grant:** none. the result has ids only; reading those messages needs `account.read(messages)`, the text in the field needs `account.read(draft)` (`tg.compose.get`).
+- **parameters:**
+  - `peer` (`InputPeerLike`, optional): whose field. the open chat's by default.
+- **returns:** `Promise<ComposeState | null>`, `null` when there's no such field (no chat open, the chat isn't open anywhere, or a secret chat). see `type ComposeState`.
+- **notes:** a marked id, `'me'`, a `PeerInfo`, a `Message` or a TL peer work without a lookup; a username is resolved through `tg.peers`.
+
+Example:
+
+```ts
+const state = await tg.compose.state()
+if (state?.replyTo) {
+  const message = await tg.getCachedMessage(state.replyTo.chatId, state.replyTo.messageId)
+  console.log(`replying to: ${message?.text ?? 'a message tele has not loaded'}`)
+}
+```
+
+### type ComposeState
+
+```ts
+export interface ComposeState {
+  chatId: bigint
+  replyTo: { chatId: bigint, messageId: number } | null
+  editing: number | null
+  silent: boolean
+  scheduled: boolean
+  sendAs: bigint | null
+  attached: number
+}
+```
+
+the state of one compose field.
+
+- **fields:**
+  - `chatId` (`bigint`): the field's chat (marked id).
+  - `replyTo` (`{ chatId, messageId } | null`): the message the next send replies to; `chatId` differs from the field's chat for a reply to another chat. `null` without a reply.
+  - `editing` (`number | null`): the id of the message being edited, `null` when not editing.
+  - `silent` (`boolean`): `true` when posts in this channel go out without sound (the bell in the field). always `false` outside channels.
+  - `scheduled` (`boolean`): `true` for the field of the scheduled messages view, where everything sent is scheduled.
+  - `sendAs` (`bigint | null`): the marked id of the peer messages are sent as, when the chat offers a choice (anonymous admins, channels you own); `null` when it doesn't.
+  - `attached` (`number`): how many messages are waiting under the field to be forwarded with the next send (the forward bar), `0` for none.
+
+Example:
+
+```ts
+const state = await tg.compose.state()
+if (state?.editing) tg.toast(`editing message ${state.editing}`)
+```
+
+### tg.compose.onStateChange(callback)
+
+```ts
+onStateChange(callback: (state: ComposeState) => unknown): Disposer
+```
+
+calls `callback` when the state of any compose field of this account changes: a reply set or cancelled, editing started or finished, messages added to or removed from the forward bar, silent sending toggled, another "send as" picked.
+
+- **grant:** none.
+- **parameters:**
+  - `callback` (`(state: ComposeState) => unknown`): gets the field's new state. runs on the next event-loop turn with the 200 ms budget.
+- **returns:** `Disposer` that stops the calls.
+- **throws:** `TypeError: tg.compose.onStateChange(function)`.
+- **notes:** it doesn't fire for typing (use `tg.compose.onInput`), nor for the state fields already had when you subscribed. switching chats can fire it for the field that now shows another chat.
+
+Example:
+
+```ts
+tg.compose.onStateChange((state) => {
+  if (state.replyTo) console.log(`replying in ${state.chatId} to ${state.replyTo.messageId}`)
+})
+```
+
+### tg.compose.setReply(messageId, peer?)
+
+```ts
+setReply(messageId: number | null, peer?: InputPeerLike): Promise<boolean>
+```
+
+makes a compose field reply to a message of its chat, like "reply" in the message menu, or cancels the reply.
+
+- **grant:** none.
+- **parameters:**
+  - `messageId` (`number | null`): a message id in the field's chat, or `null` to cancel the reply.
+  - `peer` (`InputPeerLike`, optional): whose field, the open chat's by default.
+- **returns:** `Promise<boolean>`: `true` when the field took the request, `false` when there's no field or tele hasn't loaded that message.
+- **throws:** rejects with `TypeError: tg.compose.setReply: messageId must be a positive integer or null`.
+- **notes:** it goes through the same path as "reply" in the message menu, so tele's own rules apply: in a chat you can't write to it offers to reply in another chat instead.
+
+Example:
+
+```ts
+tg.onNewMessage(async (message) => {
+  const { chatId } = tg.ui.current()
+  if (message.mentioned && chatId === message.chatId) await tg.compose.setReply(message.id)
+})
+```
+
+### tg.compose.attach(files, peer?)
+
+```ts
+attach(files: AttachFile[], peer?: InputPeerLike): Promise<boolean>
+```
+
+opens tele's "send files" box for a chat with the given files, as if they were pasted or dropped: the user still picks the options, adds a caption and presses send.
+
+- **grant:** none.
+- **parameters:**
+  - `files` (`AttachFile[]`): 1 to 100 files, each `{ name, bytes }`. images become photos, videos videos and the rest documents, like tele decides for a drop.
+  - `peer` (`InputPeerLike`, optional): which chat, the open one by default. it needs a chat view with a field: the main chat view, a topic or replies.
+- **returns:** `Promise<boolean>`: `true` when the box opened, `false` when there's no field for that chat or tele refused the files (it shows its own error then, for example when the chat doesn't allow media).
+- **throws:** rejects with a `TypeError` for anything but a non-empty array of `{ name, bytes }` with non-empty names and bytes (`Uint8Array` or `ArrayBuffer`), or more than 100 files.
+- **notes:** the files are prepared in the background (previews, video info); the promise resolves when the box is shown.
+
+Example:
+
+```ts
+tg.registerButton({
+  place: 'compose',
+  icon: '📊',
+  tooltip: 'attach a report',
+  onClick: async (ctx) => {
+    const csv = new TextEncoder().encode('day,messages\nmonday,42\n')
+    await tg.compose.attach([{ name: 'report.csv', bytes: csv }], ctx.chat)
+  },
+})
+```
+
+### type AttachFile
+
+```ts
+export interface AttachFile {
+  name: string
+  bytes: Uint8Array | ArrayBuffer
+}
+```
+
+a file a script hands to tele's send box.
+
+- **fields:**
+  - `name` (`string`): the file name shown and sent (its extension tells tele the type of a document).
+  - `bytes` (`Uint8Array | ArrayBuffer`): the content, not empty.
+
+Example:
+
+```ts
+const file: AttachFile = { name: 'hello.txt', bytes: new TextEncoder().encode('hello') }
+await tg.compose.attach([file])
+```
+
+### tg.compose.setSendOptions(options, peer?)
+
+```ts
+setSendOptions(
+  options: { silent?: boolean, sendAs?: InputPeerLike },
+  peer?: InputPeerLike,
+): Promise<boolean>
+```
+
+changes how the next messages in a chat are sent: silently, or as another peer.
+
+- **grant:** none for `sendAs`; `account.write(notify)` for `silent`, because silent posting is a notification setting of the channel kept on the server (the bell in the field).
+- **parameters:**
+  - `options.silent` (`boolean`, optional): post silently in a channel you can post in.
+  - `options.sendAs` (`InputPeerLike`, optional): send as this peer; it has to be one of the choices the chat offers (yourself, the group, channels you own).
+  - `peer` (`InputPeerLike`, optional): which chat, the open one by default.
+- **returns:** `Promise<boolean>`: `true` when applied, `false` without a chat.
+- **throws:**
+  - rejects with `TypeError: tg.compose.setSendOptions({ silent?, sendAs? })`, `TypeError: tg.compose.setSendOptions: silent must be a boolean` or `TypeError: tg.compose.setSendOptions needs silent or sendAs`.
+  - rejects with `TeleError` `not-granted` for `silent` without the grant.
+  - rejects with `TeleError` `unsupported` for `silent` outside a channel you post in.
+  - rejects with `TeleError` `not-found` when the chat doesn't offer sending as that peer, `forbidden` when that choice needs telegram premium.
+- **notes:** `sendAs` is picked for this tele session, like the menu next to the field, but it isn't saved on the server as the chat's default.
+
+Example:
+
+```ts
+const myChannel = -1001234567890n
+tg.ui.onChatOpened(async ({ chat }) => {
+  if (chat?.kind === 'supergroup') await tg.compose.setSendOptions({ sendAs: myChannel }).catch(() => {})
+})
+```
+
+### tg.compose.interceptPaste(interceptor)
+
+```ts
+interceptPaste(interceptor: PasteInterceptor): Disposer
+
+export type PasteInterceptor = (
+  paste: PasteInfo,
+) => PasteVerdict | null | void | Promise<PasteVerdict | null | void>
+```
+
+sees what is pasted (or dropped) into a message field before it lands there: text, an image from the clipboard, copied files. the interceptor keeps it, drops it, replaces it with other text, or turns it into files for the send box.
+
+- **grant:** `interceptDrop` (caution, "see the files and text you drop or paste into chats and handle them instead of tele"): pasted text can be anything the user copied, passwords included.
+- **parameters:**
+  - `interceptor` (`PasteInterceptor`): gets a `PasteInfo` (see `type PasteInfo`), answers a `PasteVerdict` (see `type PasteVerdict`). may be async.
+- **returns:** `Disposer` that removes the interceptor.
+- **throws:**
+  - `TypeError: tg.compose.interceptPaste(function)`.
+  - `TeleError` `not-granted` without the grant.
+- **notes:**
+  - while interceptors run, tele holds a copy of the pasted data; on `'keep'` it inserts it exactly as it came (formatting included), so tele's own handling follows: an image or files still open the send box, a long text still offers to go as a file, and `tg.interceptDrop` interceptors still see images and files.
+  - several interceptors (of all scripts) run one after another in the order they were registered; the first answer other than `'keep'` wins.
+  - fails open: a throw, a wrong value (`TypeError: an interceptor returns 'keep', 'drop', { text }, { files } or nothing`, logged) or 2 s keeps the paste. keep interceptors quick: the paste shows up only after they answer.
+  - the text lands at the cursor as it is when the answer comes; if the field shows another chat by then, nothing is inserted. secret chats are never intercepted.
+
+Example:
+
+```ts
+tg.compose.interceptPaste((paste) => {
+  if (paste.kind !== 'text') return 'keep'
+  const clean = paste.text.replace(/[?&](utm_[a-z]+|fbclid|gclid)=[^&\s]*/g, '')
+  return clean === paste.text ? 'keep' : { text: clean }
+})
+```
+
+### type PasteInfo
+
+```ts
+export interface PasteInfo {
+  chatId: bigint
+  kind: 'text' | 'image' | 'files'
+  text: string
+  files: { name: string, path: string, size: number }[]
+}
+```
+
+what a paste interceptor receives, a frozen object.
+
+- **fields:**
+  - `chatId` (`bigint`): the chat whose field gets the paste (marked id).
+  - `kind` (`'text' | 'image' | 'files'`): `'files'` when local files were copied, `'image'` for an image (a screenshot from the clipboard), `'text'` otherwise.
+  - `text` (`string`): the plain text of the paste, `''` when there's none. copied files often carry their paths as text.
+  - `files` (`{ name: string, path: string, size: number }[]`): the copied local files: name, full path, size in bytes. the pixels of an image and the contents of files aren't passed.
+
+Example:
+
+```ts
+tg.compose.interceptPaste((paste) => {
+  console.log(`${paste.kind} paste into ${paste.chatId}: ${paste.text.length} chars, ${paste.files.length} files`)
+})
+```
+
+### type PasteVerdict
+
+```ts
+export type PasteVerdict = 'keep' | 'drop' | { text: string } | { files: AttachFile[] }
+```
+
+what a paste interceptor answers.
+
+- **values:**
+  - `'keep'` (or nothing): the next interceptor runs; after the last one tele inserts the paste as usual.
+  - `'drop'`: nothing is inserted; later interceptors don't run.
+  - `{ text }`: this text is inserted at the cursor instead (plain, no formatting); `''` inserts nothing.
+  - `{ files }`: nothing is inserted and tele's send box opens with these files, like `tg.compose.attach`.
+
+Example:
+
+```ts
+tg.compose.interceptPaste((paste) => {
+  const match = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=]+)$/.exec(paste.text.trim())
+  if (paste.kind !== 'text' || !match) return 'keep'
+  const bytes = Uint8Array.from(atob(match[2]), (char) => char.charCodeAt(0))
+  return { files: [{ name: `pasted.${match[1]}`, bytes }] }
+})
+```
+
+## search
+
+two ways into the search in the chat list: a provider adds its own block of results above tele's, and an interceptor filters or reorders the messages tele found before they show. both cover the chat-list search, including "search in this chat" there (the provider then gets the chat's id); the search bar inside an opened chat isn't covered. what a script registers here goes away when it stops.
+
+### tg.ui.registerSearchProvider(provider)
+
+```ts
+registerSearchProvider(provider: SearchProvider): Disposer
+```
+
+adds a block titled `provider.title` to the chat-list search results of this account: while the user types, tele calls `provider.search` with the query and shows what it returns above its own chats and messages. a result can open a chat (or a message in it), run a callback, or both.
+
+- **grant:** none. a result's `peer` given as a username is resolved through `tg.peers.resolve` and so needs `account.read(peers)`; `'me'`, a marked id tele has in its cache, a `PeerInfo`, a `Message` or a TL input peer need nothing.
+- **parameters:**
+  - `provider` (`SearchProvider`): `{ title, search }`, see `type SearchProvider`.
+- **returns:** `Disposer` that removes the provider and its block.
+- **throws:**
+  - `TypeError: tg.ui.registerSearchProvider({ title, search })` without an object with a `search` function.
+  - `TypeError: tg.ui.registerSearchProvider: title must be a non-empty string`.
+- **notes:**
+  - tele waits 300 ms after the last keystroke before asking, and asks again for every new query (or chat). a query that has changed meanwhile is cancelled: `context.signal` aborts and whatever the old call returns is ignored.
+  - an answer has 2 s. a provider that throws, returns something that isn't an array or doesn't answer in time shows no block for that query; the error is in the script's log.
+  - an empty query (or clearing the search) removes all blocks. the query is trimmed.
+  - up to 20 results per provider are shown; a result that isn't valid (no title, a wrong `messageId`, ...) is skipped and logged.
+  - several providers show their blocks in the order they were registered. a provider registered while a search is open runs at once.
+  - the block sits above tele's own results; arrow keys and Enter don't reach it, the mouse does.
+
+Example:
+
+```ts
+tg.ui.registerSearchProvider({
+  title: 'calc',
+  search(query) {
+    const match = /^(-?\d+(?:\.\d+)?)\s*([+\-*/])\s*(-?\d+(?:\.\d+)?)$/.exec(query)
+    if (!match) return []
+    const [, left, operator, right] = match
+    const a = Number(left)
+    const b = Number(right)
+    const value = operator === '+' ? a + b : operator === '-' ? a - b : operator === '*' ? a * b : a / b
+    return [{ title: String(value), subtitle: query, onClick: () => tg.toast(`${query} = ${value}`) }]
+  },
+})
+```
+
+### type SearchProvider
+
+```ts
+export interface SearchProvider {
+  title: string
+  search(
+    query: string,
+    context: SearchProviderContext,
+  ):
+    | readonly SearchProviderResult[]
+    | null
+    | void
+    | Promise<readonly SearchProviderResult[] | null | void>
+}
+```
+
+what `tg.ui.registerSearchProvider` takes.
+
+- **parameters:**
+  - `title` (`string`): the header of the provider's block, up to 64 characters.
+  - `search` (`(query, context) => results`): gets the trimmed query and a `SearchProviderContext`, returns the results (an empty array, `null` or nothing for none), may be async. it's called as a method of `provider`.
+- **returns:** `SearchProviderResult[]`, see `type SearchProviderResult`.
+
+Example:
+
+```ts
+const notes: SearchProvider = {
+  title: 'notes',
+  async search(query, { signal }) {
+    const saved = tg.storage.get<Record<string, string>>('notes') ?? {}
+    await new Promise<void>((resolve) => setTimeout(resolve, 100))
+    if (signal.aborted) return []
+    return Object.entries(saved)
+      .filter(([name]) => name.includes(query))
+      .map(([name, text]) => ({ title: name, subtitle: text }))
+  },
+}
+tg.ui.registerSearchProvider(notes)
+```
+
+### type SearchProviderContext
+
+```ts
+export interface SearchProviderContext {
+  readonly chatId?: bigint
+  readonly signal: AbortSignal
+}
+```
+
+the second argument of `SearchProvider.search`.
+
+- **values:**
+  - `chatId` (`bigint`, optional): the marked id of the chat when the user searches inside one chat from the chat list ("search in this chat"); missing for a global search.
+  - `signal` (`AbortSignal`): aborts when the query changes, the search closes or the 2 s run out. pass it to `fetch` or check `signal.aborted` in long work.
+
+Example:
+
+```ts
+tg.ui.registerSearchProvider({
+  title: 'this chat',
+  search: (query, { chatId }) => (chatId === undefined ? [] : [{ title: `"${query}" in ${chatId}`, peer: chatId }]),
+})
+```
+
+### type SearchProviderResult
+
+```ts
+export interface SearchProviderResult {
+  title: string
+  subtitle?: string
+  peer?: InputPeerLike
+  messageId?: number
+  onClick?(): unknown
+}
+```
+
+one row of a provider's block.
+
+- **values:**
+  - `title` (`string`): the first line, bold; must not be empty.
+  - `subtitle` (`string`, optional): the second line, grey.
+  - `peer` (`InputPeerLike`, optional): shows the chat's userpic, and a click opens that chat. a peer tele can't resolve is dropped (logged) and the row stays.
+  - `messageId` (`number`, optional): with `peer`, the click opens the chat at this message.
+  - `onClick` (`() => unknown`, optional): runs on a click (after opening `peer`, if any); may be async, errors go to the log.
+
+Example:
+
+```ts
+tg.ui.registerSearchProvider({
+  title: 'shortcuts',
+  search: (query) => ('saved'.startsWith(query.toLowerCase()) ? [{ title: 'Saved Messages', subtitle: 'open', peer: 'me' }] : []),
+})
+```
+
+### tg.interceptSearch(interceptor)
+
+```ts
+interceptSearch(interceptor: SearchInterceptor): Disposer
+```
+
+sees every page of messages tele's chat-list message search finds in this account (global, in one chat, public posts) before they show, and decides which of them show and in which order.
+
+- **grant:** `account.read(messages)`.
+- **parameters:**
+  - `interceptor` (`SearchInterceptor`): gets a `SearchInterception` and returns the results to show, see `type SearchInterceptor`.
+- **returns:** `Disposer` that removes the interceptor.
+- **throws:**
+  - `TypeError: tg.interceptSearch(function)`.
+  - `TeleError` `not-granted` without the grant.
+- **notes:**
+  - it runs once per page: the first page and every page loaded while scrolling. the list keeps loading while it runs.
+  - fails open: a throw, a wrong value (`TypeError: an interceptor returns the results to show or nothing`, `TypeError: an interceptor returns entries of results only`) or 2 s without an answer shows the page as tele found it.
+  - several interceptors (of this script, then of later scripts) run one after another; each gets what the previous one kept.
+  - the "N messages found" counter keeps the server's number.
+  - a message found by its link (pasted `t.me/...` link) isn't passed and always shows.
+
+Example:
+
+```ts
+tg.interceptSearch(({ results }) => results.filter((message) => !/#spoiler/i.test(message.text)))
+```
+
+### type SearchInterceptor
+
+```ts
+export type SearchInterceptor = (
+  search: SearchInterception,
+) =>
+  | readonly SearchedMessage[]
+  | null
+  | void
+  | Promise<readonly SearchedMessage[] | null | void>
+```
+
+the function `tg.interceptSearch` calls.
+
+- **parameters:**
+  - `search` (`SearchInterception`): the query and this page's messages, see `type SearchInterception`.
+- **returns:**
+  - an array of entries of `search.results`: only these show, in this order (filter to drop, sort to reorder; duplicates show once). an entry may also be a copy with the same `chatId` and `id`.
+  - `null` / `undefined` (nothing): the page shows unchanged.
+  - or a promise of one of these.
+
+Example:
+
+```ts
+const newestFirst: SearchInterceptor = ({ results }) => results.toSorted((a, b) => b.date.getTime() - a.date.getTime())
+tg.interceptSearch(newestFirst)
+```
+
+### type SearchInterception
+
+```ts
+export interface SearchInterception {
+  readonly query: string
+  readonly chatId?: bigint
+  readonly results: SearchedMessage[]
+}
+```
+
+what a search interceptor gets.
+
+- **values:**
+  - `query` (`string`): the query as tele searched it.
+  - `chatId` (`bigint`, optional): the chat when the search runs inside one chat.
+  - `results` (`SearchedMessage[]`): this page's messages in tele's order.
+
+Example:
+
+```ts
+tg.interceptSearch(({ query, results }) => {
+  console.log(`'${query}': ${results.length} messages on this page`)
+})
+```
+
+### type SearchedMessage
+
+```ts
+export interface SearchedMessage {
+  readonly chatId: bigint
+  readonly id: number
+  readonly text: string
+  readonly date: Date
+  readonly fromId: bigint
+}
+```
+
+one message found by tele's search.
+
+- **values:**
+  - `chatId` (`bigint`): the marked id of the message's chat.
+  - `id` (`number`): the message id in that chat.
+  - `text` (`string`): the plain text (caption for media), empty when there is none.
+  - `date` (`Date`): when it was sent.
+  - `fromId` (`bigint`): the marked id of the sender (the chat itself for channel posts).
+
+Example:
+
+```ts
+tg.interceptSearch(({ results }) => results.filter((message) => message.fromId !== 777000n))
+```
+
+## sticker and gif panels
+
+scripts can add their own content to the panel next to the message field: a sticker set in the stickers tab, a set of custom emoji in the emoji tab, and results in the GIF tab's search. registering needs no grant. picking a script sticker or GIF sends a real message as you, so it needs `account.write(send)`, checked when the user clicks: without it tele shows a toast and sends nothing. stickers and GIFs can be TL documents (sent as they are) or raw files: a file is shown right away from memory and uploaded on its first click (`messages.uploadMedia` to Saved Messages' peer, nothing is posted), then sent like any sticker or GIF; later clicks reuse the upload. everything a script adds disappears when its disposer runs or the script stops.
+
+### tg.ui.registerStickerSet(options)
+
+```ts
+registerStickerSet(options: PanelStickerSetOptions): Disposer
+
+export interface PanelStickerSetOptions {
+  title: string
+  icon?: number
+  stickers(): PanelSticker[] | Promise<PanelSticker[]>
+}
+```
+
+adds a sticker set to the stickers tab of this account's panel: a section with the set's title after your installed sets, and a tab in the footer. clicking a sticker sends it to the open chat like any sticker (as a reply when you're replying).
+
+- **grant:** none to register; `account.write(send)` to send (checked on click, a toast explains when it's missing).
+- **parameters:**
+  - `options.title` (`string`): the section title.
+  - `options.icon` (`number`, optional): index of the sticker drawn on the footer tab, `0` by default.
+  - `options.stickers` (`() => PanelSticker[] | Promise<PanelSticker[]>`): called once, right away; the set shows when it resolves. up to 200 stickers.
+- **returns:** `Disposer` that removes the set.
+- **throws:**
+  - `TypeError: tg.ui.registerStickerSet({ title, icon?, stickers: () => [...] })` when `stickers` isn't a function.
+  - `TypeError: tg.ui.registerStickerSet: title is a non-empty string`.
+  - `TypeError: tg.ui.registerStickerSet: icon is the index of a sticker`.
+- **notes:**
+  - an error in `stickers()` or a bad item (`TypeError: tg.ui.registerStickerSet: sticker 2 is not a webp, tgs or webm file`) is logged to the script console and the set stays hidden.
+  - input documents tele doesn't have cached are skipped with a warning; pass full `document` objects (from `messages.getStickerSet`, `messages.getSavedGifs`, a message's media) to be sure.
+  - files must be webp, tgs (gzipped lottie) or webm, up to 2 MB here; Telegram's own sticker limits apply on upload (512 px on the longest side; 64 KB tgs, 256 KB webm).
+  - script stickers have no right-click menu: no favorites, no send-with-options, no set box.
+  - only the main panel (next to the message field) shows script sets, not the mask or profile-photo pickers.
+
+Example:
+
+```ts
+// grants: ['account.write(send)', 'fetch(example.com)']
+const names = ['cat', 'dog']
+tg.ui.registerStickerSet({
+  title: 'my pets',
+  stickers: () => Promise.all(names.map(async (name) => ({
+    bytes: await (await fetch(`https://example.com/stickers/${name}.webp`)).bytes(),
+    name: `${name}.webp`,
+    emoji: '🐾',
+  }))),
+})
+```
+
+### type PanelSticker
+
+```ts
+export interface PanelStickerFile {
+  bytes: Uint8Array | ArrayBuffer
+  name?: string
+  emoji?: string
+  width?: number
+  height?: number
+  duration?: number
+}
+
+export type PanelSticker = tl.TypeDocument | tl.TypeInputDocument | PanelStickerFile
+```
+
+one sticker of a script set.
+
+- **grant:** none.
+- **notes:**
+  - `tl.TypeDocument`: a full `document` that is a sticker; sent as it is.
+  - `tl.TypeInputDocument`: an `inputDocument` resolved through tele's cache by its `id`; skipped when tele doesn't know it.
+  - `PanelStickerFile`: raw webp, tgs or webm bytes; the kind is detected from the content. `name` is the file name (`sticker.webp` by default), `emoji` the sticker's emoji, `width`/`height` the size of a webm (512 by default; a webp's size is read from it), `duration` a webm's length in seconds.
+
+Example:
+
+```ts
+// grants: ['account.write(send)', 'call(messages.getStickerSet)']
+const set = await tg.call({ _: 'messages.getStickerSet', stickerset: { _: 'inputStickerSetShortName', shortName: 'HotCherry' }, hash: 0 })
+if (set._ === 'messages.stickerSet') {
+  tg.ui.registerStickerSet({ title: 'cherry', stickers: () => set.documents })
+}
+```
+
+### tg.ui.registerGifSource(options)
+
+```ts
+registerGifSource(options: PanelGifSourceOptions): Disposer
+
+export interface PanelGifSourceOptions {
+  title: string
+  search(query: string): PanelGif[] | Promise<PanelGif[]>
+}
+```
+
+answers the GIF tab's search: when the user types a query there, `search(query)` runs and its results show first, before the results of Telegram's GIF bot. clicking one sends it to the open chat as a GIF.
+
+- **grant:** none to register; `account.write(send)` to send (checked on click, a toast explains when it's missing).
+- **parameters:**
+  - `options.title` (`string`): the source's name, used in error toasts.
+  - `options.search` (`(query: string) => PanelGif[] | Promise<PanelGif[]>`): called once per query and account (answers are cached for the last 32 queries); up to 50 results.
+- **returns:** `Disposer` that removes the source and its results.
+- **throws:**
+  - `TypeError: tg.ui.registerGifSource({ title, search: (query) => [...] })` when `search` isn't a function.
+  - `TypeError: tg.ui.registerGifSource: title is a non-empty string`.
+- **notes:**
+  - nothing waits for `search`: the bot's results show as usual and yours appear when they arrive.
+  - an error (thrown, rejected or a bad item) is logged to the script console and counts as no results.
+  - the footer's emoji categories search too, with the emoji as the query.
+  - there is no paging: one answer per query.
+  - script results have no right-click menu (no saving to your GIFs, no send-with-options).
+
+Example:
+
+```ts
+// grants: ['account.write(send)', 'call(messages.getSavedGifs)']
+tg.ui.registerGifSource({
+  title: 'my reactions',
+  search: async (query) => {
+    const saved = await tg.call({ _: 'messages.getSavedGifs', hash: 0n })
+    return saved._ === 'messages.savedGifs'
+      ? saved.gifs.filter((gif) => gif._ === 'document' && gif.attributes.some((a) => a._ === 'documentAttributeFilename' && a.fileName.includes(query)))
+      : []
+  },
+})
+```
+
+### type PanelGif
+
+```ts
+export interface PanelGifFile {
+  bytes: Uint8Array | ArrayBuffer
+  name?: string
+  width?: number
+  height?: number
+  duration?: number
+}
+
+export type PanelGif = tl.TypeDocument | PanelGifFile
+```
+
+one GIF result.
+
+- **grant:** none.
+- **notes:**
+  - `tl.TypeDocument`: a full `document` that is an animation or a video; sent as it is.
+  - `PanelGifFile`: raw gif or mp4 bytes, up to 10 MB. a gif's size is read from its header; for an mp4 give `width`/`height` (256 by default) and `duration` in seconds (1 by default). `name` is the file name (`animation.gif` by default).
+
+Example:
+
+```ts
+const party = await (await fetch('https://example.com/party.gif')).bytes()
+tg.ui.registerGifSource({ title: 'party', search: (query) => (query.includes('party') ? [{ bytes: party, name: 'party.gif' }] : []) })
+```
+
+### tg.ui.registerEmojiSet(options)
+
+```ts
+registerEmojiSet(options: PanelEmojiSetOptions): Disposer
+
+export interface PanelEmojiSetOptions {
+  title: string
+  emoji(): (bigint | string)[] | Promise<(bigint | string)[]>
+}
+```
+
+adds a set of custom emoji to the emoji tab of this account's panel, after your own emoji sets, with a footer tab. clicking one inserts it into the message field like any custom emoji; nothing is sent until you send the message.
+
+- **grant:** none.
+- **parameters:**
+  - `options.title` (`string`): the section title.
+  - `options.emoji` (`() => (bigint | string)[] | Promise<(bigint | string)[]>`): custom emoji document ids, called once, right away; up to 200. ids tele doesn't know are fetched with `messages.getCustomEmojiDocuments`.
+- **returns:** `Disposer` that removes the set.
+- **throws:**
+  - `TypeError: tg.ui.registerEmojiSet({ title, emoji: () => [...] })` when `emoji` isn't a function.
+  - `TypeError: tg.ui.registerEmojiSet: title is a non-empty string`.
+- **notes:**
+  - a bad id (`TypeError: tg.ui.registerEmojiSet: emoji 3 is not a custom emoji id (a bigint or a string of digits)`) is logged to the script console and the set stays hidden.
+  - custom emoji need Telegram Premium like everywhere else: without it the section shows the unlock button, and when premium can't be bought here the set is hidden.
+  - only the main emoji panel shows script sets, not the reaction, status or topic icon pickers.
+
+Example:
+
+```ts
+tg.ui.registerEmojiSet({
+  title: 'favorites',
+  emoji: () => ['5368324170671202286', '5373141891321699086'],
+})
+```
+
+## media viewer
+
+tele's media viewer (the full-screen window photos, videos and GIFs open in): open it on a message, follow what it shows, add items to its ⋮ menu. none of it needs a grant: the events and contexts carry ids only (chat, message, album position, kind), never the media or the text. to read the message itself use `tg.getMessages` / `tg.getCachedMessage` with their grants.
+
+the viewer is one window for all accounts. a script only hears about media of its own account: for another account's media `tg.ui.mediaViewer()` is `null` and nothing fires.
+
+### type MediaViewerItem
+
+```ts
+export interface MediaViewerItem {
+  chatId: bigint
+  messageId: number
+  index: number
+  type: MediaType
+}
+```
+
+the media item the viewer shows, as `tg.ui.mediaViewer()`, `tg.ui.onMediaOpened` and media actions get it.
+
+- **fields:**
+  - `chatId` (`bigint`): marked id of the chat the message is in.
+  - `messageId` (`number`): the message with the media. in an album every item is its own message, so this is the item's message.
+  - `index` (`number`): the position in the album (0 for the first item), or in the paid media of the message; 0 for a single item.
+  - `type` (`MediaType`): the kind of the item shown: `'photo'`, `'video'`, `'gif'`, `'roundVideo'`, `'document'` (an image sent as a file) and so on. for paid media it's the kind of the item inside (`'photo'`, `'video'`), not `'paidMedia'`.
+
+Example:
+
+```ts
+const item = tg.ui.mediaViewer()
+if (item) console.log(item.chatId, item.messageId, item.index, item.type)
+```
+
+### type MediaViewerEvent
+
+```ts
+export interface MediaViewerEvent extends MediaViewerItem {
+  open: boolean
+}
+```
+
+what `tg.ui.onMediaOpened` gets: a `MediaViewerItem` plus `open`, `true` when the viewer shows this item, `false` when it stopped showing message media (it closed, or moved to something that isn't a message, like a profile photo).
+
+Example:
+
+```ts
+tg.ui.onMediaOpened((event: MediaViewerEvent) => {
+  if (!event.open) console.log('the viewer stopped showing', event.messageId)
+})
+```
+
+### type MediaActionOptions
+
+```ts
+export interface MediaActionOptions {
+  text: string
+  emoji?: string
+  filter?(context: MediaViewerItem): boolean | Promise<boolean>
+  onClick(context: MediaViewerItem): unknown
+}
+```
+
+the options of `tg.ui.registerMediaAction`.
+
+- **fields:**
+  - `text` (`string`): the menu item's label, not empty.
+  - `emoji` (`string`, optional): shown before the text.
+  - `filter` (`(context) => boolean | Promise<boolean>`, optional): whether the item shows for this media. without it the item shows on every message media.
+  - `onClick` (`(context) => unknown`): runs when the user picks the item.
+
+Example:
+
+```ts
+const action: MediaActionOptions = {
+  text: 'log this item',
+  emoji: '📝',
+  filter: (item) => item.type === 'photo',
+  onClick: (item) => console.log(item.chatId, item.messageId, item.index),
+}
+tg.ui.registerMediaAction(action)
+```
+
+### tg.ui.openMedia(message, options?)
+
+```ts
+openMedia(
+  message: Message | { peer: InputPeerLike, id: number },
+  options?: { index?: number },
+): Promise<void>
+```
+
+opens the media viewer on a message's photo or video, as if the user clicked it in the chat: the viewer can then move through the chat's media with the arrows.
+
+- **grant:** none (`account.read(peers)` when `peer` is a bare id or a username).
+- **parameters:**
+  - `message` (`Message | { peer, id }`): a `Message`, or a chat and a message id in it. a message tele hasn't loaded is fetched first.
+  - `options.index` (`number`, optional): the album item to open, 0 for the first. the message can be any item of the album. for a message with several paid media it picks the item inside the message. without it the message itself opens.
+- **returns:** `Promise<void>` that resolves once the viewer opens.
+- **throws:**
+  - rejects with `TypeError` for a missing message, an id that isn't a positive integer, options that aren't an object or an index that isn't a non-negative integer.
+  - rejects with `TeleError` `not-found` for a chat tele has never seen, a message that doesn't exist (`there's no message 5 in this chat`) or an index past the end (`the album has 3 items`).
+  - rejects with `TeleError` `unsupported` when the message has nothing the viewer opens (`this message has no photo or video`, `a music doesn't open in the media viewer`), for a shared story, paid media that isn't bought, or when the account has no window.
+- **notes:** photos, videos, GIFs, round videos and images sent as files open; music, voice messages, stickers and other files don't. with tele's external media viewer option on, photos open there instead, like a click would.
+
+Example:
+
+```ts
+tg.registerMessageAction({
+  id: 'open_second',
+  text: 'Open the second photo',
+  onClick: ({ chatId, messageId }) => tg.ui.openMedia({ peer: chatId, id: messageId }, { index: 1 }),
+})
+```
+
+### tg.ui.onMediaOpened(callback)
+
+```ts
+onMediaOpened(callback: (event: MediaViewerEvent) => unknown): Disposer
+```
+
+calls `callback` every time the viewer shows a message's media of this account, and once more when it stops.
+
+- **grant:** none.
+- **parameters:**
+  - `callback` (`(event: MediaViewerEvent) => unknown`): gets `{ chatId, messageId, index, type, open: true }` when the viewer opens or moves to another item (arrows, album thumbnails), and the last item with `open: false` when the viewer closes or moves to something that isn't a message. runs on the next event-loop turn with the 200 ms budget.
+- **returns:** `Disposer` that stops the calls.
+- **throws:** `TypeError: tg.ui.onMediaOpened(function)`.
+- **notes:** it doesn't fire for what's already open when you subscribe; read `tg.ui.mediaViewer()` for that. stories and profile photos aren't messages, so they don't fire `open: true`.
+
+Example:
+
+```ts
+tg.ui.onMediaOpened(({ chatId, messageId, open }) => {
+  console.log(open ? `viewing ${messageId} in ${chatId}` : 'viewer closed')
+})
+```
+
+### tg.ui.registerMediaAction(options)
+
+```ts
+registerMediaAction(options: MediaActionOptions): Disposer
+```
+
+adds an item to the media viewer's ⋮ menu (and its right-click menu) on message media of this account.
+
+- **grant:** none.
+- **parameters:**
+  - `options` (`MediaActionOptions`): `text`, optional `emoji`, optional `filter(context)` and `onClick(context)`. both functions get the item shown as a `MediaViewerItem`.
+- **returns:** `Disposer` that removes the item. stopping the script removes it too.
+- **throws:** `TypeError` (`tg.ui.registerMediaAction needs a text`, `onClick must be a function`, `filter must be a function`, `emoji must be a string`).
+- **notes:**
+  - `filter` runs when the viewer moves to an item, not when the menu opens, so the menu never waits on a script. until it answers `true` the item stays hidden; a filter that throws or rejects hides it.
+  - the item isn't there on stories, profile photos or sponsored media.
+
+Example:
+
+```ts
+tg.ui.registerMediaAction({
+  text: 'Show ids',
+  emoji: '🆔',
+  filter: ({ type }) => type === 'photo',
+  onClick: ({ chatId, messageId }) => tg.toast(`photo ${messageId} in ${chatId}`),
+})
+```
+
+### tg.ui.mediaViewer()
+
+```ts
+mediaViewer(): MediaViewerItem | null
+```
+
+tells what the media viewer shows right now.
+
+- **grant:** none.
+- **returns:** `MediaViewerItem | null`: the message media shown, `null` when the viewer is closed or shows something else (a story, a profile photo, another account's media).
+- **notes:** cheap and synchronous.
+
+Example:
+
+```ts
+const shown = tg.ui.mediaViewer()
+if (shown) console.log(`the viewer shows ${shown.type} ${shown.messageId}`)
+```
+
+## mini apps
+
+opening bots' mini apps (web apps) and watching what they ask tele to do. opening needs no grant: tele shows the app like it does after a click on a `t.me/bot?startapp` link or a menu button, with the same confirmation for bots you haven't trusted yet, and the bot gets exactly what tdesktop gives it (your name, id, language and theme). the app is bound to the bot's own chat, never to the chat you have open. watching the open apps and their events needs `ui.read`: a mini app window is something tele shows, and its events can carry what you type into the page.
+
+running your own code inside a mini app page isn't provided on purpose: the page belongs to a third party (wallets, shops, games) and a script that could read or change it could take your money or your logins there. for your own pages use `tg.ui.webview`.
+
+### tg.ui.openWebApp(bot, options?)
+
+```ts
+openWebApp(bot: InputPeerLike, options?: WebAppOptions): Promise<void>
+```
+
+opens a bot's mini app in tele's mini app window.
+
+- **grant:** none (`account.read(peers)` when `bot` is a bare id or a username).
+- **parameters:**
+  - `bot` (`InputPeerLike`): the bot.
+  - `options.url` (`string`, optional): an `http(s)` address of the bot's web app, opened like an inline `web_app` button in the bot's chat. without it tele opens the bot's main mini app (the "open app" button on its profile), or, for a bot without one, the web app of its menu button.
+  - `options.startParam` (`string`, optional): the start parameter the app reads as `start_param` (like `?startapp=` in a link): up to 512 of `A-Z`, `a-z`, `0-9`, `_` and `-`.
+  - `options.mode` (`WebAppMode`, optional): `'fullscreen'` asks for the full screen, `'compact'` asks for the compact size of the main mini app; the default is the size the bot chose. see `type WebAppMode`.
+- **returns:** `Promise<void>` that resolves once the opening is queued; tele then asks for confirmation when needed, loads the app and shows it. if the user declines or the server refuses (a toast shows the error), the app just doesn't open.
+- **throws:**
+  - rejects with `TypeError` for options that aren't an object, a `url` that isn't an `http(s)` address, a bad `startParam` or `mode`.
+  - rejects with `TypeError: this peer isn't in tele's cache` for an input peer of a user tele hasn't loaded.
+  - rejects with `TeleError` `not-found` when the peer isn't a bot, `unsupported` when the bot has no mini app (and no `url` was given) or the account has no window.
+- **notes:**
+  - opening the same bot's app the same way again focuses the window that is already open.
+  - for a bot without a main mini app tele loads its full info first to find the menu button (up to 10 s).
+  - tele's own options still apply: with "never open web apps in fullscreen" (`tele-webapps-no-fullscreen`) on, `'fullscreen'` opens a normal window.
+
+Example:
+
+```ts
+tg.registerChatAction({
+  id: 'wallet',
+  text: 'open wallet',
+  onClick: () => tg.ui.openWebApp('wallet', { mode: 'fullscreen' }),
+})
+```
+
+### tg.ui.webApps()
+
+```ts
+webApps(): WebAppInfo[]
+```
+
+lists the mini apps open in this account right now.
+
+- **grant:** `ui.read`.
+- **returns:** one `WebAppInfo` (`{ bot, url, mode }`) per open mini app window, see `type WebAppInfo`. apps still loading or waiting for confirmation aren't listed yet; games aren't listed.
+- **throws:** `TeleError` `not-granted` without `ui.read`.
+
+Example:
+
+```ts
+for (const app of tg.ui.webApps()) console.log(`${app.bot}: ${app.url} (${app.mode})`)
+```
+
+### tg.ui.onWebAppEvent(callback)
+
+```ts
+onWebAppEvent(callback: (event: WebAppEvent) => unknown): Disposer
+```
+
+calls `callback` for every event an open mini app of this account sends to tele (the page's `Telegram.WebApp` calls: `web_app_ready`, `web_app_expand`, `web_app_setup_main_button`, `web_app_open_link`, `web_app_data_send`, ...).
+
+- **grant:** `ui.read`.
+- **parameters:**
+  - `callback` (`(event) => unknown`): gets a `WebAppEvent` (`{ bot, name, data }`). runs on the next event-loop turn with the 200 ms budget, after tele has already handled the event.
+- **returns:** `Disposer` that stops the calls.
+- **throws:**
+  - `TypeError: tg.ui.onWebAppEvent(function)`.
+  - `TeleError` `not-granted` without `ui.read`.
+- **notes:**
+  - read-only: the callback can't stop, change or answer an event; tele handles every event the same with or without listeners.
+  - the `value` of `web_app_device_storage_save_key` and `web_app_secure_storage_save_key` is replaced by `null`: what an app keeps on your device is its own.
+  - only events the page sends are reported, not what tele sends back to the page. games aren't reported.
+
+Example:
+
+```ts
+tg.ui.onWebAppEvent(({ bot, name, data }) => {
+  if (name === 'web_app_open_link') console.log(`bot ${bot} opens ${String(data.url)}`)
+})
+```
+
+### type WebAppMode
+
+```ts
+export type WebAppMode = 'compact' | 'fullsize' | 'fullscreen'
+```
+
+the size of a mini app window.
+
+- **values:**
+  - `'compact'`: the small window (on phones, the half-height sheet).
+  - `'fullsize'`: the full window size the bot asked for.
+  - `'fullscreen'`: the window covers the screen.
+
+Example:
+
+```ts
+const mode: WebAppMode = 'fullscreen'
+await tg.ui.openWebApp('wallet', { mode })
+```
+
+### type WebAppOptions
+
+```ts
+export interface WebAppOptions {
+  url?: string
+  startParam?: string
+  mode?: WebAppMode
+}
+```
+
+the options of `tg.ui.openWebApp`.
+
+- **fields:**
+  - `url` (`string`, optional): an `http(s)` address of the bot's web app instead of its main mini app.
+  - `startParam` (`string`, optional): the start parameter, up to 512 of `A-Z`, `a-z`, `0-9`, `_` and `-`.
+  - `mode` (`WebAppMode`, optional): the size to ask for.
+
+Example:
+
+```ts
+const options: WebAppOptions = { startParam: 'from_tele', mode: 'compact' }
+await tg.ui.openWebApp('wallet', options)
+```
+
+### type WebAppInfo
+
+```ts
+export interface WebAppInfo {
+  bot: bigint
+  url: string
+  mode: WebAppMode
+}
+```
+
+an open mini app, as `tg.ui.webApps` lists it.
+
+- **fields:**
+  - `bot` (`bigint`): the bot's id.
+  - `url` (`string`): the address the app was opened at, without the `tgWebApp...` launch parameters (they carry your signed login data for the bot's server).
+  - `mode` (`WebAppMode`): `'fullscreen'` while the window is full screen, otherwise the size the server opened it with.
+
+Example:
+
+```ts
+const wallet = tg.ui.webApps().find((app) => app.url.includes('wallet'))
+```
+
+### type WebAppEvent
+
+```ts
+export interface WebAppEvent {
+  bot: bigint
+  name: string
+  data: Record<string, unknown>
+}
+```
+
+an event a mini app sent to tele, as `tg.ui.onWebAppEvent` gets it.
+
+- **fields:**
+  - `bot` (`bigint`): the id of the bot whose app sent it.
+  - `name` (`string`): the event name, `web_app_*` for mini apps (older pages also send a few legacy names like `iframe_ready`).
+  - `data` (`Record<string, unknown>`): the event's parameters as the page sent them (an empty object when there are none), for example `{ url }` for `web_app_open_link` or `{ is_visible, text, color }` for `web_app_setup_main_button`.
+
+Example:
+
+```ts
+tg.ui.onWebAppEvent((event: WebAppEvent) => {
+  if (event.name === 'web_app_data_send') tg.toast(`the app sent data to its bot: ${String(event.data.data)}`)
 })
 ```
 
@@ -11011,7 +17683,7 @@ what a drop interceptor receives, a frozen object.
   - `chatId` (`bigint`): the chat it was dropped on or pasted into (marked id).
   - `files` (`{ name: string, path: string, size: number }[]`): local files: `name` is the file name, `path` the full path, `size` in bytes. scripts get paths, not contents; a path is what `tg.unsafe.exec` needs.
   - `urls` (`string[]`): dropped urls that aren't local files (links dragged from a browser).
-  - `text` (`string`): the text part of the data, `''` when there's none. drags from other apps often carry one (a link's address, a file list); plain text pasted into the field doesn't go through this gate.
+  - `text` (`string`): the text part of the data, `''` when there's none. drags from other apps often carry one (a link's address, a file list); plain text pasted into the field doesn't go through this gate; `tg.compose.interceptPaste` sees it.
   - `image` (`boolean`): `true` when the data holds an image (a screenshot pasted from the clipboard, an image dragged from a browser). the pixels aren't passed to the script.
 
 Example:
@@ -11670,7 +18342,7 @@ export default defineScript({
 
 ## app and system
 
-control over tele itself and the computer it runs on: the theme and palette, the window title and badge, the music player, calls, the other logged-in accounts, and running programs. reading state is mostly free; changing it needs `app`, `calls`, `accounts` (all caution) or `unsafe.exec` (dangerous). everything a script changes here is undone when it stops: palette overrides, title, badge; running programs are killed.
+control over tele itself and the computer it runs on: the theme and palette, the window title, badge and focus, the music player, sounds and per-chat notification sounds, calls and video chats, the other logged-in accounts, and running programs. reading state is mostly free; changing it needs `app`, `calls`, `accounts`, `account.write(notify)` (all caution) or `unsafe.exec` (dangerous). everything a script changes here is undone when it stops: palette overrides, title, badge; running programs are killed.
 
 ### tg.app
 
@@ -11678,9 +18350,9 @@ control over tele itself and the computer it runs on: the theme and palette, the
 readonly app: App
 ```
 
-tele's appearance and media controls, see `type App`.
+tele's appearance, window focus, sounds and media controls, see `type App`.
 
-- **grant:** none to read (`theme.get`, `theme.color`, `theme.onChange`, `player.current`, `player.onChange`); `app` (caution, "control tele: the theme and colors, the window title and badge, the music player") for everything that changes something.
+- **grant:** none to read (`theme.get`, `theme.color`, `theme.onChange`, `player.current`, `player.onChange`, `focus`) or to play a sound (`playSound`); `app` (caution, "control tele: the theme and colors, the window title and badge, the music player") for everything that changes something.
 
 Example:
 
@@ -11715,14 +18387,24 @@ export interface App {
     onChange(callback: (playing: NowPlaying | null) => unknown): Disposer
   }
 }
+
+export interface App {
+  playSound(source: SoundSource, options?: PlaySoundOptions): SoundPlayback
+}
+
+export interface App {
+  readonly focus: AppFocus
+}
 ```
 
-the type of `tg.app`; every member has its own item below.
+the type of `tg.app`; every member has its own item below. the later blocks are interface merging: `playSound` and `focus` come with the sound and focus features.
 
 - **fields:**
   - `theme`: night mode and the color palette: `get`, `setDark`, `color`, `setColors`, `onChange`.
   - `window`: the main window's title, unread badge and attention flash: `setTitle`, `setBadge`, `flash`.
   - `player`: tele's music and voice player: `current`, `play`, `pause`, `toggle`, `stop`, `next`, `previous`, `onChange`.
+  - `playSound` (`(source, options?) => SoundPlayback`): play a sound through tele's audio output.
+  - `focus` (`AppFocus`): whether a window of this account is the active one: `focused`, `onChange`.
 
 Example:
 
@@ -12009,6 +18691,55 @@ tg.onNewMessage((message) => {
 })
 ```
 
+### tg.app.focus
+
+```ts
+readonly focus: AppFocus
+
+export interface AppFocus {
+  readonly focused: boolean
+  onChange(callback: (focused: boolean) => unknown): Disposer
+}
+```
+
+whether a window of this account is the focused window on the desktop. it lives in `tg.app.focus` rather than `tg.app.window` because `tg.app.window` is a frozen object whose type can't be extended.
+
+- **grant:** none.
+- **fields:**
+  - `focused` (`boolean`): `true` while the main window or a separate chat window of this account is the active window. `false` when tele is minimized, behind another app, or another account's window (or the media viewer) is in front.
+  - `onChange` (`(callback) => Disposer`): see `tg.app.focus.onChange`.
+- **notes:** `tg.ui.current().windowActive` is the same check for the main window alone.
+
+Example:
+
+```ts
+if (!tg.app.focus.focused) tg.app.window.flash()
+```
+
+### tg.app.focus.onChange(callback)
+
+```ts
+onChange(callback: (focused: boolean) => unknown): Disposer
+```
+
+calls `callback` when this account's windows gain or lose the focus: switching to another app and back, minimizing, clicking another account's window.
+
+- **grant:** none.
+- **parameters:**
+  - `callback` (`(focused: boolean) => unknown`): gets the new state. runs on the next event-loop turn with the 200 ms budget. moving between two windows of the same account doesn't call it.
+- **returns:** `Disposer` that stops the calls.
+- **throws:** `TypeError: tg.app.focus.onChange(function)`.
+
+Example:
+
+```ts
+let away = 0
+tg.app.focus.onChange((focused) => {
+  if (!focused) away = Date.now()
+  else if (away) tg.toast(`welcome back after ${Math.round((Date.now() - away) / 1000)} s`)
+})
+```
+
 ### tg.app.player
 
 ```ts
@@ -12220,13 +18951,181 @@ const track = tg.app.player.current()
 if (track?.chatId && track.messageId) await tg.ui.openChat(track.chatId, { message: track.messageId })
 ```
 
+### tg.app.playSound(source, options?)
+
+```ts
+playSound(source: SoundSource, options?: PlaySoundOptions): SoundPlayback
+
+export type SoundSource = Uint8Array | ArrayBuffer | 'notification'
+
+export interface PlaySoundOptions {
+  volume?: number
+}
+```
+
+plays a sound through tele's own audio output (the one notification sounds use), with no ui.
+
+- **grant:** none.
+- **parameters:**
+  - `source` (`SoundSource`, that is `Uint8Array | ArrayBuffer | 'notification'`): the bytes of an audio file, or `'notification'`.
+    - bytes: any audio file tdesktop's ffmpeg decoder reads: ogg/opus, mp3, wav, flac, m4a and so on. at most 10 MB; the file is decoded off the main thread before it plays.
+    - `'notification'`: the sound tele plays for new messages in private chats right now: the user's chosen default sound (Settings > Notifications), a custom ringtone included, or tele's built-in sound. when the user chose "no sound" there, nothing plays and `done` resolves at once.
+  - `options.volume` (`number`, optional): from `0` to `1`. without it, bytes play at the notification volume from Settings > Notifications, and `'notification'` at the volume chosen for private chats' sound (or the same notification volume). `0` plays nothing and resolves `done` at once.
+- **returns:** `SoundPlayback`: `done` resolves when the sound has finished playing, `stop()` cuts it short.
+- **throws:**
+  - `TypeError` for a source that isn't bytes or `'notification'`, empty bytes, options that aren't an object, or a `volume` outside `0..1`.
+  - `TeleError` `quota-exceeded` for more than 10 MB of bytes.
+  - `done` rejects with `TeleError` `unsupported` when tele can't decode the bytes or has no audio output device.
+- **notes:** several sounds can play at once. `'notification'` also lowers the music player for its length, like a real notification. every sound stops when the script stops. it plays even when the user turned notification sounds off: a script decides when to call it.
+
+Example:
+
+```ts
+const beep = await fetch('https://example.com/beep.ogg').then((response) => response.bytes())
+const sound = tg.app.playSound(beep, { volume: 0.5 })
+setTimeout(() => sound.stop(), 2000)
+await sound.done
+```
+
+### type SoundPlayback
+
+```ts
+export interface SoundPlayback {
+  readonly done: Promise<void>
+  stop(): void
+  [Symbol.dispose](): void
+}
+```
+
+one sound started by `tg.app.playSound`.
+
+- **fields:**
+  - `done` (`Promise<void>`): resolves when the sound ends by itself or through `stop()`; rejects with `TeleError` `unsupported` when it can't play. it never settles when the script stops first.
+  - `stop()`: stops the sound (it may still be decoding, then it never plays) and resolves `done`. calling it again does nothing.
+  - `[Symbol.dispose]()`: the same as `stop()`, so `using` stops the sound at the end of the block.
+
+Example:
+
+```ts
+{
+  using alarm = tg.app.playSound('notification')
+  await Promise.race([alarm.done, new Promise<void>((resolve) => setTimeout(resolve, 500))])
+}
+```
+
+### tg.notifications
+
+```ts
+readonly notifications: Notifications
+
+export interface Notifications {
+  getSound(peer: InputPeerLike): Promise<NotifySoundInfo>
+  setSound(peer: InputPeerLike, sound: NotifySoundChoice): Promise<NotifySoundInfo>
+}
+```
+
+per-chat notification sounds, the same setting as "Select tone" / "Disable sound" in a chat's mute menu.
+
+- **grant:** none for `getSound`; `account.write(notify)` (caution) for `setSound`.
+
+Example:
+
+```ts
+const { kind } = await tg.notifications.getSound('me')
+```
+
+### tg.notifications.getSound(peer)
+
+```ts
+getSound(peer: InputPeerLike): Promise<NotifySoundInfo>
+```
+
+reads the notification sound a chat has on its own, from tele's local data.
+
+- **grant:** none (and `account.read(peers)` when `peer` is a bare id or a username).
+- **parameters:**
+  - `peer` (`InputPeerLike`): the chat; must be one tele has loaded.
+- **returns:** `Promise<NotifySoundInfo>`. `kind: 'default'` means the chat follows the default sound for its type (private chats, groups or channels). when tele doesn't know the chat's settings yet, it asks the server first and waits up to 5 s; it also loads the saved ringtones list to find a custom sound's title.
+- **throws:**
+  - rejects with `TypeError` for something that isn't a peer.
+  - rejects with `TeleError` `not-found` for a chat tele hasn't loaded.
+  - rejects with `TeleError` `timed-out` when the chat's settings don't arrive within 5 s.
+
+Example:
+
+```ts
+const sound = await tg.notifications.getSound(message)
+console.log(sound.kind === 'custom' ? `ringtone ${sound.title}` : sound.kind)
+```
+
+### tg.notifications.setSound(peer, sound)
+
+```ts
+setSound(peer: InputPeerLike, sound: NotifySoundChoice): Promise<NotifySoundInfo>
+
+export type NotifySoundChoice =
+  | 'default'
+  | 'none'
+  | { bytes: Uint8Array | ArrayBuffer, name: string }
+```
+
+changes a chat's notification sound through tdesktop's own notify settings path: the chat list, the mute menu and the profile update at once, and the change goes to the server (as `account.updateNotifySettings`) a moment later, exactly as when the user picks a tone.
+
+- **grant:** `account.write(notify)` (and `account.read(peers)` when `peer` is a bare id or a username).
+- **parameters:**
+  - `peer` (`InputPeerLike`): the chat; must be one tele has loaded.
+  - `sound` (`NotifySoundChoice`):
+    - `'default'`: follow the default sound for the chat's type.
+    - `'none'`: no sound (notifications still show).
+    - `{ bytes, name }`: a new custom sound. `bytes` (`Uint8Array | ArrayBuffer`) is an audio file, `name` (`string`) its file name, shown as the tone's title (without the extension). it's uploaded like the "Upload sound" button of the tone picker does (`account.uploadRingtone`, which also adds it to the account's saved ringtones), then set as the chat's sound. telegram limits ringtones: by default 100 KB and 5 seconds (app config `ringtone_size_max`, `ringtone_duration_max`), and mp3 is the safe format (tdesktop's own picker only offers mp3; ogg usually works too).
+- **returns:** `Promise<NotifySoundInfo>` with the new setting (`id` and `title` for an uploaded sound).
+- **throws:**
+  - rejects with `TypeError` for a bad `sound` (another string, missing or empty `bytes`, an empty `name`) or something that isn't a peer.
+  - rejects with `TeleError` `not-granted` without the grant.
+  - rejects with `TeleError` `not-found` for a chat tele hasn't loaded.
+  - rejects with `TeleError` `quota-exceeded` for bytes over the size limit, or when telegram refuses the duration (`RINGTONE_DURATION_TOO_LONG`) or size (`RINGTONE_SIZE_TOO_BIG`).
+  - rejects with `TeleError` `unsupported` when telegram doesn't take the format (`RINGTONE_MIME_INVALID`).
+  - rejects with `TeleError` `network` when the upload fails or for any other server error (its type is in the message).
+- **notes:** this is the account's own setting: it stays after the script stops; an upload still in progress is cancelled when the script stops. tdesktop ignores Saved Messages' own sound when it plays notifications (they follow the private chats' default), but the setting is still stored and synced. the chat's mute state and the other notification settings don't change.
+
+Example:
+
+```ts
+const tone = await fetch('https://example.com/ding.mp3').then((response) => response.bytes())
+await tg.notifications.setSound('@durov', { bytes: tone, name: 'ding.mp3' })
+await tg.notifications.setSound('me', 'none')
+```
+
+### type NotifySoundInfo
+
+```ts
+export interface NotifySoundInfo {
+  kind: 'default' | 'none' | 'custom'
+  id?: bigint
+  title?: string
+}
+```
+
+a chat's own notification sound.
+
+- **fields:**
+  - `kind`: `'default'` follows the default sound for the chat's type, `'none'` is silent, `'custom'` is a ringtone.
+  - `id` (`bigint`, optional): the ringtone's document id, for `'custom'` sounds from the account's saved ringtones.
+  - `title` (`string`, optional): the ringtone's title as tele's tone picker shows it, when tele knows it.
+
+Example:
+
+```ts
+const { kind, title } = await tg.notifications.getSound('me')
+```
+
 ### tg.calls
 
 ```ts
 readonly calls: Calls
 ```
 
-this account's voice and video calls (one-to-one calls, not group calls or video chats). see `type Calls`.
+this account's voice and video calls (one-to-one calls, and group calls / video chats through `group`, `join`, `leave`, `raiseHand`, `participants`, `onGroupChange`). see `type Calls`.
 
 - **grant:** `calls` (caution, "see your calls, answer, decline or start them, mute you") for every member.
 - **notes:** a script only sees and controls calls of its own account; a call on another account looks like no call.
@@ -12249,9 +19148,18 @@ export interface Calls {
   start(user: InputPeerLike, options?: { video?: boolean }): Promise<void>
   onChange(callback: (call: CallInfo | null) => unknown): Disposer
 }
+
+export interface Calls {
+  group(): GroupCallInfo | null
+  onGroupChange(callback: (call: GroupCallInfo | null, changes: GroupCallChange[]) => unknown): Disposer
+  join(chat: InputPeerLike, options?: { muted?: boolean, joinAs?: InputPeerLike }): Promise<GroupCallInfo>
+  leave(): boolean
+  raiseHand(raised: boolean): boolean
+  participants(chat?: InputPeerLike, options?: { limit?: number }): Promise<GroupCallParticipant[]>
+}
 ```
 
-the type of `tg.calls`.
+the type of `tg.calls`; the second block is interface merging, added with group calls.
 
 - **fields:**
   - `current` (`() => CallInfo | null`): the ongoing call.
@@ -12260,6 +19168,12 @@ the type of `tg.calls`.
   - `setMuted` (`(muted: boolean) => boolean`): mute or unmute the microphone.
   - `start` (`(user, options?) => Promise<void>`): call someone.
   - `onChange` (`(callback) => Disposer`): follow state changes.
+  - `group` (`() => GroupCallInfo | null`): the group call or video chat you're in.
+  - `onGroupChange` (`(callback) => Disposer`): follow it.
+  - `join` (`(chat, options?) => Promise<GroupCallInfo>`): join a chat's video chat.
+  - `leave` (`() => boolean`): leave it.
+  - `raiseHand` (`(raised: boolean) => boolean`): raise or lower your hand.
+  - `participants` (`(chat?, options?) => Promise<GroupCallParticipant[]>`): who is in a group call.
 
 Example:
 
@@ -12332,12 +19246,12 @@ tg.calls.onChange((call) => {
 setMuted(muted: boolean): boolean
 ```
 
-mutes or unmutes your microphone in the call.
+mutes or unmutes your microphone in the call. with no one-to-one call, it mutes or unmutes you in the group call or video chat you're in.
 
 - **grant:** `calls`.
 - **parameters:**
   - `muted` (`boolean`): `true` to mute.
-- **returns:** `boolean`: `false` when this account has no call, `true` otherwise.
+- **returns:** `boolean`: `false` when this account is in neither kind of call, or when an admin muted you in a group call and you ask to unmute; `true` otherwise.
 - **throws:** `TeleError` `not-granted` without the grant.
 
 Example:
@@ -12442,6 +19356,327 @@ Example:
 ```ts
 tg.calls.onChange((call) => {
   if (call?.state === 'busy') tg.toast(`${call.user.name} is busy`)
+})
+```
+
+### tg.calls.group()
+
+```ts
+group(): GroupCallInfo | null
+```
+
+reads the group call or video chat this account is in (voice chats in groups, video chats and live streams in channels, conference calls).
+
+- **grant:** `calls`.
+- **returns:** `GroupCallInfo | null`: the call with its participants, `null` when this account isn't in one (or the one tele is in belongs to another account).
+- **throws:** `TeleError` `not-granted` without the grant.
+- **notes:**
+  - tele is in one call at a time: while it's in a group call, `tg.calls.current()` is `null`, and the other way round.
+  - `tg.calls.setMuted(muted)` works here too: with no one-to-one call it mutes or unmutes you in the group call, and returns `false` when there's neither or when an admin muted you and you ask to unmute.
+
+Example:
+
+```ts
+const call = tg.calls.group()
+if (call) console.log(`${call.peer.name}: ${call.count} people, ${call.participants.filter((p) => p.speaking).length} talking`)
+```
+
+### tg.calls.onGroupChange(callback)
+
+```ts
+onGroupChange(callback: (call: GroupCallInfo | null, changes: GroupCallChange[]) => unknown): Disposer
+```
+
+calls `callback` when this account joins or leaves a group call, when the call changes state (connecting, joined, scheduled, recording, title, who you join as, your microphone), and when its participants come, go, mute, raise or lower a hand, turn video on, or start and stop talking.
+
+- **grant:** `calls`.
+- **parameters:**
+  - `callback` (`(call: GroupCallInfo | null, changes: GroupCallChange[]) => unknown`): gets the call's new snapshot (`null` once you left) and what changed since the last call. runs on the next event-loop turn with the 200 ms budget.
+- **returns:** `Disposer` that stops the calls.
+- **throws:**
+  - `TypeError: tg.calls.onGroupChange(function)`.
+  - `TeleError` `not-granted` without the grant.
+- **notes:**
+  - changes are batched for 250 ms, so a burst of updates arrives as one call with several `changes`.
+  - talking is rate-limited: a change where only `'speaking'` differs comes at most once a second; any other change comes with the next 250 ms batch and carries the latest talking state too.
+  - it doesn't fire on registration; read `tg.calls.group()` for the state at that moment.
+
+Example:
+
+```ts
+tg.calls.onGroupChange((call, changes) => {
+  if (!call) return console.log('left the video chat')
+  if (changes.includes('raisedHand')) {
+    const hands = call.participants.filter((p) => p.raisedHand).map((p) => p.peer.name)
+    if (hands.length) tg.toast(`hands up: ${hands.join(', ')}`)
+  }
+})
+```
+
+### tg.calls.join(chat, options?)
+
+```ts
+join(chat: InputPeerLike, options?: { muted?: boolean, joinAs?: InputPeerLike }): Promise<GroupCallInfo>
+```
+
+joins the group call or video chat that is going on in a group or a channel, the same as its join button.
+
+- **grant:** `calls` (and `account.read(peers)` when `chat` or `joinAs` is a bare id or a username).
+- **parameters:**
+  - `chat` (`InputPeerLike`): the group or channel with the call; must be one tele has loaded.
+  - `options.muted` (`boolean`, optional): join with the microphone off (default `true`). `false` unmutes you once you're in, unless an admin keeps you muted.
+  - `options.joinAs` (`InputPeerLike`, optional): who to appear as: you, or a channel you own that telegram offers for this call. it becomes the chat's default for joining.
+- **returns:** `Promise<GroupCallInfo>` that resolves once you're in (or registered for a scheduled call), with the call's snapshot. already in that call: it applies `muted` and resolves right away.
+- **throws:**
+  - rejects with `TeleError` `not-granted` without the grant.
+  - rejects with `TypeError: tg.calls.join needs a group or a channel tele has loaded` for a user or an unknown peer, and `TypeError: tg.calls.join: joinAs must be a peer tele has loaded`.
+  - rejects with `TeleError` `not-found` when nothing is going on in that chat (it never starts a new call).
+  - rejects with `TeleError` `timed-out` when you're not in after 60 s, for example because the user cancelled one of tele's boxes.
+  - rejects with `TeleError` `internal` when joining fails or the call ends meanwhile, `unsupported` when the account has no window, and `RpcError` when telegram refuses to give the chat's info.
+- **notes:**
+  - tele's usual flow runs: if you're in another call, tele asks before leaving it; if telegram offers several identities and none was chosen before (or `joinAs` isn't one of them), tele shows its "join as" box. the promise waits for those.
+  - the call panel opens like after a click.
+
+Example:
+
+```ts
+tg.registerChatAction({
+  id: 'listen',
+  text: 'listen in (muted)',
+  visible: (ctx) => ctx.chat.kind !== 'user',
+  onClick: async (ctx) => {
+    const call = await tg.calls.join(ctx.chat, { muted: true })
+    tg.toast(`in ${call.title || call.peer.name} with ${call.count} people`)
+  },
+})
+```
+
+### tg.calls.leave()
+
+```ts
+leave(): boolean
+```
+
+leaves the group call this account is in, like the leave button. the call goes on for everyone else.
+
+- **grant:** `calls`.
+- **returns:** `boolean`: `false` when this account isn't in a group call, `true` otherwise.
+- **throws:** `TeleError` `not-granted` without the grant.
+
+Example:
+
+```ts
+tg.calls.onGroupChange((call) => {
+  if (call?.joined && call.count <= 1) tg.calls.leave()
+})
+```
+
+### tg.calls.raiseHand(raised)
+
+```ts
+raiseHand(raised: boolean): boolean
+```
+
+raises or lowers your hand in the group call. a hand only means something while an admin keeps you muted: it asks them to let you talk.
+
+- **grant:** `calls`.
+- **parameters:**
+  - `raised` (`boolean`): `true` to raise, `false` to lower.
+- **returns:** `boolean`: `true` when your hand is now as asked; `false` when there's no group call, or when you raise it but you may already talk (or it's a live stream or a conference call, which have no hands).
+- **throws:** `TeleError` `not-granted` without the grant.
+
+Example:
+
+```ts
+tg.calls.onGroupChange((call, changes) => {
+  if (call && changes.includes('state') && call.mute === 'forceMuted') tg.calls.raiseHand(true)
+})
+```
+
+### tg.calls.participants(chat?, options?)
+
+```ts
+participants(chat?: InputPeerLike, options?: { limit?: number }): Promise<GroupCallParticipant[]>
+```
+
+lists who is in a group call, also one you aren't in.
+
+- **grant:** `calls` (and `account.read(peers)` when `chat` is a bare id or a username).
+- **parameters:**
+  - `chat` (`InputPeerLike`, optional): the group or channel with the call. leave it out for the call you're in.
+  - `options.limit` (`number`, optional): at most this many (default 100, capped at 5000).
+- **returns:** `Promise<GroupCallParticipant[]>`. for the call you're in, the list tele already has (`speaking` is live); for another chat, a fresh list from telegram (`phone.getGroupParticipants`, in pages of 100), where `speaking` is always `false`.
+- **throws:**
+  - rejects with `TeleError` `not-granted` without the grant.
+  - rejects with `TypeError: tg.calls.participants needs a group or a channel tele has loaded` and `TypeError: tg.calls.participants: limit must be a positive integer`.
+  - rejects with `TeleError` `not-found` when there's no call in that chat, or no `chat` and you're not in a call.
+  - rejects with `RpcError` when telegram refuses (for example a private channel you're not in).
+- **notes:** peers telegram sends that tele can't load are left out.
+
+Example:
+
+```ts
+const people = await tg.calls.participants('@durov_russia', { limit: 20 })
+console.log(people.map((p) => `${p.peer.name}${p.muted ? '' : ' (mic on)'}`).join('\n'))
+```
+
+### type GroupCallInfo
+
+```ts
+export interface GroupCallInfo {
+  peer: PeerInfo
+  title: string
+  state: GroupCallState
+  joined: boolean
+  joinAs: PeerInfo
+  mute: GroupCallMute
+  muted: boolean
+  mutedByAdmin: boolean
+  raisedHand: boolean
+  stream: boolean
+  count: number
+  recording: boolean
+  scheduled: number | null
+  participants: GroupCallParticipant[]
+}
+```
+
+a snapshot of the group call this account is in.
+
+- **fields:**
+  - `peer` (`PeerInfo`): the group or channel of the call.
+  - `title` (`string`): the call's own title, `''` when it has none (tele shows the chat's name then).
+  - `state` (`GroupCallState`): where joining is.
+  - `joined` (`boolean`): `true` once you're in and connected (`state === 'joined'`).
+  - `joinAs` (`PeerInfo`): who you appear as: you or one of your channels.
+  - `mute` (`GroupCallMute`): your microphone in detail.
+  - `muted` (`boolean`): `true` unless your microphone is on (`'active'` or `'pushToTalk'`).
+  - `mutedByAdmin` (`boolean`): an admin keeps you muted (or it's a live stream you only watch).
+  - `raisedHand` (`boolean`): your hand is up.
+  - `stream` (`boolean`): a live stream from an external app (rtmp) instead of a voice chat.
+  - `count` (`number`): how many people are in, by telegram's count (more than `participants` in big calls).
+  - `recording` (`boolean`): the call is being recorded.
+  - `scheduled` (`number | null`): unix time the call is scheduled to start, `null` when it's live.
+  - `participants` (`GroupCallParticipant[]`): the participants tele has loaded, you included.
+
+Example:
+
+```ts
+const call = tg.calls.group()
+if (call?.recording) tg.toast('this video chat is being recorded')
+```
+
+### type GroupCallParticipant
+
+```ts
+export interface GroupCallParticipant {
+  peer: PeerInfo
+  self: boolean
+  speaking: boolean
+  muted: boolean
+  mutedByAdmin: boolean
+  raisedHand: boolean
+  video: boolean
+  screen: boolean
+}
+```
+
+one person (or channel) in a group call.
+
+- **fields:**
+  - `peer` (`PeerInfo`): who it is.
+  - `self` (`boolean`): it's you (as `joinAs`).
+  - `speaking` (`boolean`): talking right now (tele keeps it on for about 1.5 s after the voice stops). always `false` in lists fetched for a call you aren't in.
+  - `muted` (`boolean`): their microphone is off.
+  - `mutedByAdmin` (`boolean`): muted by an admin, can't unmute themselves.
+  - `raisedHand` (`boolean`): their hand is up.
+  - `video` (`boolean`): their camera is on.
+  - `screen` (`boolean`): they share their screen.
+
+Example:
+
+```ts
+const talking = tg.calls.group()?.participants.filter((p) => p.speaking && !p.self) ?? []
+```
+
+### type GroupCallState
+
+```ts
+export type GroupCallState =
+  | 'creating'
+  | 'waiting'
+  | 'joining'
+  | 'connecting'
+  | 'joined'
+  | 'failedHangingUp'
+  | 'failed'
+  | 'hangingUp'
+  | 'ended'
+  | 'unknown'
+```
+
+tdesktop's group call state in camelCase.
+
+- **grant:** none.
+- **notes:**
+  - `'creating'`, `'joining'`, `'connecting'`: on the way in.
+  - `'waiting'`: in a scheduled call that hasn't started.
+  - `'joined'`: in and connected.
+  - `'hangingUp'`, `'failedHangingUp'`: leaving.
+  - `'ended'`, `'failed'`: over.
+  - `'unknown'`: a state tele doesn't know a name for.
+
+Example:
+
+```ts
+tg.calls.onGroupChange((call) => {
+  if (call?.state === 'waiting' && call.scheduled) console.log('starts at', new Date(call.scheduled * 1000))
+})
+```
+
+### type GroupCallMute
+
+```ts
+export type GroupCallMute = 'active' | 'pushToTalk' | 'muted' | 'forceMuted' | 'raisedHand'
+```
+
+your microphone in a group call.
+
+- **grant:** none.
+- **notes:**
+  - `'active'`: on.
+  - `'pushToTalk'`: on while the push-to-talk key is held.
+  - `'muted'`: off, you can turn it on.
+  - `'forceMuted'`: an admin muted you; raise your hand to ask.
+  - `'raisedHand'`: muted by an admin, hand up.
+
+Example:
+
+```ts
+const call = tg.calls.group()
+if (call?.mute === 'muted') tg.calls.setMuted(false)
+```
+
+### type GroupCallChange
+
+```ts
+export type GroupCallChange = 'state' | 'participants' | 'raisedHand' | 'speaking'
+```
+
+what changed in a `tg.calls.onGroupChange` call.
+
+- **grant:** none.
+- **notes:**
+  - `'state'`: joined or left, the state, your microphone, who you join as, the title, recording, the schedule.
+  - `'participants'`: someone came or went, muted or unmuted, turned video or screen sharing on or off, or the total count moved.
+  - `'raisedHand'`: a hand went up or down (yours too).
+  - `'speaking'`: someone started or stopped talking.
+
+Example:
+
+```ts
+tg.calls.onGroupChange((call, changes) => {
+  if (changes.includes('participants')) console.log(`${call?.count ?? 0} in the call`)
 })
 ```
 

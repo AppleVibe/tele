@@ -1,0 +1,260 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Tue, 13 Oct 2026 20:55:13 +0300
+Subject: [PATCH] feat: hide the other balances above the money card
+
+---
+ .../SourceFiles/settings/settings_tele.cpp    |  5 +++
+ Telegram/SourceFiles/tele/tele_money_card.cpp | 33 +++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_money_card.h   |  5 +++
+ Telegram/SourceFiles/tele/tele_options.cpp    | 21 ++++++++++++
+ Telegram/SourceFiles/tele/tele_options.h      |  3 ++
+ .../SourceFiles/tele/tele_settings_io.cpp     |  1 +
+ .../SourceFiles/wallet/wallet_content.cpp     | 25 ++++++++------
+ 7 files changed, 83 insertions(+), 10 deletions(-)
+
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index ee4991d62d91f318f2197d9c86640c613b5a37f2..9f8488d9bcd996ea9e3618856bfdc04a0ea03bbc 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -2937,6 +2937,11 @@ void FillChats(SectionBuilder &builder) {
+ 		::Tele::kOptionMoneyCardDesigns,
+ 		{ u"wallet"_q, u"gift"_q, u"card"_q, u"gram"_q },
+ 		{ Off(::Tele::kOptionNoMoney) });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionMoneyHideBalances,
++		{ u"wallet"_q, u"balance"_q, u"earnings"_q, u"walt"_q },
++		{ Off(::Tele::kOptionNoMoney) });
+ 	AddOptionToggle(builder, ::Tele::kOptionGroupQuickReplies);
+ 	AddOptionToggle(
+ 		builder,
+diff --git a/Telegram/SourceFiles/tele/tele_money_card.cpp b/Telegram/SourceFiles/tele/tele_money_card.cpp
+index 66b18de889be25c8b145d5bddfbf899195019cc0..a6db93d17cd44f2c3565beee79f747ccc8f494c9 100644
+--- a/Telegram/SourceFiles/tele/tele_money_card.cpp
++++ b/Telegram/SourceFiles/tele/tele_money_card.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include "api/api_premium.h"
+ #include "apiwrap.h"
++#include "base/event_filter.h"
+ #include "chat_helpers/stickers_lottie.h"
+ #include "data/stickers/data_custom_emoji.h"
+ #include "data/data_changes.h"
+@@ -14,14 +15,19 @@
+ #include "history/view/media/history_view_sticker_player.h"
+ #include "main/main_session.h"
+ #include "storage/storage_account.h"
++#include "tele/tele_lowercase.h"
+ #include "tele/tele_options.h"
+ #include "ui/text/text_custom_emoji.h"
+ #include "ui/widgets/buttons.h"
++#include "ui/widgets/popup_menu.h"
+ #include "ui/painter.h"
+ #include "ui/top_background_gradient.h"
++#include "styles/style_menu_icons.h"
++#include "styles/style_widgets.h"
+ 
+ #include <QtCore/QJsonDocument>
+ #include <QtCore/QJsonObject>
++#include <QtGui/QCursor>
+ #include <QtGui/QRadialGradient>
+ 
+ namespace Tele {
+@@ -327,6 +333,33 @@ void ValidateMoneyCardChoice(not_null<Main::Session*> session) {
+ 	});
+ }
+ 
++rpl::producer<bool> MoneyBalanceRowShown(rpl::producer<bool> shown) {
++	return rpl::combine(
++		std::move(shown),
++		MoneyHideBalancesValue()
++	) | rpl::map([](bool shown, bool hidden) {
++		return shown && !hidden;
++	});
++}
++
++void AddHideBalancesMenu(not_null<Ui::RpWidget*> row) {
++	const auto menu = row->lifetime().make_state<
++		base::unique_qptr<Ui::PopupMenu>>();
++	base::install_event_filter(row, [=](not_null<QEvent*> e) {
++		if (e->type() != QEvent::ContextMenu || !MoneyCardDesignsOn()) {
++			return base::EventFilterResult::Continue;
++		}
++		*menu = base::make_unique_q<Ui::PopupMenu>(
++			row,
++			st::popupMenuWithIcons);
++		(*menu)->addAction(Lower(u"Hide these rows"_q), [] {
++			SetMoneyHideBalances(true);
++		}, &st::menuIconCancel);
++		(*menu)->popup(QCursor::pos());
++		return base::EventFilterResult::Cancel;
++	});
++}
++
+ QSize MoneyCardModelSize(int chipSide) {
+ 	const auto side = int(base::SafeRound(chipSide * kModelScale));
+ 	return QSize(side, side);
+diff --git a/Telegram/SourceFiles/tele/tele_money_card.h b/Telegram/SourceFiles/tele/tele_money_card.h
+index 11782224ec323846324c93ae83f0d22427110885..c91b5a46205eb077eef2021e1d78c33596ab104b 100644
+--- a/Telegram/SourceFiles/tele/tele_money_card.h
++++ b/Telegram/SourceFiles/tele/tele_money_card.h
+@@ -17,6 +17,7 @@ class Session;
+ 
+ namespace Ui {
+ class RoundButton;
++class RpWidget;
+ } // namespace Ui
+ 
+ namespace Ui::Text {
+@@ -82,6 +83,10 @@ void SetMoneyCardChoice(
+ 	not_null<Main::Session*> session);
+ void ValidateMoneyCardChoice(not_null<Main::Session*> session);
+ 
++[[nodiscard]] rpl::producer<bool> MoneyBalanceRowShown(
++	rpl::producer<bool> shown);
++void AddHideBalancesMenu(not_null<Ui::RpWidget*> row);
++
+ [[nodiscard]] QSize MoneyCardModelSize(int chipSide);
+ [[nodiscard]] QRect MoneyCardModelRect(const QRect &box);
+ 
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index d888a477ad39b7e18da89f7bd1f681b6d63f45fb..16b72bfb017bd8af1c86836020f589ceb9574d65 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -75,6 +75,7 @@ const char kOptionReactionsOrder[] = "tele-reactions-order";
+ const char kOptionNoAi[] = "tele-no-ai";
+ const char kOptionNoMoney[] = "tele-no-money";
+ const char kOptionMoneyCardDesigns[] = "tele-money-card-designs";
++const char kOptionMoneyHideBalances[] = "tele-money-hide-balances";
+ const char kOptionEmojiPanelClick[] = "tele-emoji-panel-click";
+ const char kOptionAttachMenuClick[] = "tele-attach-menu-click";
+ const char kOptionPinSets[] = "tele-pin-sets";
+@@ -696,6 +697,12 @@ base::options::toggle MoneyCardDesignsOption({
+ 	.defaultValue = true,
+ });
+ 
++base::options::toggle MoneyHideBalancesOption({
++	.id = kOptionMoneyHideBalances,
++	.name = "Hide other balances",
++	.description = "Hides the \"You also have\" rows above the Money card.",
++});
++
+ base::options::toggle EmojiPanelClickOption({
+ 	.id = kOptionEmojiPanelClick,
+ 	.name = "Open the emoji panel by click only",
+@@ -2388,6 +2395,20 @@ rpl::producer<bool> MoneyCardDesignsOnValue() {
+ 	});
+ }
+ 
++rpl::producer<bool> MoneyHideBalancesValue() {
++	return rpl::single(
++		rpl::empty
++	) | rpl::then(
++		MoneyHideBalancesOption.changes()
++	) | rpl::map([] {
++		return MoneyHideBalancesOption.value();
++	});
++}
++
++void SetMoneyHideBalances(bool hidden) {
++	MoneyHideBalancesOption.set(hidden);
++}
++
+ rpl::producer<> NoAiChanges() {
+ 	return NoAiOption.changes();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index dc738be655bbeb8e7c38d982f0974c3d97004b94..b7d6e709f12af76f76c338337c14b1da212be9c1 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -70,6 +70,7 @@ extern const char kOptionReactionsOrder[];
+ extern const char kOptionNoAi[];
+ extern const char kOptionNoMoney[];
+ extern const char kOptionMoneyCardDesigns[];
++extern const char kOptionMoneyHideBalances[];
+ extern const char kOptionEmojiPanelClick[];
+ extern const char kOptionAttachMenuClick[];
+ extern const char kOptionPinSets[];
+@@ -361,6 +362,8 @@ void SetReactionsOrder(const QString &value);
+ [[nodiscard]] bool NoMoney();
+ [[nodiscard]] bool MoneyCardDesignsOn();
+ [[nodiscard]] rpl::producer<bool> MoneyCardDesignsOnValue();
++[[nodiscard]] rpl::producer<bool> MoneyHideBalancesValue();
++void SetMoneyHideBalances(bool hidden);
+ [[nodiscard]] rpl::producer<> NoAiChanges();
+ [[nodiscard]] bool EmojiPanelClick();
+ [[nodiscard]] bool AttachMenuClick();
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index 5674af64a0f3730452ed65d40cafa1bcaa2d71eb..e324d9651ab155d9c5e56766d1c8373f1855d781 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -163,6 +163,7 @@ struct Spec {
+ 		Toggle(kOptionNoAi),
+ 		Toggle(kOptionNoMoney),
+ 		Toggle(kOptionMoneyCardDesigns),
++		Toggle(kOptionMoneyHideBalances),
+ 		Toggle(kOptionEmojiPanelClick),
+ 		Toggle(kOptionAttachMenuClick),
+ 		Toggle(kOptionPinSets),
+diff --git a/Telegram/SourceFiles/wallet/wallet_content.cpp b/Telegram/SourceFiles/wallet/wallet_content.cpp
+index b10cbb9851698291b3cb88e78235300b5ac02ef4..ef301e4554ed44a82708cbeabdc995b62a2fae14 100644
+--- a/Telegram/SourceFiles/wallet/wallet_content.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_content.cpp
+@@ -15552,16 +15552,18 @@ void Content::setupWaltEntry(not_null<InfoIsland*> island) {
+ 			st::walletIslandRow));
+ 	const auto button = wrap->entity();
+ 	AddRowChevron(button);
++	Tele::AddHideBalancesMenu(button);
+ 	button->setClickedCallback([=] {
+ 		const auto url = session->wallet().existingWaltBalanceUrl();
+ 		if (!url.isEmpty()) {
+ 			OpenWalletUrl(session, _show, url);
+ 		}
+ 	});
+-	wrap->toggleOn(session->wallet().existingWaltBalanceUrlValue(
+-	) | rpl::map([](const QString &url) {
+-		return !url.isEmpty();
+-	}), anim::type::normal);
++	wrap->toggleOn(Tele::MoneyBalanceRowShown(
++		session->wallet().existingWaltBalanceUrlValue(
++		) | rpl::map([](const QString &url) {
++			return !url.isEmpty();
++		})), anim::type::normal);
+ }
+ 
+ void Content::setupEarningsEntry(not_null<InfoIsland*> island) {
+@@ -15592,10 +15594,12 @@ void Content::setupEarningsEntry(not_null<InfoIsland*> island) {
+ 	});
+ 
+ 	session->credits().tonLoad();
+-	wrap->toggleOn(session->credits().tonBalanceValue(
+-	) | rpl::map([](CreditsAmount value) {
+-		return !value.empty();
+-	}), anim::type::normal);
++	Tele::AddHideBalancesMenu(button);
++	wrap->toggleOn(Tele::MoneyBalanceRowShown(
++		session->credits().tonBalanceValue(
++		) | rpl::map([](CreditsAmount value) {
++			return !value.empty();
++		})), anim::type::normal);
+ }
+ 
+ void Content::setupProtectRow() {
+@@ -16055,13 +16059,14 @@ void Content::setupOldWalletEntry(not_null<InfoIsland*> island) {
+ 	button->setClickedCallback([=] {
+ 		_show->showBox(Box(WalletConflictBox, _show, nullptr));
+ 	});
++	Tele::AddHideBalancesMenu(button);
+ 
+-	wrap->toggleOn(rpl::combine(
++	wrap->toggleOn(Tele::MoneyBalanceRowShown(rpl::combine(
+ 		wallet->deviceCustodyStateValue(),
+ 		wallet->presenceValue()
+ 	) | rpl::map([](DeviceCustodyState state, Presence presence) {
+ 		return (presence == Presence::Ready) && state.conflict;
+-	}), anim::type::normal);
++	})), anim::type::normal);
+ }
+ 
+ int Content::pinnedMax() const {
