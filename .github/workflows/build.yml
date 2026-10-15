@@ -499,12 +499,16 @@ jobs:
           path: tele
           persist-credentials: false
 
-      - name: Clone tdesktop
+      # patches can change the recipe (0341 takes the wallet engine from gettele/money)
+      - name: Clone tdesktop and apply patches
         run: |
-          git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$UPSTREAM_TAG" \
-            https://github.com/telegramdesktop/tdesktop.git tdesktop
+          git -c advice.detachedHead=false clone --quiet --depth 1 --recurse-submodules --shallow-submodules \
+            --branch "$UPSTREAM_TAG" https://github.com/telegramdesktop/tdesktop.git tdesktop
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 tele/tele.py --tdesktop "$GITHUB_WORKSPACE/tdesktop" apply
 
-      # the image holds every library built from upstream's recipe, keyed by the recipe itself
+      # the image holds every library built from the patched recipe, keyed by the recipe itself
       - name: Pick the image
         id: image
         run: |
@@ -730,10 +734,14 @@ jobs:
       - name: Set up
         run: bash tele/ci/macos-setup.sh
 
-      - name: Clone tdesktop
+      # patches can change prepare.py (0341 takes the wallet engine from gettele/money)
+      - name: Clone tdesktop and apply patches
         run: |
           git -c advice.detachedHead=false clone --quiet --depth 1 --recurse-submodules --shallow-submodules \
             --branch "$UPSTREAM_TAG" https://github.com/telegramdesktop/tdesktop.git tdesktop
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 tele/tele.py --tdesktop "$GITHUB_WORKSPACE/tdesktop" apply
 
       - name: Pick the libraries
         id: key
