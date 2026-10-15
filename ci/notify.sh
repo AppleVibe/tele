@@ -9,8 +9,9 @@ case "${STATUS:-}" in
   *) text="$1" ;;
 esac
 url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-curl -sS -m 30 -o /dev/null "https://api.telegram.org/bot$NOTIFY_TOKEN/sendMessage" \
+# the text goes through stdin: on windows runners curl's arguments pass the
+# ansi code page, which turns emoji into "?"
+printf '%s\n%s' "$text" "$url" | curl -sS -m 30 -o /dev/null "https://api.telegram.org/bot$NOTIFY_TOKEN/sendMessage" \
   --data-urlencode "chat_id=$NOTIFY_CHAT" \
-  --data-urlencode "text=$text
-$url" \
+  --data-urlencode "text@-" \
   --data-urlencode 'link_preview_options={"is_disabled":true}' || true
