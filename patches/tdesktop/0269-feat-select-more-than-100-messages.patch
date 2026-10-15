@@ -1,0 +1,476 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Wed, 7 Oct 2026 18:57:07 +0300
+Subject: [PATCH] feat: select more than 100 messages
+
+---
+ Telegram/CMakeLists.txt                       |  2 +
+ Telegram/SourceFiles/api/api_report.cpp       | 13 +++--
+ Telegram/SourceFiles/data/data_histories.cpp  |  7 +++
+ .../history/history_inner_widget.cpp          |  9 ++--
+ .../history/history_item_helpers.cpp          |  7 ++-
+ .../history/view/history_view_list_widget.cpp |  7 +--
+ .../downloads/info_downloads_provider.cpp     |  3 +-
+ .../info/media/info_media_common.cpp          |  3 +-
+ .../info/media/info_media_list_widget.cpp     |  3 +-
+ .../SourceFiles/settings/settings_tele.cpp    |  4 ++
+ .../SourceFiles/tele/tele_delete_fail.cpp     | 23 +++++++-
+ Telegram/SourceFiles/tele/tele_options.cpp    | 12 +++++
+ Telegram/SourceFiles/tele/tele_options.h      |  2 +
+ .../SourceFiles/tele/tele_select_many.cpp     | 52 +++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_select_many.h  | 17 ++++++
+ .../SourceFiles/tele/tele_settings_io.cpp     |  1 +
+ 16 files changed, 148 insertions(+), 17 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_select_many.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_select_many.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index f6cae581514eae22327b8467189b04c8b14b244a..91f83fed28063ed94f21ad9fa8eb701c986407ed 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2680,6 +2680,8 @@ PRIVATE
+     tele/tele_screen_capture.h
+     tele/tele_secret_media.cpp
+     tele/tele_secret_media.h
++    tele/tele_select_many.cpp
++    tele/tele_select_many.h
+     tele/tele_select_service.cpp
+     tele/tele_select_service.h
+     tele/tele_send_files.cpp
+diff --git a/Telegram/SourceFiles/api/api_report.cpp b/Telegram/SourceFiles/api/api_report.cpp
+index 79981978a013561062c99d52fc1a525cfd504125..46f5064ed5460cb850a8809baaca06a70e6a5209 100644
+--- a/Telegram/SourceFiles/api/api_report.cpp
++++ b/Telegram/SourceFiles/api/api_report.cpp
+@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "data/data_user.h"
+ #include "lang/lang_keys.h"
+ #include "main/main_session.h"
++#include "tele/tele_select_many.h"
+ #include "ui/boxes/report_box_graphics.h"
+ #include "ui/layers/show.h"
+ 
+@@ -229,11 +230,13 @@ void ReportSpam(
+ 		msgIds.push_back(MTP_int(fullId.msg));
+ 	}
+ 
+-	sender->session().api().request(MTPchannels_ReportSpam(
+-		channel->inputChannel(),
+-		sender->input(),
+-		MTP_vector<MTPint>(msgIds)
+-	)).send();
++	for (const auto &part : Tele::SplitIds(msgIds)) {
++		sender->session().api().request(MTPchannels_ReportSpam(
++			channel->inputChannel(),
++			sender->input(),
++			MTP_vector<MTPint>(part)
++		)).send();
++	}
+ }
+ 
+ } // namespace Api
+diff --git a/Telegram/SourceFiles/data/data_histories.cpp b/Telegram/SourceFiles/data/data_histories.cpp
+index 6bcdbbee8eb589e8a33ec18e4093467eabb6d422..8f12a1dbdcbc4a5ff3d95cf12f1b57913ceda8db 100644
+--- a/Telegram/SourceFiles/data/data_histories.cpp
++++ b/Telegram/SourceFiles/data/data_histories.cpp
+@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_delete_fail.h"
+ #include "tele/tele_deleted.h"
+ #include "tele/tele_ghost.h"
++#include "tele/tele_select_many.h"
+ #include "tele/tele_send_order.h"
+ 
+ namespace Data {
+@@ -826,6 +827,12 @@ void Histories::deleteMessages(
+ 		not_null<History*> history,
+ 		const QVector<MTPint> &ids,
+ 		bool revoke) {
++	if (ids.size() > Tele::kMaxIdsPerRequest) {
++		for (const auto &part : Tele::SplitIds(ids)) {
++			deleteMessages(history, part, revoke);
++		}
++		return;
++	}
+ 	sendRequest(history, RequestType::Delete, [=](Fn<void()> finish) {
+ 		const auto done = [=](const MTPmessages_AffectedMessages &result) {
+ 			session().api().applyAffectedMessages(history->peer, result);
+diff --git a/Telegram/SourceFiles/history/history_inner_widget.cpp b/Telegram/SourceFiles/history/history_inner_widget.cpp
+index 6fb0f6ec3579f99fa366f0188b65783cdf5c0aad..a4bf38311fcbd6224064e10093ef6638a6ec278f 100644
+--- a/Telegram/SourceFiles/history/history_inner_widget.cpp
++++ b/Telegram/SourceFiles/history/history_inner_widget.cpp
+@@ -139,6 +139,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_gif_video.h"
+ #include "tele/tele_ignored.h"
+ #include "tele/tele_secret_media.h"
++#include "tele/tele_select_many.h"
+ #include "tele/tele_shot.h"
+ #include "tele/tele_message_menu.h"
+ #include "tele/tele_options.h"
+@@ -3297,7 +3298,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
+ 				}
+ 				const auto start = (topToBottom ? nearestItem : toItem);
+ 				const auto end = (topToBottom ? toItem : nearestItem);
+-				const auto left = MaxSelectedItems
++				const auto left = Tele::MaxSelectedItems()
+ 					- selectedState.count
+ 					+ (topToBottom ? 0 : 1);
+ 				if (collectBetween(start, end, left).empty()) {
+@@ -6112,7 +6113,7 @@ void HistoryInner::changeSelection(
+ 	const auto add = (action == SelectAction::Select);
+ 	if (add
+ 		&& goodForSelection(toItems, item, total)
+-		&& total <= MaxSelectedItems) {
++		&& total <= Tele::MaxSelectedItems()) {
+ 		addToSelection(toItems, item);
+ 	} else {
+ 		removeFromSelection(toItems, item);
+@@ -6139,7 +6140,7 @@ void HistoryInner::changeSelectionAsGroup(
+ 				return false;
+ 			}
+ 		}
+-		return (total <= MaxSelectedItems);
++		return (total <= Tele::MaxSelectedItems());
+ 	}();
+ 	if (action == SelectAction::Select && canSelect) {
+ 		for (const auto &other : group->items) {
+@@ -6407,7 +6408,7 @@ void HistoryInner::addSelectionRange(
+ 				auto item = block->messages[fromitem]->data();
+ 				changeSelectionAsGroup(toItems, item, SelectAction::Select);
+ 			}
+-			if (toItems->size() >= MaxSelectedItems) break;
++			if (int(toItems->size()) >= Tele::MaxSelectedItems()) break;
+ 			fromitem = 0;
+ 		}
+ 	}
+diff --git a/Telegram/SourceFiles/history/history_item_helpers.cpp b/Telegram/SourceFiles/history/history_item_helpers.cpp
+index 0b00ff89f8aadc58d1e992cd05db564551503768..13c89f99c3a3423a0072d6ac1f5e3014672d77f6 100644
+--- a/Telegram/SourceFiles/history/history_item_helpers.cpp
++++ b/Telegram/SourceFiles/history/history_item_helpers.cpp
+@@ -58,6 +58,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "lang/lang_keys.h"
+ #include "tele/tele_forward.h"
+ #include "tele/tele_local_password.h"
++#include "tele/tele_select_many.h"
+ #include "tele/tele_silent.h"
+ 
+ #include "styles/style_layers.h"
+@@ -690,7 +691,11 @@ std::vector<ForwardRange> CollectForwardRanges(
+ 		}
+ 		if (result.empty()
+ 			|| result.back().fromEphemeral != fromEphemeral
+-			|| Tele::ForwardSeparately(result.back().items.back(), item)) {
++			|| Tele::ForwardSeparately(result.back().items.back(), item)
++			|| Tele::ForwardSplitBySize(
++				result.back().items,
++				ordered,
++				int(&item - ordered.data()))) {
+ 			result.push_back({ .fromEphemeral = fromEphemeral });
+ 		}
+ 		result.back().items.push_back(item);
+diff --git a/Telegram/SourceFiles/history/view/history_view_list_widget.cpp b/Telegram/SourceFiles/history/view/history_view_list_widget.cpp
+index 86cecff81e42e4266be71ff1bd49a5fd01e2a661..579577565ecdabeff2eade60f9889485f8d6c68c 100644
+--- a/Telegram/SourceFiles/history/view/history_view_list_widget.cpp
++++ b/Telegram/SourceFiles/history/view/history_view_list_widget.cpp
+@@ -108,6 +108,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_full_preview.h"
+ #include "tele/tele_protected.h"
+ #include "tele/tele_rmb_beside_bubble.h"
++#include "tele/tele_select_many.h"
+ #include "tele/tele_select_service.h"
+ #include "styles/style_chat.h"
+ #include "styles/style_window.h" // columnMaximalWidthLeft
+@@ -1801,7 +1802,7 @@ bool ListWidget::isGoodForSelection(
+ 	if (!applyTo.contains(item->fullId())) {
+ 		++totalCount;
+ 	}
+-	return (totalCount <= MaxSelectedItems);
++	return (totalCount <= Tele::MaxSelectedItems());
+ }
+ 
+ bool ListWidget::addToSelection(
+@@ -2042,7 +2043,7 @@ std::vector<not_null<HistoryItem*>> ListWidget::selectionUpTo(
+ 	}
+ 	const auto startItem = topToBottom ? nearestItem : toItem.get();
+ 	const auto endItem = topToBottom ? toItem.get() : nearestItem;
+-	const auto left = MaxSelectedItems
++	const auto left = Tele::MaxSelectedItems()
+ 		- int(_selected.size())
+ 		+ (topToBottom ? 0 : 1);
+ 	return collectBetween(startItem, endItem, left);
+@@ -3500,7 +3501,7 @@ void ListWidget::applyDragSelection(SelectedMap &applyTo) const {
+ 	if (_dragSelectAction == DragSelectAction::Selecting) {
+ 		auto already = int(applyTo.size());
+ 		for (const auto &itemId : _dragSelected) {
+-			if (applyTo.size() >= MaxSelectedItems) {
++			if (int(applyTo.size()) >= Tele::MaxSelectedItems()) {
+ 				break;
+ 			} else if (!applyTo.contains(itemId)) {
+ 				if (const auto item = session().data().message(itemId)) {
+diff --git a/Telegram/SourceFiles/info/downloads/info_downloads_provider.cpp b/Telegram/SourceFiles/info/downloads/info_downloads_provider.cpp
+index e1204491090a92c1c7e0fe7ff02e860270b7c3c8..f3d415dea82c1831672d8bb4eaacd31909a68a7e 100644
+--- a/Telegram/SourceFiles/info/downloads/info_downloads_provider.cpp
++++ b/Telegram/SourceFiles/info/downloads/info_downloads_provider.cpp
+@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "core/application.h"
+ #include "storage/storage_shared_media.h"
+ #include "tele/tele_protected.h"
++#include "tele/tele_select_many.h"
+ #include "layout/layout_selection.h"
+ #include "styles/style_overview.h"
+ 
+@@ -519,7 +520,7 @@ void Provider::applyDragSelection(
+ 	const auto search = !_queryWords.isEmpty();
+ 	const auto selectLimit = _storiesAddToAlbumId
+ 		? _controller->session().appConfig().storiesAlbumLimit()
+-		: MaxSelectedItems;
++		: Tele::MaxSelectedItems();
+ 	auto chosen = base::flat_set<not_null<const HistoryItem*>>();
+ 	chosen.reserve(till - from);
+ 	for (auto i = from; i != till; ++i) {
+diff --git a/Telegram/SourceFiles/info/media/info_media_common.cpp b/Telegram/SourceFiles/info/media/info_media_common.cpp
+index a26cdf558560c7ff0864120ce2a271276bdd480d..9307de91d68246cd5f7aa90e6c2afbc10a202ba3 100644
+--- a/Telegram/SourceFiles/info/media/info_media_common.cpp
++++ b/Telegram/SourceFiles/info/media/info_media_common.cpp
+@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ 
+ #include "history/history_item.h"
+ #include "storage/storage_shared_media.h"
++#include "tele/tele_select_many.h"
+ #include "styles/style_info.h"
+ #include "styles/style_overview.h"
+ 
+@@ -38,7 +39,7 @@ bool ChangeItemSelection(
+ 		ListItemSelectionData selectionData,
+ 		int limit) {
+ 	if (!limit) {
+-		limit = MaxSelectedItems;
++		limit = Tele::MaxSelectedItems();
+ 	}
+ 	const auto changeExisting = [&](auto it) {
+ 		if (it == selected.cend()) {
+diff --git a/Telegram/SourceFiles/info/media/info_media_list_widget.cpp b/Telegram/SourceFiles/info/media/info_media_list_widget.cpp
+index 028a199a4af655063e8512146d9df0a562c073dc..0588a7e9c5c6107657658e16ad5cbba9f1abb71c 100644
+--- a/Telegram/SourceFiles/info/media/info_media_list_widget.cpp
++++ b/Telegram/SourceFiles/info/media/info_media_list_widget.cpp
+@@ -74,6 +74,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "core/application.h"
+ #include "ui/toast/toast.h"
+ #include "tele/tele_list_dates.h"
++#include "tele/tele_select_many.h"
+ #include "styles/style_info.h"
+ #include "styles/style_layers.h"
+ #include "styles/style_menu_icons.h"
+@@ -173,7 +174,7 @@ ListWidget::ListWidget(
+ 	_provider->type(),
+ 	[=] { scrollDateCheck(); },
+ 	[=] { scrollDateHide(); }))
+-, _selectedLimit(MaxSelectedItems)
++, _selectedLimit(Tele::MaxSelectedItems())
+ , _storiesAddToAlbumId(controller->storiesAddToAlbumId())
+ , _hiddenMark(std::make_unique<StickerPremiumMark>(
+ 		&_controller->session(),
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 1af43fdbbc402c8e73daa90c3a91d52cbc5e59ca..9c429d4cc885b9320f8842371c566cddb293ae3d 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -2924,6 +2924,10 @@ void FillChats(SectionBuilder &builder) {
+ 		builder,
+ 		::Tele::kOptionPinnedBarMenu,
+ 		{ u"pinned messages"_q });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionSelectMany,
++		{ u"selection"_q, u"limit"_q, u"bulk"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Sponsored"_q);
+ 	AddOptionToggle(builder, ::Tele::kOptionHideSponsored);
+diff --git a/Telegram/SourceFiles/tele/tele_delete_fail.cpp b/Telegram/SourceFiles/tele/tele_delete_fail.cpp
+index b97d1627e50ea6dcfad70ca017725ee930c32943..e848035dc6fcc03a308e473d482eb3373a7e2b93 100644
+--- a/Telegram/SourceFiles/tele/tele_delete_fail.cpp
++++ b/Telegram/SourceFiles/tele/tele_delete_fail.cpp
+@@ -14,6 +14,25 @@
+ #include "window/window_session_controller.h"
+ 
+ namespace Tele {
++namespace {
++
++// a big deletion goes out in parts of 100 that usually fail together
++constexpr auto kSameFailToastSkip = crl::time(3000);
++
++[[nodiscard]] bool RepeatedFailToast(
++		not_null<History*> history,
++		const QString &error) {
++	static auto last = std::tuple<PeerId, QString, crl::time>();
++	const auto now = crl::now();
++	const auto peer = history->peer->id;
++	const auto repeated = (std::get<0>(last) == peer)
++		&& (std::get<1>(last) == error)
++		&& (now - std::get<2>(last) < kSameFailToastSkip);
++	last = { peer, error, now };
++	return repeated;
++}
++
++} // namespace
+ 
+ void ReinsertDeleted(not_null<HistoryItem*> item) {
+ 	const auto history = item->history();
+@@ -78,7 +97,9 @@ void DeleteFailed(
+ 			}
+ 		});
+ 	}
+-	if (const auto window = session->tryResolveWindow(peer)) {
++	if (RepeatedFailToast(history, error)) {
++		return;
++	} else if (const auto window = session->tryResolveWindow(peer)) {
+ 		ShowTeleToast(
+ 			window,
+ 			Lower(u"Couldn't delete messages: "_q) + error);
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 94e38fc63c48dceae74b5aa3d10092cff5c30c37..e0ba8945e3ceed221cd0a0cfb5bc65985d2979ae 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -178,6 +178,7 @@ const char kOptionBackgroundMenu[] = "tele-background-menu";
+ const char kOptionUsernameAliases[] = "tele-username-aliases";
+ const char kOptionAliasMenu[] = "tele-alias-menu";
+ const char kOptionPinnedBarMenu[] = "tele-pinned-bar-menu";
++const char kOptionSelectMany[] = "tele-select-many";
+ const char kOptionNoPhoneInHeader[] = "tele-no-phone-in-header";
+ const char kOptionNftPurchasePrice[] = "tele-nft-purchase-price";
+ const char kOptionLinkRewrites[] = "tele-link-rewrites";
+@@ -1295,6 +1296,13 @@ base::options::toggle PinnedBarMenuOption({
+ 	.defaultValue = true,
+ });
+ 
++base::options::toggle SelectManyOption({
++	.id = kOptionSelectMany,
++	.name = "Select more than 100 messages",
++	.description = "Up to 10000; deleting and forwarding go out in parts "
++		"of 100.",
++});
++
+ base::options::toggle NoPhoneInHeaderOption({
+ 	.id = kOptionNoPhoneInHeader,
+ 	.name = "Names instead of phone numbers in chats",
+@@ -2917,6 +2925,10 @@ bool PinnedBarMenu() {
+ 	return PinnedBarMenuOption.value();
+ }
+ 
++bool SelectMany() {
++	return SelectManyOption.value();
++}
++
+ bool NoPhoneInHeader() {
+ 	return NoPhoneInHeaderOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index f5c2dcfcdaa54054de14501d5b125e9744e4dafa..44866e9c92aaff416d94c36aef56b32931df60df 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -173,6 +173,7 @@ extern const char kOptionBackgroundMenu[];
+ extern const char kOptionUsernameAliases[];
+ extern const char kOptionAliasMenu[];
+ extern const char kOptionPinnedBarMenu[];
++extern const char kOptionSelectMany[];
+ extern const char kOptionNoPhoneInHeader[];
+ extern const char kOptionNftPurchasePrice[];
+ extern const char kOptionLinkRewrites[];
+@@ -485,6 +486,7 @@ void SetUsernameAliases(const QString &value);
+ [[nodiscard]] bool BackgroundMenu();
+ [[nodiscard]] bool AliasMenu();
+ [[nodiscard]] bool PinnedBarMenu();
++[[nodiscard]] bool SelectMany();
+ [[nodiscard]] bool NoPhoneInHeader();
+ [[nodiscard]] rpl::producer<bool> NoPhoneInHeaderValue();
+ [[nodiscard]] bool NftPurchasePrice();
+diff --git a/Telegram/SourceFiles/tele/tele_select_many.cpp b/Telegram/SourceFiles/tele/tele_select_many.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..94fe4011c19accd2702e625bad1be081d9fe0802
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_select_many.cpp
+@@ -0,0 +1,52 @@
++#include "tele/tele_select_many.h"
++
++#include "history/history_item.h"
++#include "tele/tele_options.h"
++
++namespace Tele {
++namespace {
++
++constexpr auto kDefaultMaxSelected = 100;
++constexpr auto kManyMaxSelected = 10000;
++
++} // namespace
++
++int MaxSelectedItems() {
++	return SelectMany() ? kManyMaxSelected : kDefaultMaxSelected;
++}
++
++std::vector<QVector<MTPint>> SplitIds(const QVector<MTPint> &ids) {
++	auto result = std::vector<QVector<MTPint>>();
++	const auto count = int(ids.size());
++	result.reserve((count + kMaxIdsPerRequest - 1) / kMaxIdsPerRequest);
++	for (auto i = 0; i < count; i += kMaxIdsPerRequest) {
++		result.push_back(ids.mid(i, kMaxIdsPerRequest));
++	}
++	return result;
++}
++
++bool ForwardSplitBySize(
++		const std::vector<not_null<HistoryItem*>> &range,
++		const std::vector<not_null<HistoryItem*>> &ordered,
++		int index) {
++	const auto size = int(range.size());
++	if (size >= kMaxIdsPerRequest) {
++		return true;
++	}
++	const auto group = ordered[index]->groupId();
++	if (!group
++		|| (index > 0 && ordered[index - 1]->groupId() == group)) {
++		return false;
++	}
++	auto album = 0;
++	for (auto i = index; i != int(ordered.size()); ++i) {
++		if (ordered[i]->groupId() != group) {
++			break;
++		}
++		++album;
++	}
++	return (album <= kMaxIdsPerRequest)
++		&& (size + album > kMaxIdsPerRequest);
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_select_many.h b/Telegram/SourceFiles/tele/tele_select_many.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..b4f90259da9d0f14ac3d8b29923c25da10193d53
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_select_many.h
+@@ -0,0 +1,17 @@
++#pragma once
++
++class HistoryItem;
++
++namespace Tele {
++
++inline constexpr auto kMaxIdsPerRequest = 100;
++
++[[nodiscard]] int MaxSelectedItems();
++[[nodiscard]] std::vector<QVector<MTPint>> SplitIds(
++	const QVector<MTPint> &ids);
++[[nodiscard]] bool ForwardSplitBySize(
++	const std::vector<not_null<HistoryItem*>> &range,
++	const std::vector<not_null<HistoryItem*>> &ordered,
++	int index);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index c412c6e3bd81e1a1f200b3e65ec1a663d0d42546..7c4b508e94733a3f0176543f44ac99a78235d2ba 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -260,6 +260,7 @@ struct Spec {
+ 		Toggle(kOptionBackgroundMenu),
+ 		Toggle(kOptionAliasMenu),
+ 		Toggle(kOptionPinnedBarMenu),
++		Toggle(kOptionSelectMany),
+ 		Toggle(kOptionLocalNameMenu),
+ 		Toggle(kOptionInvisibleNames),
+ 		Choice(kOptionInvisibleNamesFallback, { QString(), u"id"_q }),

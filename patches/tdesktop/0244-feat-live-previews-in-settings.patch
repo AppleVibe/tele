@@ -41,7 +41,7 @@ index 288f569e5db7d1a6d9addd3ae0f235f54e9e8094..efe1146ae627a426fb221084467f7f31
      tele/tele_protected.h
      tele/tele_punctual_scheduled.cpp
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index cf1234a0621f2ee11eb98e6cf875cf38ed3d4b2a..c719e1f100f08c0868ca4217c8c85ab80eed8fc0 100644
+index fab5c4af0929b4b6ebcfd260f638766fa4894011..1fc38ce6dd8d990065d2bba2a890c08727ec8d89 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -31,6 +31,7 @@

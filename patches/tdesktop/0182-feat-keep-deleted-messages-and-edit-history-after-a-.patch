@@ -52,7 +52,7 @@ index bfb56de2a8887225cc8a5912363c3fbb746429b3..e85e03f447f414bcf504feaf80aa0d99
  
  void Session::appConfigRefreshed() {
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index f83559b9dcb361fc5f64070f2127fc2d6d9d6518..e6fcbcec24c6517ef13c21b8690fad19593ce7a9 100644
+index 905fb108c5b48bdd031f806fd36b466cd578724a..2829683a6c16768ceb7bbf96c8736649760877b7 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -32,6 +32,7 @@
@@ -2141,7 +2141,7 @@ index 0000000000000000000000000000000000000000..34ff19c7ea66c508ad80b508e5f353d8
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 9c3e9d2844fd1a118878dee8cb0f0b918635b8c8..9d9e6bed50d1b0079f6f6d416d94bc9ad486d469 100644
+index a1e126b06e2b64d2de1d65925f603f64729e595a..04460ebe169368f45c4643a24d2d755e188751f0 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -74,14 +74,17 @@ const char kOptionIgnoredUsers[] = "tele-ignored-users";
@@ -2213,7 +2213,7 @@ index 9c3e9d2844fd1a118878dee8cb0f0b918635b8c8..9d9e6bed50d1b0079f6f6d416d94bc9a
  base::options::toggle RevealSpoilersOption({
  	.id = kOptionRevealSpoilers,
  	.name = "Reveal spoilers automatically",
-@@ -1725,6 +1745,21 @@ rpl::producer<bool> EditHistoryValue() {
+@@ -1726,6 +1746,21 @@ rpl::producer<bool> EditHistoryValue() {
  	});
  }
  
@@ -2235,7 +2235,7 @@ index 9c3e9d2844fd1a118878dee8cb0f0b918635b8c8..9d9e6bed50d1b0079f6f6d416d94bc9a
  bool ReadLog() {
  	return ReadLogOption.value();
  }
-@@ -1745,6 +1780,21 @@ bool KeepDeletedOwn() {
+@@ -1746,6 +1781,21 @@ bool KeepDeletedOwn() {
  	return KeepDeletedOwnOption.value();
  }
  
@@ -2257,7 +2257,7 @@ index 9c3e9d2844fd1a118878dee8cb0f0b918635b8c8..9d9e6bed50d1b0079f6f6d416d94bc9a
  bool DeletedTrashIcon() {
  	return KeepDeletedOption.value() && DeletedIconOption.value();
  }
-@@ -1796,6 +1846,24 @@ rpl::producer<QString> DeletedQuoteNameValue() {
+@@ -1797,6 +1847,24 @@ rpl::producer<QString> DeletedQuoteNameValue() {
  	});
  }
  

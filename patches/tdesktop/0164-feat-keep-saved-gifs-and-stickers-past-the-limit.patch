@@ -196,7 +196,7 @@ index 53b7b7c372b75d778731b7f715d513380cee1235..e67ead0c26ffede414ea9e477f976f19
  		builder,
  		::Tele::kOptionAttachMenuClick,
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index da79d6ab9bd3e517764f13437e825705d9a4f022..6af9983a99b1ed9e917b18c9fbeee311d87d1969 100644
+index 423696ae57a126904fe3aec92bf9221880df19a4..b91040a03059a8fb83854f9fa61eec5eebe0339e 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -55,6 +55,7 @@ const char kOptionNoAi[] = "tele-no-ai";
@@ -220,7 +220,7 @@ index da79d6ab9bd3e517764f13437e825705d9a4f022..6af9983a99b1ed9e917b18c9fbeee311
  base::options::toggle ShowGiftIdsOption({
  	.id = kOptionShowGiftIds,
  	.name = "IDs on collectible gifts",
-@@ -1364,6 +1371,14 @@ rpl::producer<> PinSetsChanges() {
+@@ -1365,6 +1372,14 @@ rpl::producer<> PinSetsChanges() {
  	return PinSetsOption.changes();
  }
  

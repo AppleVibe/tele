@@ -59,7 +59,7 @@ index 82711e8525cd2e0c1ea84abfb71fdf2639bdea56..0a60e313bbe4158fafa6c9e0b91ed3d1
  		const auto guard = QPointer<Instance>(_instance);
  		if (onFail && onFail(error, response)) {
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 32f695d87cdcfeed40fec202d905f943d9135ad5..8f9c7d91e665f67f53c660257fe314864a3884fb 100644
+index c7284505cc3f35b2269ce22369d5b02ad97656ec..695486ae709c6b1f1f11492cc6dcb4efe77c8bb8 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3108,8 +3108,8 @@ void FillNotifications(SectionBuilder &builder) {
@@ -99,7 +99,7 @@ index 3c0151706e60d19760b371726ad70ba0c26f0fcc..c7a69a8a262f4f26464230c69d8f56a8
  
  [[nodiscard]] int FloodWaitSeconds(const QString &error);
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 7ec4c0e3255d9f0d8a544b8419d358722ecafd7f..33fa566a8573654eb395b4cc233086fa6a8a658d 100644
+index 01ab97025d3edb399815c0f018149e1e4de6181e..04e00df593eea6d5fb148706c253432146857a6e 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -136,6 +136,7 @@ const char kOptionSilentPerChat[] = "tele-silent-per-chat";
@@ -123,7 +123,7 @@ index 7ec4c0e3255d9f0d8a544b8419d358722ecafd7f..33fa566a8573654eb395b4cc233086fa
  base::options::toggle NoticesTeleToastsOption({
  	.id = kOptionNoticesTeleToasts,
  	.name = "Log tele toasts",
-@@ -2421,6 +2428,10 @@ bool NoticesLimits() {
+@@ -2422,6 +2429,10 @@ bool NoticesLimits() {
  	return NoticesLimitsOption.value();
  }
  

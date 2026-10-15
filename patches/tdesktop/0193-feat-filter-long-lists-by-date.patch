@@ -270,7 +270,7 @@ index bfa2154d71b62dd17ca18bad3a47e4b3bb5ed38e..4b004523cab2421a3271db478b3912ec
  
  not_null<Ui::SlideWrap<Ui::SettingsButton>*> AddShowMoreButton(
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 8cd4620d24ac01283f5ef617be0f30e2cc1cdce1..cdc370832cac8740c810aca1199174f316ae4eb8 100644
+index 174817a4a973270422aede555a1f28e666ec1362..cb23541e899a692ddb62339030812554eb844821 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -2512,6 +2512,10 @@ void FillInterface(SectionBuilder &builder) {
@@ -1424,7 +1424,7 @@ index 0000000000000000000000000000000000000000..a08967625cbb615c7a7a343105763e91
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index d52a8099db9e412035e2ac0d85bf936f930fd8ce..a44d635570ba41a023db4c44fccfd292b21c1301 100644
+index 865643258cfcaf4fbca1d7500984665e0fafb578..99e5c80a17f59e21746079e5f6d82bbde98c1d18 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -164,6 +164,7 @@ const char kOptionLocalFolders[] = "tele-local-folders";
@@ -1435,7 +1435,7 @@ index d52a8099db9e412035e2ac0d85bf936f930fd8ce..a44d635570ba41a023db4c44fccfd292
  const char kOptionBookmarks[] = "tele-bookmarks";
  const char kOptionReturnPoint[] = "tele-return-point";
  const char kOptionNoGestures[] = "tele-no-gestures";
-@@ -1155,6 +1156,13 @@ base::options::toggle FullChatPreviewOption({
+@@ -1156,6 +1157,13 @@ base::options::toggle FullChatPreviewOption({
  		"leaving messages unread.",
  });
  
@@ -1449,7 +1449,7 @@ index d52a8099db9e412035e2ac0d85bf936f930fd8ce..a44d635570ba41a023db4c44fccfd292
  base::options::toggle BookmarksOption({
  	.id = kOptionBookmarks,
  	.name = "Message bookmarks",
-@@ -2566,6 +2574,10 @@ bool FullChatPreview() {
+@@ -2567,6 +2575,10 @@ bool FullChatPreview() {
  	return FullChatPreviewOption.value();
  }
  

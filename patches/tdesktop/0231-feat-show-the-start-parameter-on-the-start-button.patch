@@ -86,7 +86,7 @@ index a56a4d5d45cce63fb44d2f08dd4595b491e41083..5fe8764c02f4f47d5498f238a4822faa
  		} else {
  			toggle(nullptr);
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index c403386d96f7740da5c800e2f091b855a8ee1428..4df10e3541fc7831a463f0589f87f35beb8fb5b2 100644
+index 236950bad9ead02ecbab86ba656bdc4c8bbb66cf..c26a5c3ca535fe892792d789485465552a233e1e 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3512,6 +3512,10 @@ void FillBots(SectionBuilder &builder) {
@@ -101,7 +101,7 @@ index c403386d96f7740da5c800e2f091b855a8ee1428..4df10e3541fc7831a463f0589f87f35b
  }
  
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 62be42cd4b7f431caa15da3f836d54ac644a20a1..489138ad2256a24b776f7ed3b417feb5fd3e888b 100644
+index ca409e4d5bdee129944f9349bd22a78ccfcefc39..8bf96aa5d4b41640311592b3970dcf2ee95c9b11 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -131,6 +131,7 @@ const char kOptionSendOlderReplies[] = "tele-send-older-replies";
@@ -125,7 +125,7 @@ index 62be42cd4b7f431caa15da3f836d54ac644a20a1..489138ad2256a24b776f7ed3b417feb5
  base::options::toggle NoRichPastePromptOption({
  	.id = kOptionNoRichPastePrompt,
  	.name = "No rich message prompt on paste",
-@@ -2429,6 +2436,14 @@ bool InlineAsText() {
+@@ -2430,6 +2437,14 @@ bool InlineAsText() {
  	return InlineAsTextOption.value();
  }
  

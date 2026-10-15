@@ -694,7 +694,7 @@ index 54c10a8bf2c995ab680bd99d8a3431988e285b20..6fcc88d5ba9efd86707039731a7c1e58
  	const auto from = item->from();
  	return from->isUser()
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index d6a932235bb5745f9de5efbea74944684975516d..19d9842800039414e0040f34fb44340bd499861a 100644
+index 4f161b3cc9d1fe24b88e6a8015945435cab20d75..f8168dca1531611ab74830a28933dbf413b148ba 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -67,6 +67,7 @@ const char kOptionMergeIdDc[] = "tele-merge-id-dc";
@@ -717,7 +717,7 @@ index d6a932235bb5745f9de5efbea74944684975516d..19d9842800039414e0040f34fb44340b
  base::options::toggle MessageSecondsOption({
  	.id = kOptionMessageSeconds,
  	.name = "Show seconds in message times",
-@@ -1467,6 +1473,24 @@ rpl::producer<QString> IgnoredListValue() {
+@@ -1468,6 +1474,24 @@ rpl::producer<QString> IgnoredListValue() {
  	});
  }
  

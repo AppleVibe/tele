@@ -642,7 +642,7 @@ index 0000000000000000000000000000000000000000..245246dbea94955986118f03f044b558
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 5f035db2140a1e2afbd5a04f0c48179ace9b7f21..5d3ebacc2577359187804529a3d96144923699ed 100644
+index 2bf1d9508ebe3265b3dc4fe5b87a3f533bbb9c8b..1ff32248ba0fc193aac7c70db38f322a7f76d303 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -112,6 +112,7 @@ const char kOptionConfirmGifs[] = "tele-confirm-gifs";
@@ -653,7 +653,7 @@ index 5f035db2140a1e2afbd5a04f0c48179ace9b7f21..5d3ebacc2577359187804529a3d96144
  const char kOptionChatBackgrounds[] = "tele-chat-backgrounds";
  const char kOptionUsernameAliases[] = "tele-username-aliases";
  const char kOptionNoPhoneInHeader[] = "tele-no-phone-in-header";
-@@ -782,6 +783,11 @@ base::options::toggle HdPhotosOption({
+@@ -783,6 +784,11 @@ base::options::toggle HdPhotosOption({
  	.defaultValue = true,
  });
  
@@ -665,7 +665,7 @@ index 5f035db2140a1e2afbd5a04f0c48179ace9b7f21..5d3ebacc2577359187804529a3d96144
  base::options::option<QString> ChatBackgroundsOption({
  	.id = kOptionChatBackgrounds,
  	.name = "Chat backgrounds",
-@@ -1722,6 +1728,10 @@ bool HdPhotos() {
+@@ -1723,6 +1729,10 @@ bool HdPhotos() {
  	return HdPhotosOption.value();
  }
  

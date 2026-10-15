@@ -160,7 +160,7 @@ index 5f52699a5d9ad7f9a6e303afe0c21a66f066bdc7..cd438f57dbc4a7650665cfcb12c1acbc
  	}
  	if (!result->empty()) {
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index b4582e573b938b84a862a2a586dfb7821a5a8e4e..06b7e54944095b3ed633e9cc5bbf8653a606da00 100644
+index e2e4ebe9f76903de44e1fbbf455eb50c38223977..28492e60224e2968568cb102ce5c91bb7fa4a491 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -2806,6 +2806,10 @@ void FillMessages(SectionBuilder &builder) {
@@ -175,7 +175,7 @@ index b4582e573b938b84a862a2a586dfb7821a5a8e4e..06b7e54944095b3ed633e9cc5bbf8653
  	AddGroupTitle(builder, u"Bookmarks"_q);
  	AddOptionToggle(
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index ff71a961c3efe2aa51fbd4c7124a15f40af0130d..f7fd08fcf57214975fb16e466c44a7741474d9d9 100644
+index c0cf402358e14b5f1e69c1a1bb9d794d787fcff5..c3f2811e3c3c261a9d6af5d1def91e5fba88885e 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -97,6 +97,7 @@ const char kOptionSavedHistoryPeriod[] = "tele-saved-history-period";
@@ -201,7 +201,7 @@ index ff71a961c3efe2aa51fbd4c7124a15f40af0130d..f7fd08fcf57214975fb16e466c44a774
  base::options::toggle KeepSecretMediaOption({
  	.id = kOptionKeepSecretMedia,
  	.name = "Open disappearing media without burning it",
-@@ -2070,6 +2079,10 @@ bool CopyProtected() {
+@@ -2071,6 +2080,10 @@ bool CopyProtected() {
  	return CopyProtectedOption.value();
  }
  

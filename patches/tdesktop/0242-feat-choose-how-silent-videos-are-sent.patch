@@ -36,7 +36,7 @@ index be82b5b74757cbce2f2013da4b4fba82a44515cf..2171b564bf7581a32a247977ef236d5a
  				state->preparing = false;
  				if (!file.canEditVideo()) {
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index c8041fd0cda6c22ddfd18206379d9932e5e48dbf..ec464b1f0c2b7d3910fb80651e571d20af9f9daf 100644
+index 66ca3bdbbc53116559e820737e8d68550b40ea9f..7d372e17b7831c1c45159cef46dc7da64dadeb62 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3077,7 +3077,22 @@ void FillSending(SectionBuilder &builder) {
@@ -123,7 +123,7 @@ index 46178d68f5ccd2e5b8084f0f81f47c93d59eef53..9cbf967cf834d9efccf285040a2a52db
  	not_null<Ui::PopupMenu*> menu,
  	const Ui::PreparedFile &file,
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index c6b0145c2610a2a3f22d789b5f44112bf38c7bae..449fcd5dbada636bb9e20dbb06f92a24575c1304 100644
+index 37be2ff92e0cd777ac49e3492de450b5d7fbe113..c1fb2ce7a2244d49ba451ab5156562313aa8edc3 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -156,6 +156,7 @@ const char kOptionConfirmVoice[] = "tele-confirm-voice";
@@ -134,7 +134,7 @@ index c6b0145c2610a2a3f22d789b5f44112bf38c7bae..449fcd5dbada636bb9e20dbb06f92a24
  const char kOptionAudioVoice[] = "tele-audio-voice";
  const char kOptionDownloadsPerChat[] = "tele-downloads-per-chat";
  const char kOptionChatBackgrounds[] = "tele-chat-backgrounds";
-@@ -1142,6 +1143,12 @@ base::options::toggle GifVideoOption({
+@@ -1143,6 +1144,12 @@ base::options::toggle GifVideoOption({
  	.defaultValue = true,
  });
  
@@ -147,7 +147,7 @@ index c6b0145c2610a2a3f22d789b5f44112bf38c7bae..449fcd5dbada636bb9e20dbb06f92a24
  base::options::toggle AudioVoiceOption({
  	.id = kOptionAudioVoice,
  	.name = "Send audio files as voice",
-@@ -2633,6 +2640,24 @@ bool GifVideo() {
+@@ -2634,6 +2641,24 @@ bool GifVideo() {
  	return GifVideoOption.value();
  }
  

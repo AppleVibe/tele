@@ -197,7 +197,7 @@ index bb0a17d9c80be9e33bb543e3e06a3d705695d85e..384ce00c27071e6dd74fe11e926da135
  	const auto skipw = st::giftBoxGiftSkip.x();
  	const auto skiph = st::giftBoxGiftSkip.y();
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index ee3dec7fe7566da20d543310b49236f3e8b4ceca..58d5265fc1aff604fc4fddad607e2882bcc43f37 100644
+index d7585a62288713c138a8c6916fd6c7f2add843ea..579c652b04e7e8550cd116a108c7819ed0dbed8c 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3127,6 +3127,10 @@ void FillProfiles(SectionBuilder &builder) {
@@ -872,7 +872,7 @@ index 0000000000000000000000000000000000000000..8329bec627cb628bfd5cdd5ed1f35dfb
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index ab221a3d006b3696aa99d1859b9c5273770d0990..b5e86a45b35b15663b2c04d72473606ee8fbb83e 100644
+index 11d3d16d83b973e3cc8810b023471be65b748fea..9c0b40eae744386bdd720e01dca3351af9bf0eb2 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -63,6 +63,7 @@ const char kOptionShowGiftIds[] = "tele-show-gift-ids";
@@ -896,7 +896,7 @@ index ab221a3d006b3696aa99d1859b9c5273770d0990..b5e86a45b35b15663b2c04d72473606e
  base::options::toggle NoCollectibleTooltipOption({
  	.id = kOptionNoCollectibleTooltip,
  	.name = "No tooltip for collectible statuses",
-@@ -1648,6 +1655,10 @@ bool SeeTgButton() {
+@@ -1649,6 +1656,10 @@ bool SeeTgButton() {
  	return SeeTgButtonOption.value();
  }
  

@@ -87,7 +87,7 @@ index 24e383e8cb6ac123e227686bad8018313a78b070..3305bfb75969a80683e273235c69ef61
  	if (canToggle && type == SavedStarGiftMenuType::List) {
  		if (e.savedToProfile) {
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 832bd21a5f36afa52fdcd9d62c2e34c20afb868b..b4582e573b938b84a862a2a586dfb7821a5a8e4e 100644
+index a1738b0fb8c31e69e77533d09d1d3a7a8e0deb66..e2e4ebe9f76903de44e1fbbf455eb50c38223977 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3310,6 +3310,10 @@ void FillProfiles(SectionBuilder &builder) {
@@ -977,7 +977,7 @@ index 0000000000000000000000000000000000000000..55d8341136e6f1eab32fc92a6a07a716
 +
 +} // namespace Tele::GiftStudio
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 76e93a5f5aebb628555e4c5e4ee6c248119588f6..ff71a961c3efe2aa51fbd4c7124a15f40af0130d 100644
+index dbd38fc2aab2f8e0df546a9997cddd61a201f6e0..c0cf402358e14b5f1e69c1a1bb9d794d787fcff5 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -71,6 +71,7 @@ const char kOptionGiftHiddenDim[] = "tele-gift-hidden-dim";
@@ -1003,7 +1003,7 @@ index 76e93a5f5aebb628555e4c5e4ee6c248119588f6..ff71a961c3efe2aa51fbd4c7124a15f4
  base::options::toggle PeerIdsWithoutSpacesOption({
  	.id = kOptionPeerIdsWithoutSpaces,
  	.name = "IDs without spaces",
-@@ -1798,6 +1807,10 @@ bool GiftStudioMainMenu() {
+@@ -1799,6 +1808,10 @@ bool GiftStudioMainMenu() {
  	return GiftStudioMainMenuOption.value();
  }
  

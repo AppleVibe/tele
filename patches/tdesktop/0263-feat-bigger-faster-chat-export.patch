@@ -1,0 +1,246 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Wed, 7 Oct 2026 18:57:10 +0300
+Subject: [PATCH] feat: bigger, faster chat export
+
+---
+ Telegram/CMakeLists.txt                       |  2 ++
+ .../SourceFiles/export/export_api_wrap.cpp    |  6 ++++--
+ .../export/output/export_output_html.cpp      |  6 ++++--
+ .../export/output/export_output_html.h        |  1 +
+ .../SourceFiles/settings/settings_tele.cpp    |  4 ++++
+ Telegram/SourceFiles/tele/tele_export.cpp     | 21 +++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_export.h       |  8 +++++++
+ Telegram/SourceFiles/tele/tele_options.cpp    | 12 +++++++++++
+ Telegram/SourceFiles/tele/tele_options.h      |  2 ++
+ .../SourceFiles/tele/tele_settings_io.cpp     |  1 +
+ 10 files changed, 59 insertions(+), 4 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_export.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_export.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index ced7c50fc0097d5b8d82429ccfef4b4306a8a174..2a7867713c1f4f9dcff6b91586107fbe190a05ab 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2473,6 +2473,8 @@ PRIVATE
+     tele/tele_editor_eyedropper.h
+     tele/tele_emoji_panel.cpp
+     tele/tele_emoji_panel.h
++    tele/tele_export.cpp
++    tele/tele_export.h
+     tele/tele_edit_history_section.cpp
+     tele/tele_edit_history_section.h
+     tele/tele_failed_sends.cpp
+diff --git a/Telegram/SourceFiles/export/export_api_wrap.cpp b/Telegram/SourceFiles/export/export_api_wrap.cpp
+index b00484369bce22bada7b9eb2e3ab6df0d5d274e9..f520742b992c17b319ec4e70069b08414766b0c5 100644
+--- a/Telegram/SourceFiles/export/export_api_wrap.cpp
++++ b/Telegram/SourceFiles/export/export_api_wrap.cpp
+@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "base/bytes.h"
+ #include "base/options.h"
+ #include "base/random.h"
++#include "tele/tele_export.h"
+ #include <set>
+ #include <deque>
+ 
+@@ -515,6 +516,7 @@ struct ApiWrap::FileProcess {
+ 	};
+ 	std::deque<Request> requests;
+ 	mtpRequestId requestId = 0;
++	int chunk = Tele::ExportFileChunkSize(kFileChunkSize);
+ };
+ 
+ struct ApiWrap::FileProgress {
+@@ -747,7 +749,7 @@ auto ApiWrap::fileRequest(const Data::FileLocation &location, int64 offset) {
+ 			MTP_flags(0),
+ 			location.data,
+ 			MTP_long(offset),
+-			MTP_int(kFileChunkSize))
++			MTP_int(_fileProcess->chunk))
+ 	)).fail([=](const MTP::Error &result) {
+ 		_fileProcess->requestId = 0;
+ 		if (result.type() == u"TAKEOUT_FILE_EMPTY"_q
+@@ -3433,7 +3435,7 @@ void ApiWrap::loadFilePart() {
+ 		_fileProcess->requestId = 0;
+ 		filePartDone(offset, result);
+ 	}).send();
+-	_fileProcess->offset += kFileChunkSize;
++	_fileProcess->offset += _fileProcess->chunk;
+ 
+ 	if (_fileProcess->size > 0
+ 		&& _fileProcess->requests.size() < kFileRequestsCount) {
+diff --git a/Telegram/SourceFiles/export/output/export_output_html.cpp b/Telegram/SourceFiles/export/output/export_output_html.cpp
+index a2d84004192274d59a012d7f2e76c4ca53dd0999..da5829e903c872352166f9bd9948a1d4519a317a 100644
+--- a/Telegram/SourceFiles/export/output/export_output_html.cpp
++++ b/Telegram/SourceFiles/export/output/export_output_html.cpp
+@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "countries/countries_instance.h"
+ #include "export/data/export_data_types.h"
+ #include "export/output/export_output_result.h"
++#include "tele/tele_export.h"
+ #include "ui/grouped_layout_geometry.h"
+ #include "ui/text/format_values.h"
+ 
+@@ -6416,6 +6417,7 @@ Result HtmlWriter::writeDialogStart(const Data::DialogInfo &data) {
+ 	_chat = fileWithRelativePath(data.relativePath + messagesFile(0));
+ 	_chatFileEmpty = true;
+ 	_messagesCount = 0;
++	_messagesInFile = Tele::ExportMessagesInFile(kMessagesInFile);
+ 	_dateMessageId = 0;
+ 	_lastMessageInfo = nullptr;
+ 	_lastMessageIdsPerFile.clear();
+@@ -6431,7 +6433,7 @@ Result HtmlWriter::writeDialogSlice(const Data::MessagesSlice &data) {
+ 		return wrapMessageLink(messageId, text);
+ 	};
+ 	auto oldIndex = (_messagesCount > 0)
+-		? ((_messagesCount - 1) / kMessagesInFile)
++		? ((_messagesCount - 1) / _messagesInFile)
+ 		: 0;
+ 	auto previous = _lastMessageInfo.get();
+ 	auto saved = std::optional<MessageInfo>();
+@@ -6440,7 +6442,7 @@ Result HtmlWriter::writeDialogSlice(const Data::MessagesSlice &data) {
+ 		if (Data::SkipMessageByDate(message, _settings)) {
+ 			continue;
+ 		}
+-		const auto newIndex = (_messagesCount / kMessagesInFile);
++		const auto newIndex = (_messagesCount / _messagesInFile);
+ 		if (oldIndex != newIndex) {
+ 			if (const auto result = _chat->writeBlock(block); !result) {
+ 				return result;
+diff --git a/Telegram/SourceFiles/export/output/export_output_html.h b/Telegram/SourceFiles/export/output/export_output_html.h
+index 2ecc9aaab50eb43f9f468aa138e603ad6f04652d..4c3d5f06c6bab44ea04b734fe452dbbaa4d14813 100644
+--- a/Telegram/SourceFiles/export/output/export_output_html.h
++++ b/Telegram/SourceFiles/export/output/export_output_html.h
+@@ -173,6 +173,7 @@ private:
+ 	DialogsMode _dialogsMode = DialogsMode::None;
+ 
+ 	int _messagesCount = 0;
++	int _messagesInFile = 0;
+ 	std::unique_ptr<MessageInfo> _lastMessageInfo;
+ 	int _dateMessageId = 0;
+ 	std::unique_ptr<Wrap> _chats;
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index a26c88107448b38d7d5fc47a5041b2979ec4c646..051a37dd61226409d0bde2436d680da2264808b3 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -4131,6 +4131,10 @@ void FillRoot(SectionBuilder &builder) {
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Backup"_q);
+ 	AddBackup(builder);
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionBigExport,
++		{ u"export"_q, u"html"_q, u"download"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Updates"_q);
+ 	AddUpdates(builder);
+diff --git a/Telegram/SourceFiles/tele/tele_export.cpp b/Telegram/SourceFiles/tele/tele_export.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..ca842d749f7d194f3e2c907443c91341ca055567
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_export.cpp
+@@ -0,0 +1,21 @@
++#include "tele/tele_export.h"
++
++#include "tele/tele_options.h"
++
++namespace Tele {
++namespace {
++
++constexpr auto kBigMessagesInFile = 10000;
++constexpr auto kBigFileChunkSize = 1024 * 1024;
++
++} // namespace
++
++int ExportMessagesInFile(int count) {
++	return BigExport() ? kBigMessagesInFile : count;
++}
++
++int ExportFileChunkSize(int size) {
++	return BigExport() ? kBigFileChunkSize : size;
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_export.h b/Telegram/SourceFiles/tele/tele_export.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..9fcb7c9fb64241f46543f5087a88fc16eb151040
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_export.h
+@@ -0,0 +1,8 @@
++#pragma once
++
++namespace Tele {
++
++[[nodiscard]] int ExportMessagesInFile(int count);
++[[nodiscard]] int ExportFileChunkSize(int size);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 12be01d2b05a4ddbdf2dbbf60c227287764a38f6..049b36cd4931ebd9c03ec15ffd43db45c1f0e8a0 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -203,6 +203,7 @@ const char kOptionHideFolderCounters[] = "tele-hide-folder-counters";
+ const char kOptionHideAppCounter[] = "tele-hide-app-counter";
+ const char kOptionCounterSkipArchive[] = "tele-counter-skip-archive";
+ const char kOptionCounterAccounts[] = "tele-counter-accounts";
++const char kOptionBigExport[] = "tele-big-export";
+ const char kOptionUncountedAccounts[] = "tele-uncounted-accounts";
+ const char kOptionViewerLoop[] = "tele-viewer-loop";
+ const char kOptionTranslateOutTo[] = "tele-translate-out-to";
+@@ -1441,6 +1442,13 @@ base::options::toggle CounterAccountsOption({
+ 	.defaultValue = true,
+ });
+ 
++base::options::toggle BigExportOption({
++	.id = kOptionBigExport,
++	.name = "Bigger, faster chat export",
++	.description = "10000 messages per HTML file instead of 1000, files "
++		"downloaded in 1 MB parts.",
++});
++
+ base::options::option<QString> UncountedAccountsOption({
+ 	.id = kOptionUncountedAccounts,
+ 	.name = "Uncounted accounts",
+@@ -3098,6 +3106,10 @@ bool CounterAccounts() {
+ 	return CounterAccountsOption.value();
+ }
+ 
++bool BigExport() {
++	return BigExportOption.value();
++}
++
+ rpl::producer<> CountersChanges() {
+ 	return rpl::merge(
+ 		HideCountersOption.changes(),
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index 8baa44ccb7ede246849f1b391707e1eaf0b4de82..59d2a175d0835c1039733eb39fd1bd397a994927 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -198,6 +198,7 @@ extern const char kOptionHideFolderCounters[];
+ extern const char kOptionHideAppCounter[];
+ extern const char kOptionCounterSkipArchive[];
+ extern const char kOptionCounterAccounts[];
++extern const char kOptionBigExport[];
+ extern const char kOptionUncountedAccounts[];
+ extern const char kOptionViewerLoop[];
+ extern const char kOptionTranslateOutTo[];
+@@ -521,6 +522,7 @@ void SetFieldHeight(int height);
+ [[nodiscard]] bool HideAppCounter();
+ [[nodiscard]] bool CounterSkipArchive();
+ [[nodiscard]] bool CounterAccounts();
++[[nodiscard]] bool BigExport();
+ [[nodiscard]] rpl::producer<> CountersChanges();
+ [[nodiscard]] QString UncountedAccounts();
+ void SetUncountedAccounts(const QString &value);
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index db75f3cc877f8654e47e6aeefd108b326b7f9dbe..9daa08b7d00635ec7f170db4061e9daeaf3a7e0f 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -278,6 +278,7 @@ struct Spec {
+ 		Toggle(kOptionHideAppCounter),
+ 		Toggle(kOptionCounterSkipArchive),
+ 		Toggle(kOptionCounterAccounts),
++		Toggle(kOptionBigExport),
+ 		Spec{
+ 			.id = kOptionCallButton,
+ 			.kind = Kind::Choice,

@@ -223,7 +223,7 @@ index 90f267e598e63d2c3cddb61d8dee0dcf0995e357..0b0cf2afa3993d78378623139bc265c9
  }
  
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index a52cd9d6a3c7f00da43e4701c1fe8e940adb86f1..9cd567a931c48668bf832575ca7c6429d9724905 100644
+index 9136538038c482e07cd20fedd6a944f488a5dba9..45e1418c784417d91837d791b655372a7a058032 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -80,6 +80,8 @@ const char kOptionCopyProtected[] = "tele-copy-protected";
@@ -254,7 +254,7 @@ index a52cd9d6a3c7f00da43e4701c1fe8e940adb86f1..9cd567a931c48668bf832575ca7c6429
  base::options::toggle ViewAsTlOption({
  	.id = kOptionViewAsTl,
  	.name = "View as TL",
-@@ -1530,6 +1544,28 @@ rpl::producer<> AllowScreenCaptureChanges() {
+@@ -1531,6 +1545,28 @@ rpl::producer<> AllowScreenCaptureChanges() {
  	return AllowScreenCaptureOption.changes();
  }
  

@@ -5,9 +5,10 @@ Subject: [PATCH] feat: turn @username into a t.me link in the link box
 
 ---
  Telegram/SourceFiles/chat_helpers/message_field.cpp | 2 +-
+ Telegram/SourceFiles/iv/editor/iv_editor_widget.cpp | 2 ++
  Telegram/SourceFiles/tele/tele_link_rewrites.cpp    | 9 +++++++++
  Telegram/SourceFiles/tele/tele_link_rewrites.h      | 2 ++
- 3 files changed, 12 insertions(+), 1 deletion(-)
+ 4 files changed, 14 insertions(+), 1 deletion(-)
 
 diff --git a/Telegram/SourceFiles/chat_helpers/message_field.cpp b/Telegram/SourceFiles/chat_helpers/message_field.cpp
 index de09887000c8e44f6555ea5c0926bf3d2a5e4d3c..0547c9a1da1dcad930c8ccb1c1b421dc7bb3633e 100644
@@ -22,11 +23,31 @@ index de09887000c8e44f6555ea5c0926bf3d2a5e4d3c..0547c9a1da1dcad930c8ccb1c1b421dc
  		if (linkText.text.isEmpty()) {
  			text->showError();
  			return;
+diff --git a/Telegram/SourceFiles/iv/editor/iv_editor_widget.cpp b/Telegram/SourceFiles/iv/editor/iv_editor_widget.cpp
+index fb8e1682c9bdba7d3a7e16ef792c43fbe4597588..a322ab73327e26cc38e0469c2ec455cf653a267a 100644
+--- a/Telegram/SourceFiles/iv/editor/iv_editor_widget.cpp
++++ b/Telegram/SourceFiles/iv/editor/iv_editor_widget.cpp
+@@ -75,6 +75,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "ui/widgets/menu/menu_separator.h"
+ #include "ui/widgets/popup_menu.h"
+ #include "ui/widgets/scroll_area.h"
++#include "tele/tele_link_rewrites.h"
+ 
+ #include "styles/palette.h"
+ #include "styles/style_boxes.h"
+@@ -831,6 +832,7 @@ struct InputRule {
+ }
+ 
+ [[nodiscard]] QString ValidateInstantViewEditorLink(QString link) {
++	link = Tele::UsernameToLink(link);
+ 	const auto normal = qthelp::validate_url(link);
+ 	if (!normal.isEmpty()) {
+ 		return normal;
 diff --git a/Telegram/SourceFiles/tele/tele_link_rewrites.cpp b/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
-index 3df2649d6bd68dad6083cafefe6792041900c7d8..4ce9d64dddefb1c54ae2ece8c9a636fdcb904c1e 100644
+index 8e50e8142d898cfb00bcd5665be48fb6f64b2803..f763f3f6ab5c9c1a168fafcb99302fa6b6e26fb4 100644
 --- a/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
 +++ b/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
-@@ -639,4 +639,13 @@ Ui::InputField::MimeDataHook WithLinkRewrites(
+@@ -657,4 +657,13 @@ Ui::InputField::MimeDataHook WithLinkRewrites(
  	};
  }
  

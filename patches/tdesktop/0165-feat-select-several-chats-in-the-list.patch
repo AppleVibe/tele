@@ -821,7 +821,7 @@ index 0000000000000000000000000000000000000000..8ba86ea1916aa40e9e247b7f392d43a5
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 6af9983a99b1ed9e917b18c9fbeee311d87d1969..d6a932235bb5745f9de5efbea74944684975516d 100644
+index b91040a03059a8fb83854f9fa61eec5eebe0339e..4f161b3cc9d1fe24b88e6a8015945435cab20d75 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -133,6 +133,7 @@ const char kOptionResizableField[] = "tele-resizable-field";
@@ -832,7 +832,7 @@ index 6af9983a99b1ed9e917b18c9fbeee311d87d1969..d6a932235bb5745f9de5efbea7494468
  const char kOptionBookmarks[] = "tele-bookmarks";
  const char kOptionReturnPoint[] = "tele-return-point";
  const char kOptionNoGestures[] = "tele-no-gestures";
-@@ -918,6 +919,11 @@ base::options::toggle UnsortedFolderOption({
+@@ -919,6 +920,11 @@ base::options::toggle UnsortedFolderOption({
  		"archived ones.",
  });
  
@@ -844,7 +844,7 @@ index 6af9983a99b1ed9e917b18c9fbeee311d87d1969..d6a932235bb5745f9de5efbea7494468
  base::options::toggle BookmarksOption({
  	.id = kOptionBookmarks,
  	.name = "Message bookmarks",
-@@ -2027,6 +2033,20 @@ rpl::producer<bool> UnsortedFolderValue() {
+@@ -2028,6 +2034,20 @@ rpl::producer<bool> UnsortedFolderValue() {
  	});
  }
  

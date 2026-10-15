@@ -2479,7 +2479,7 @@ index 7cbe9aaee3e19f5692031f766928b87eb051c1f1..9eb6919d858f8a51e8207acf3c2260c7
  			]
  		}
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index b91f08df4167b71d1c32910184f0f46283580a25..c8041fd0cda6c22ddfd18206379d9932e5e48dbf 100644
+index 5161564bcd82baccd3e9ad6ac67b35fc48e0b62a..66ca3bdbbc53116559e820737e8d68550b40ea9f 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -25,7 +25,7 @@

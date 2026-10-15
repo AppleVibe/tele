@@ -126,7 +126,7 @@ index 461da97add897e22658adce43915fb9c9a7e8739..0c02009a6a15b2b84ca29c706abb47ee
  	AddGroupDivider(builder);
  	AddGroupTitle(builder, u"Chats"_q);
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 4d8a6e5ac3b1c0c23bc6ec9337524d985e76e039..0dc3f66dafb0167ab1ef696f78169bd3aa7bd4cf 100644
+index 2afb900de8bcbc39f30b61193188a3fa8afc5909..8e3a922ff8bd894a899aa674833981b855a254cf 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -79,6 +79,7 @@ const char kOptionCalcmula[] = "tele-calcmula";
@@ -149,7 +149,7 @@ index 4d8a6e5ac3b1c0c23bc6ec9337524d985e76e039..0dc3f66dafb0167ab1ef696f78169bd3
  base::options::toggle ShotOption({
  	.id = kOptionShot,
  	.name = "Shot in the message menu",
-@@ -1421,6 +1427,10 @@ bool CopyMarkdown() {
+@@ -1422,6 +1428,10 @@ bool CopyMarkdown() {
  	return CopyMarkdownOption.value();
  }
  

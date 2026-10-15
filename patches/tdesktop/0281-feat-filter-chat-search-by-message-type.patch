@@ -1,0 +1,1201 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Thu, 8 Oct 2026 22:28:24 +0300
+Subject: [PATCH] feat: filter chat search by message type
+
+---
+ Telegram/CMakeLists.txt                       |   2 +
+ .../SourceFiles/api/api_messages_search.cpp   |   3 +
+ .../SourceFiles/api/api_messages_search.h     |   8 +
+ .../dialogs/dialogs_inner_widget.cpp          |  12 +-
+ .../dialogs/dialogs_inner_widget.h            |   1 +
+ .../SourceFiles/dialogs/dialogs_widget.cpp    |  36 +-
+ .../controls/history_view_compose_search.cpp  |  34 +-
+ .../SourceFiles/settings/settings_tele.cpp    |   4 +
+ Telegram/SourceFiles/tele/tele_options.cpp    |  22 +
+ Telegram/SourceFiles/tele/tele_options.h      |   3 +
+ .../SourceFiles/tele/tele_regex_search.cpp    |  35 +-
+ Telegram/SourceFiles/tele/tele_regex_search.h |   1 +
+ .../SourceFiles/tele/tele_search_types.cpp    | 493 ++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_search_types.h |  66 +++
+ .../SourceFiles/tele/tele_settings_io.cpp     |   1 +
+ 15 files changed, 699 insertions(+), 22 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_search_types.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_search_types.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 4d1f82c13afb4736ca5e8495717f8e4c25c4e05f..0fb616bc6fd007617950caf9055efe8a8afc10e3 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2686,6 +2686,8 @@ PRIVATE
+     tele/tele_rmb_beside_bubble.h
+     tele/tele_screen_capture.cpp
+     tele/tele_screen_capture.h
++    tele/tele_search_types.cpp
++    tele/tele_search_types.h
+     tele/tele_secret_media.cpp
+     tele/tele_secret_media.h
+     tele/tele_select_many.cpp
+diff --git a/Telegram/SourceFiles/api/api_messages_search.cpp b/Telegram/SourceFiles/api/api_messages_search.cpp
+index ac348199bc358ee9e8d203fb95c5d0c4fdc30354..1e9b6247f468fcff878ea26013140deb68c54204 100644
+--- a/Telegram/SourceFiles/api/api_messages_search.cpp
++++ b/Telegram/SourceFiles/api/api_messages_search.cpp
+@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "history/history.h"
+ #include "history/history_item.h"
+ #include "main/main_session.h"
++#include "tele/tele_search_types.h"
+ 
+ namespace Api {
+ namespace {
+@@ -61,6 +62,7 @@ constexpr auto kSearchPerPage = 50;
+ 	switch (request.filter) {
+ 	case SearchFilter::NoFilter: break;
+ 	case SearchFilter::Pinned: result += u"\npinned"_q; break;
++	default: result += Tele::SearchTypeToken(request.filter); break;
+ 	}
+ 	return result;
+ }
+@@ -71,6 +73,7 @@ constexpr auto kSearchPerPage = 50;
+ 		return MTP_inputMessagesFilterPinned();
+ 	case SearchFilter::NoFilter:
+ 		return MTP_inputMessagesFilterEmpty();
++	default: return Tele::SearchTypeFilter(filter);
+ 	}
+ 	return MTP_inputMessagesFilterEmpty();
+ }
+diff --git a/Telegram/SourceFiles/api/api_messages_search.h b/Telegram/SourceFiles/api/api_messages_search.h
+index 99b222b703a6d0e5d50d33dc8877e88b623b1b92..6ef4d7cd9f421be6ec6d634971e0283eb11e27b4 100644
+--- a/Telegram/SourceFiles/api/api_messages_search.h
++++ b/Telegram/SourceFiles/api/api_messages_search.h
+@@ -23,6 +23,14 @@ namespace Api {
+ enum class SearchFilter {
+ 	NoFilter,
+ 	Pinned,
++	Photo,
++	Video,
++	File,
++	Music,
++	Voice,
++	RoundVideo,
++	Gif,
++	Url,
+ };
+ 
+ struct FoundMessages {
+diff --git a/Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp b/Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp
+index 279880f3240551e9442037041db824d2271beabe..1bbcf06001613fa6d3a98be1c6e2d34a1a61e1c8 100644
+--- a/Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp
++++ b/Telegram/SourceFiles/dialogs/dialogs_inner_widget.cpp
+@@ -93,6 +93,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_list_previews.h"
+ #include "tele/tele_local_pins.h"
+ #include "tele/tele_options.h"
++#include "tele/tele_search_types.h"
+ #include "tele/tele_unsorted_folder.h"
+ #include "tele/tele_username_aliases.h"
+ #include "api/api_chat_filters.h"
+@@ -179,6 +180,7 @@ constexpr auto kPreviewPostsLimit = 3;
+ [[nodiscard]] object_ptr<SearchEmpty> MakeSearchEmpty(
+ 		QWidget *parent,
+ 		SearchState state,
++		bool typed,
+ 		Fn<void()> resetSearchFilters) {
+ 	const auto query = state.query.trimmed();
+ 	const auto hashtag = !query.isEmpty() && (query[0] == '#');
+@@ -194,7 +196,8 @@ constexpr auto kPreviewPostsLimit = 3;
+ 		: state.fromPeer;
+ 	const auto waiting = trimmed.isEmpty()
+ 		&& state.tags.empty()
+-		&& !fromPeer;
++		&& !fromPeer
++		&& !typed;
+ 	const auto suggestAllChats = !waiting
+ 		&& state.tab == ChatSearchTab::MyMessages
+ 		&& (state.filter != ChatTypeFilter::All || !state.fromArchive);
+@@ -5076,13 +5079,16 @@ void InnerWidget::refreshEmpty() {
+ 			&& _searchResults.empty()
+ 			&& _peerSearchResults.empty()
+ 			&& _hashtagResults.empty();
++		const auto typed = ::Tele::DialogsSearchTypeChosenAbove(this);
+ 		if (_searchLoading || _searchWaiting || !empty) {
+ 			if (_searchEmpty) {
+ 				_searchEmpty->hide();
+ 			}
+-		} else if (_searchEmptyState != _searchState) {
++		} else if (_searchEmptyState != _searchState
++			|| _searchEmptyTyped != typed) {
+ 			_searchEmptyState = _searchState;
+-			_searchEmpty = MakeSearchEmpty(this, _searchState, [=] {
++			_searchEmptyTyped = typed;
++			_searchEmpty = MakeSearchEmpty(this, _searchState, typed, [=] {
+ 				_resetSearchRestrictionsRequests.fire({});
+ 			});
+ 			if (_controller->session().data().chatsListLoaded()) {
+diff --git a/Telegram/SourceFiles/dialogs/dialogs_inner_widget.h b/Telegram/SourceFiles/dialogs/dialogs_inner_widget.h
+index f88c0353bc1208eb71f2b6d7ebf9bfd8211ac09b..563735d27314a0ad3a62e8ab3f2533625d85819a 100644
+--- a/Telegram/SourceFiles/dialogs/dialogs_inner_widget.h
++++ b/Telegram/SourceFiles/dialogs/dialogs_inner_widget.h
+@@ -758,6 +758,7 @@ private:
+ 	object_ptr<Ui::RpWidget> _loadingAnimation = { nullptr };
+ 	object_ptr<SearchEmpty> _searchEmpty = { nullptr };
+ 	SearchState _searchEmptyState;
++	bool _searchEmptyTyped = false;
+ 	object_ptr<Ui::FlatLabel> _empty = { nullptr };
+ 	object_ptr<Ui::VerticalLayout> _emptyList = { nullptr };
+ 	object_ptr<Ui::RoundButton> _emptyButton = { nullptr };
+diff --git a/Telegram/SourceFiles/dialogs/dialogs_widget.cpp b/Telegram/SourceFiles/dialogs/dialogs_widget.cpp
+index bec35d2d5d18668d958942cbbb47ab5fae13365c..40f05a81486f448d254558fecb3a36ea98a3b46e 100644
+--- a/Telegram/SourceFiles/dialogs/dialogs_widget.cpp
++++ b/Telegram/SourceFiles/dialogs/dialogs_widget.cpp
+@@ -100,6 +100,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_communities.h"
+ #include "tele/tele_folders.h"
+ #include "tele/tele_regex_search.h"
++#include "tele/tele_search_types.h"
+ #include "tele/tele_updater.h"
+ #include "styles/style_dialogs.h"
+ #include "styles/style_chat.h"
+@@ -685,11 +686,22 @@ Widget::Widget(
+ 	_chooseFromUser->entity()->setClickedCallback([=] { showSearchFrom(); });
+ 	_chooseFromUser->entity()->setAccessibleName(
+ 		tr::lng_search_messages_from(tr::now));
++	const auto searchType = Tele::SetupDialogsSearchType({
++		.widget = this,
++		.parent = _search->parentWidget(),
++		.changed = [=](bool rerun) {
++			clearSearchCache(false);
++			if (rerun) {
++				searchRequested(SearchRequestDelay::Instant);
++			}
++		},
++	});
+ 	Tele::SetupDialogsRegexSearch({
+ 		.widget = this,
+ 		.field = _search.data(),
+ 		.from = _chooseFromUser.data(),
+ 		.date = _jumpToDate.data(),
++		.type = searchType,
+ 		.apply = [=](std::vector<not_null<HistoryItem*>> items, int count) {
+ 			cancelSearchRequest();
+ 			_inner->searchReceived(
+@@ -3176,7 +3188,10 @@ bool Widget::search(bool inCache, SearchRequestDelay delay) {
+ 		.start = true,
+ 		.peer = (inPeer != nullptr),
+ 	};
+-	if (trimmed.isEmpty() && !fromPeer && inTags.empty()) {
++	if (trimmed.isEmpty()
++		&& !fromPeer
++		&& inTags.empty()
++		&& !Tele::DialogsSearchTypeChosen(this)) {
+ 		cancelSearchRequest();
+ 
+ 		// Otherwise inside first searchApplyEmpty we call searchMode(),
+@@ -3217,6 +3232,7 @@ bool Widget::search(bool inCache, SearchRequestDelay delay) {
+ 			_searchQueryCommunity = community;
+ 			_searchQueryFilter = filter;
+ 			_searchQueryFromArchive = fromArchive;
++			(void)Tele::DialogsSearchTypeTake(this);
+ 			process->nextRate = 0;
+ 			process->full = false;
+ 			_migratedProcess.full = false;
+@@ -3230,7 +3246,8 @@ bool Widget::search(bool inCache, SearchRequestDelay delay) {
+ 		|| _searchQueryTab != tab
+ 		|| _searchQueryCommunity != community
+ 		|| _searchQueryFilter != filter
+-		|| _searchQueryFromArchive != fromArchive) {
++		|| _searchQueryFromArchive != fromArchive
++		|| Tele::DialogsSearchTypeDirty(this)) {
+ 		const auto process = currentSearchProcess();
+ 		_searchQuery = query;
+ 		_searchQueryFrom = fromPeer;
+@@ -3239,6 +3256,7 @@ bool Widget::search(bool inCache, SearchRequestDelay delay) {
+ 		_searchQueryCommunity = community;
+ 		_searchQueryFilter = filter;
+ 		_searchQueryFromArchive = fromArchive;
++		const auto typeFilter = Tele::DialogsSearchTypeTake(this);
+ 		process->nextRate = 0;
+ 		process->full = false;
+ 		_migratedProcess.full = false;
+@@ -3279,7 +3297,7 @@ bool Widget::search(bool inCache, SearchRequestDelay delay) {
+ 								Data::ReactionToMTP
+ 							)),
+ 						MTP_int(topic ? topic->rootId() : 0),
+-						MTP_inputMessagesFilterEmpty(),
++						typeFilter,
+ 						MTP_int(0), // min_date
+ 						MTP_int(0), // max_date
+ 						MTP_int(0), // offset_id
+@@ -3459,6 +3477,7 @@ void Widget::searchMore() {
+ 		return;
+ 	} else if (!process->full) {
+ 		if (const auto peer = searchInPeer()) {
++			const auto typeFilter = Tele::DialogsSearchTypeRequested(this);
+ 			auto &histories = session().data().histories();
+ 			const auto topic = searchInTopic();
+ 			const auto type = Data::Histories::RequestType::History;
+@@ -3496,7 +3515,7 @@ void Widget::searchMore() {
+ 								Data::ReactionToMTP
+ 							)),
+ 						MTP_int(topic ? topic->rootId() : 0),
+-						MTP_inputMessagesFilterEmpty(),
++						typeFilter,
+ 						MTP_int(0), // min_date
+ 						MTP_int(0), // max_date
+ 						MTP_int(process->lastId),
+@@ -3527,6 +3546,7 @@ void Widget::searchMore() {
+ 			requestMessages(false);
+ 		}
+ 	} else if (_searchInMigrated && !_migratedProcess.full) {
++		const auto typeFilter = Tele::DialogsSearchTypeRequested(this);
+ 		auto &histories = session().data().histories();
+ 		const auto type = Data::Histories::RequestType::History;
+ 		const auto history = _searchInMigrated;
+@@ -3550,7 +3570,7 @@ void Widget::searchMore() {
+ 					MTPInputPeer(), // saved_peer_id
+ 					MTPVector<MTPReaction>(), // saved_reaction
+ 					MTPint(), // top_msg_id
+-					MTP_inputMessagesFilterEmpty(),
++					typeFilter,
+ 					MTP_int(0), // min_date
+ 					MTP_int(0), // max_date
+ 					MTP_int(_migratedProcess.lastId),
+@@ -4314,7 +4334,8 @@ bool Widget::applySearchState(SearchState state) {
+ 
+ 	const auto searchCleared = state.query.isEmpty()
+ 		&& !state.fromPeer
+-		&& state.tags.empty();
++		&& state.tags.empty()
++		&& !Tele::DialogsSearchTypeChosen(this);
+ 	if (searchCleared
+ 		|| inChatChanged
+ 		|| communityChanged
+@@ -4375,6 +4396,7 @@ void Widget::clearSearchCache(bool clearPosts) {
+ 	_searchQuery = QString();
+ 	_searchQueryFrom = nullptr;
+ 	_searchQueryTags.clear();
++	Tele::DialogsSearchTypeInvalidate(this);
+ 	if (clearPosts) {
+ 		_postsProcess.cache.clear();
+ 		const auto queries = base::take(_postsProcess.queries);
+@@ -4580,6 +4602,7 @@ void Widget::updateSearchFromVisibility(bool fast) {
+ 		}
+ 		_search->setAdditionalMargins(additional);
+ 	}
++	Tele::DialogsSearchTypeState(this, _searchState);
+ 	Tele::DialogsRegexState(this, _searchState);
+ }
+ 
+@@ -5073,6 +5096,7 @@ bool Widget::cancelSearch(CancelSearchOptions options) {
+ 		}
+ 	}
+ 	cancelSearchRequest();
++	Tele::DialogsSearchTypeReset(this);
+ 	auto updatedState = _searchState;
+ 	const auto clearingQuery = clearingSuggestionsQuery
+ 		|| !updatedState.query.isEmpty();
+diff --git a/Telegram/SourceFiles/history/view/controls/history_view_compose_search.cpp b/Telegram/SourceFiles/history/view/controls/history_view_compose_search.cpp
+index 965e80e91aa8daca283e350e34995f146eb9e8b1..9ff8f8e7261b9c7911f460169a8c1a7b1b15d05a 100644
+--- a/Telegram/SourceFiles/history/view/controls/history_view_compose_search.cpp
++++ b/Telegram/SourceFiles/history/view/controls/history_view_compose_search.cpp
+@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "lang/lang_keys.h"
+ #include "main/main_session.h"
+ #include "tele/tele_regex_search.h"
++#include "tele/tele_search_types.h"
+ #include "ui/effects/show_animation.h"
+ #include "ui/widgets/buttons.h"
+ #include "ui/widgets/labels.h"
+@@ -325,6 +326,7 @@ public:
+ 
+ 	void setFrom(PeerData *peer);
+ 	bool handleKeyPress(not_null<QKeyEvent*> e);
++	void requestSearch(bool cache = true);
+ 
+ protected:
+ 	void keyPressEvent(QKeyEvent *e) override;
+@@ -333,7 +335,6 @@ private:
+ 	void clearItems();
+ 	void refreshTags();
+ 	void updateSize();
+-	void requestSearch(bool cache = true);
+ 	void requestSearchDelayed();
+ 
+ 	base::unique_qptr<Ui::IconButton> _cancel;
+@@ -662,6 +663,7 @@ public:
+ 
+ 	void buttonFromToggleOn(rpl::producer<bool> &&visible);
+ 	void buttonCalendarToggleOn(rpl::producer<bool> &&visible);
++	[[nodiscard]] not_null<Tele::ComposeSearchType*> type() const;
+ 
+ 	bool handleKeyPress(not_null<QKeyEvent*> e);
+ 
+@@ -685,6 +687,7 @@ private:
+ 	base::unique_qptr<Ui::IconButton> _jumpToDate;
+ 	base::unique_qptr<Ui::IconButton> _chooseFromUser;
+ 	base::unique_qptr<Ui::FlatLabel> _counter;
++	const std::unique_ptr<Tele::ComposeSearchType> _type;
+ 
+ 	int _total = -1;
+ 	rpl::variable<int> _current = 0;
+@@ -704,7 +707,8 @@ BottomBar::BottomBar(not_null<Ui::RpWidget*> parent, bool fastShowChooseFrom)
+ 	base::make_unique_q<Ui::IconButton>(this, st::dialogSearchFrom))
+ , _counter(base::make_unique_q<Ui::FlatLabel>(
+ 	this,
+-	st::defaultSettingsRightLabel)) {
++	st::defaultSettingsRightLabel))
++, _type(std::make_unique<Tele::ComposeSearchType>(this)) {
+ 
+ 	_counter->setAttribute(Qt::WA_TransparentForMouseEvents);
+ 	_chooseFromUser->setVisible(fastShowChooseFrom);
+@@ -720,6 +724,7 @@ BottomBar::BottomBar(not_null<Ui::RpWidget*> parent, bool fastShowChooseFrom)
+ 	rpl::merge(
+ 		_jumpToDate->shownValue() | mapSize,
+ 		_chooseFromUser->shownValue() | mapSize,
++		_type->shownValue() | mapSize,
+ 		_counter->sizeValue() | mapSize,
+ 		sizeValue()
+ 	) | rpl::on_next([=](const QSize &s) {
+@@ -730,10 +735,13 @@ BottomBar::BottomBar(not_null<Ui::RpWidget*> parent, bool fastShowChooseFrom)
+ 			(s.height() - _next->height()) / 2);
+ 
+ 		auto left = st::topBarActionSkip;
+-		const auto list = std::vector<not_null<Ui::RpWidget*>>{
++		auto list = std::vector<not_null<Ui::RpWidget*>>{
+ 			_jumpToDate.get(),
+ 			_chooseFromUser.get(),
+ 			_counter.get() };
++		if (const auto type = _type->button()) {
++			list.insert(list.end() - 1, not_null<Ui::RpWidget*>(type));
++		}
+ 		for (const auto &w : list) {
+ 			if (w->isHidden()) {
+ 				continue;
+@@ -856,6 +864,10 @@ void BottomBar::buttonFromToggleOn(rpl::producer<bool> &&visible) {
+ 	}, _chooseFromUser->lifetime());
+ }
+ 
++not_null<Tele::ComposeSearchType*> BottomBar::type() const {
++	return _type.get();
++}
++
+ void BottomBar::buttonCalendarToggleOn(rpl::producer<bool> &&visible) {
+ 	std::move(
+ 		visible
+@@ -981,13 +993,18 @@ ComposeSearch::Inner::Inner(
+ 		if (_regex->active()) {
+ 			return;
+ 		}
+-		if (search.query.isEmpty() && search.tags.empty()) {
++		const auto type = _bottomBar->type()->filter();
++		if (search.query.isEmpty()
++			&& search.tags.empty()
++			&& type == Api::SearchFilter::NoFilter) {
+ 			if (!search.from || _history->peer->isSelf()) {
+ 				return;
+ 			}
+ 		}
+ 		search.topMsgId = _topMsgId;
+-		search.filter = _searchFilter;
++		search.filter = (type != Api::SearchFilter::NoFilter)
++			? type
++			: _searchFilter;
+ 		_apiSearch.clear();
+ 
+ 		_list.controller->addItems({}, true);
+@@ -1000,6 +1017,12 @@ ComposeSearch::Inner::Inner(
+ 		hideList();
+ 	}, _topBar->lifetime());
+ 
++	_bottomBar->type()->changes(
++	) | rpl::on_next([=] {
++		hideList();
++		_topBar->requestSearch(false);
++	}, _topBar->lifetime());
++
+ 	_topBar->closeRequests(
+ 	) | rpl::on_next([=] {
+ 		hideAnimated();
+@@ -1145,6 +1168,7 @@ void ComposeSearch::Inner::setTopMsgId(MsgId topMsgId) {
+ void ComposeSearch::Inner::setSearchFilter(Api::SearchFilter filter) {
+ 	_searchFilter = filter;
+ 	_filterAllowsFrom = (filter != Api::SearchFilter::Pinned);
++	_bottomBar->type()->setAvailable(filter != Api::SearchFilter::Pinned);
+ 	_regex->setPinnedOnly(filter == Api::SearchFilter::Pinned);
+ }
+ 
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 0fdb80dbf514f1d5edad04194325b1c4c45c09c3..7c42de02d3158129f9cb4bde0379c2f7ddcbe01f 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -2928,6 +2928,10 @@ void FillChats(SectionBuilder &builder) {
+ 		builder,
+ 		::Tele::kOptionRegexSearch,
+ 		{ u"regular expression"_q, u"pattern"_q, u"find"_q });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionSearchTypes,
++		{ u"photos"_q, u"videos"_q, u"files"_q, u"media"_q, u"links"_q });
+ 	AddOptionToggle(
+ 		builder,
+ 		::Tele::kOptionPinnedBarMenu,
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index df868a06d1ea2b3b4a84e395c03f11e0ad3d85dd..e52112c208d3ef0ac149aa2ec1ccc770e8928211 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -27,6 +27,7 @@ const char kOptionKnownSettings[] = "tele-known-settings";
+ const char kOptionGroupQuickReplies[] = "tele-group-quick-replies";
+ const char kOptionQuickRepliesByName[] = "tele-quick-replies-by-name";
+ const char kOptionRegexSearch[] = "tele-regex-search";
++const char kOptionSearchTypes[] = "tele-search-types";
+ const char kOptionBubbleBadges[] = "tele-bubble-badges";
+ const char kOptionOnlineInBigGroups[] = "tele-online-in-big-groups";
+ const char kOptionHideCalls[] = "tele-hide-calls";
+@@ -385,6 +386,13 @@ base::options::toggle RegexSearchOption({
+ 		"the server.",
+ });
+ 
++base::options::toggle SearchTypesOption({
++	.id = kOptionSearchTypes,
++	.name = "Message type filter in chat search",
++	.description = "With an empty query it lists every message of that "
++		"type.",
++});
++
+ base::options::toggle LowercaseOption({
+ 	.id = kOptionLowercase,
+ 	.name = "Lowercase everything",
+@@ -1864,6 +1872,20 @@ rpl::producer<bool> RegexSearchInChatsValue() {
+ 	});
+ }
+ 
++bool SearchTypes() {
++	return SearchTypesOption.value();
++}
++
++rpl::producer<bool> SearchTypesValue() {
++	return rpl::single(
++		rpl::empty
++	) | rpl::then(
++		SearchTypesOption.changes()
++	) | rpl::map([] {
++		return SearchTypesOption.value();
++	});
++}
++
+ bool LowercaseStrings() {
+ 	return LowercaseOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index f483c372def548fb77a09fcbfc443b25aac5f086..5fa193cc4062544555ff3319895bdf027d82bb49 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -23,6 +23,7 @@ extern const char kOptionKnownSettings[];
+ extern const char kOptionGroupQuickReplies[];
+ extern const char kOptionQuickRepliesByName[];
+ extern const char kOptionRegexSearch[];
++extern const char kOptionSearchTypes[];
+ extern const char kOptionBubbleBadges[];
+ extern const char kOptionOnlineInBigGroups[];
+ extern const char kOptionCallButton[];
+@@ -267,6 +268,8 @@ void SetKnownSettings(const QString &value);
+ [[nodiscard]] bool QuickRepliesByName();
+ [[nodiscard]] bool RegexSearchInChats();
+ [[nodiscard]] rpl::producer<bool> RegexSearchInChatsValue();
++[[nodiscard]] bool SearchTypes();
++[[nodiscard]] rpl::producer<bool> SearchTypesValue();
+ [[nodiscard]] bool BubbleBadges();
+ [[nodiscard]] bool OnlineInBigGroups();
+ [[nodiscard]] rpl::producer<bool> OnlineInBigGroupsValue();
+diff --git a/Telegram/SourceFiles/tele/tele_regex_search.cpp b/Telegram/SourceFiles/tele/tele_regex_search.cpp
+index 7f5e048030b10c055a245b72d86e5194c6168796..4a2d769804a597e0f094009da1f3418639452433 100644
+--- a/Telegram/SourceFiles/tele/tele_regex_search.cpp
++++ b/Telegram/SourceFiles/tele/tele_regex_search.cpp
+@@ -20,6 +20,7 @@
+ #include "main/main_session.h"
+ #include "tele/tele_lowercase.h"
+ #include "tele/tele_options.h"
++#include "tele/tele_search_types.h"
+ #include "ui/widgets/buttons.h"
+ #include "ui/widgets/fields/input_field.h"
+ #include "ui/widgets/labels.h"
+@@ -372,6 +373,7 @@ private:
+ 	const not_null<Ui::InputField*> _field;
+ 	const not_null<Ui::FadeWrapScaled<Ui::IconButton>*> _from;
+ 	const not_null<Ui::FadeWrapScaled<Ui::IconButton>*> _date;
++	Ui::RpWidget * const _type = nullptr;
+ 	const Fn<void(std::vector<not_null<HistoryItem*>>, int)> _apply;
+ 	const Fn<void()> _rerun;
+ 	const Fn<void()> _relayout;
+@@ -413,6 +415,7 @@ DialogsRegex::DialogsRegex(DialogsRegexDescriptor &&descriptor)
+ , _field(descriptor.field)
+ , _from(descriptor.from)
+ , _date(descriptor.date)
++, _type(descriptor.type)
+ , _apply(std::move(descriptor.apply))
+ , _rerun(std::move(descriptor.rerun))
+ , _relayout(std::move(descriptor.relayout))
+@@ -438,6 +441,11 @@ DialogsRegex::DialogsRegex(DialogsRegexDescriptor &&descriptor)
+ 	) | rpl::on_next([=] {
+ 		updateGeometry();
+ 	}, _lifetime);
++	if (_type) {
++		_type->shownValue() | rpl::skip(1) | rpl::on_next([=] {
++			updateGeometry();
++		}, _lifetime);
++	}
+ 
+ 	RegexSearchInChatsValue(
+ 	) | rpl::skip(1) | rpl::on_next([=] {
+@@ -588,6 +596,7 @@ void DialogsRegex::loadOlder() {
+ 
+ void DialogsRegex::updateToggle() {
+ 	const auto shown = eligible();
++	DialogsSearchTypeBlock(_widget, _checked && shown);
+ 	_toggle->setChecked(_checked);
+ 	_toggle->setError(active() && _engine && !_engine->valid());
+ 	if (_toggleShown != shown) {
+@@ -598,30 +607,40 @@ void DialogsRegex::updateToggle() {
+ }
+ 
+ void DialogsRegex::updateGeometry() {
+-	const auto right = _from->toggled()
++	auto right = _from->toggled()
+ 		? _from->x()
+ 		: _date->toggled()
+ 		? _date->x()
+ 		: (_date->x() + _date->width());
+-	_toggle->move(
+-		right - _toggle->width(),
+-		_field->y() + (_field->height() - _toggle->height()) / 2);
++	const auto top = [&](QWidget *widget) {
++		return _field->y() + (_field->height() - widget->height()) / 2;
++	};
++	if (_type) {
++		_type->move(right - _type->width(), top(_type));
++		if (!_type->isHidden()) {
++			right = _type->x();
++		}
++	}
++	_toggle->move(right - _toggle->width(), top(_toggle.get()));
+ 	updateMargins();
+ }
+ 
+ void DialogsRegex::updateMargins() {
+-	if (!_toggleShown && !_appliedMargins) {
++	const auto typeShown = _type && !_type->isHidden();
++	const auto shown = _toggleShown || typeShown;
++	if (!shown && !_appliedMargins) {
+ 		return;
+ 	}
+ 	auto margins = QMargins();
+-	if (_toggleShown) {
+-		const auto right = _field->x() + _field->width() - _toggle->x();
++	if (shown) {
++		const auto left = _toggleShown ? _toggle->x() : _type->x();
++		const auto right = _field->x() + _field->width() - left;
+ 		margins.setRight(
+ 			std::max(right - _field->st().textMargins.right(), 0));
+ 	} else if (_from->toggled()) {
+ 		margins.setRight(_from->width());
+ 	}
+-	const auto applied = _toggleShown
++	const auto applied = shown
+ 		? std::make_optional(margins)
+ 		: std::nullopt;
+ 	if (!_marginsOverridden && _appliedMargins == applied) {
+diff --git a/Telegram/SourceFiles/tele/tele_regex_search.h b/Telegram/SourceFiles/tele/tele_regex_search.h
+index 6c1e947365734a33328e80ea35d6630a5908748d..dfcaf450685a9e052c2cc581b48aa88dbb17026d 100644
+--- a/Telegram/SourceFiles/tele/tele_regex_search.h
++++ b/Telegram/SourceFiles/tele/tele_regex_search.h
+@@ -25,6 +25,7 @@ struct DialogsRegexDescriptor {
+ 	not_null<Ui::InputField*> field;
+ 	not_null<Ui::FadeWrapScaled<Ui::IconButton>*> from;
+ 	not_null<Ui::FadeWrapScaled<Ui::IconButton>*> date;
++	Ui::RpWidget *type = nullptr;
+ 	Fn<void(std::vector<not_null<HistoryItem*>>, int)> apply;
+ 	Fn<void()> rerun;
+ 	Fn<void()> relayout;
+diff --git a/Telegram/SourceFiles/tele/tele_search_types.cpp b/Telegram/SourceFiles/tele/tele_search_types.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..ddf1ea837cc44a280bbe02ae75518c3bdb60b79e
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_search_types.cpp
+@@ -0,0 +1,493 @@
++#include "tele/tele_search_types.h"
++
++#include "base/flat_map.h"
++#include "dialogs/dialogs_key.h"
++#include "dialogs/ui/chat_search_in.h"
++#include "tele/tele_lowercase.h"
++#include "tele/tele_options.h"
++#include "ui/effects/ripple_animation.h"
++#include "ui/widgets/buttons.h"
++#include "ui/widgets/popup_menu.h"
++#include "ui/painter.h"
++#include "styles/style_dialogs.h"
++#include "styles/style_info.h"
++#include "styles/style_media_player.h"
++#include "styles/style_menu_icons.h"
++#include "styles/style_widgets.h"
++
++namespace Tele {
++namespace {
++
++using Filter = Api::SearchFilter;
++
++struct Type {
++	Filter filter = Filter::NoFilter;
++	const char *name = nullptr;
++};
++
++constexpr auto kTypes = std::array{
++	Type{ Filter::NoFilter, "All messages" },
++	Type{ Filter::Photo, "Photos" },
++	Type{ Filter::Video, "Videos" },
++	Type{ Filter::File, "Files" },
++	Type{ Filter::Music, "Music" },
++	Type{ Filter::Voice, "Voice messages" },
++	Type{ Filter::RoundVideo, "Round videos" },
++	Type{ Filter::Gif, "GIFs" },
++	Type{ Filter::Url, "Links" },
++};
++
++[[nodiscard]] const style::icon &Icon(Filter filter) {
++	switch (filter) {
++	case Filter::Photo: return st::infoIconMediaPhoto;
++	case Filter::Video:
++	case Filter::RoundVideo: return st::infoIconMediaVideo;
++	case Filter::File: return st::infoIconMediaFile;
++	case Filter::Music: return st::infoIconMediaAudio;
++	case Filter::Voice: return st::infoIconMediaVoice;
++	case Filter::Gif: return st::infoIconMediaGif;
++	case Filter::Url: return st::infoIconMediaLink;
++	case Filter::NoFilter:
++	case Filter::Pinned: break;
++	}
++	return st::menuIconTagFilter;
++}
++
++void FillMenu(
++		not_null<Ui::PopupMenu*> menu,
++		Filter current,
++		Fn<void(Filter)> choose) {
++	for (const auto &type : kTypes) {
++		const auto filter = type.filter;
++		menu->addAction(
++			Lower(QString::fromLatin1(type.name)),
++			[=] { choose(filter); },
++			(current == filter) ? &st::mediaPlayerMenuCheck : nullptr);
++	}
++}
++
++class DialogsTypeButton final : public Ui::AbstractButton {
++public:
++	explicit DialogsTypeButton(QWidget *parent);
++
++	void setFilter(Filter filter);
++
++protected:
++	void paintEvent(QPaintEvent *e) override;
++	void onStateChanged(State was, StateChangeSource source) override;
++
++private:
++	Filter _filter = Filter::NoFilter;
++
++};
++
++DialogsTypeButton::DialogsTypeButton(QWidget *parent)
++: AbstractButton(parent) {
++	resize(st::dialogsCalendar.width, st::dialogsCalendar.height);
++	setCursor(style::cur_pointer);
++}
++
++void DialogsTypeButton::setFilter(Filter filter) {
++	if (_filter != filter) {
++		_filter = filter;
++		update();
++	}
++}
++
++void DialogsTypeButton::paintEvent(QPaintEvent *e) {
++	auto p = QPainter(this);
++	const auto active = (_filter != Filter::NoFilter);
++	if (active) {
++		auto hq = PainterHighQualityEnabler(p);
++		const auto size = std::min(width(), height()) - 4 * st::lineWidth;
++		p.setPen(Qt::NoPen);
++		p.setBrush(st::lightButtonBgOver);
++		p.drawEllipse(QRect(
++			(width() - size) / 2,
++			(height() - size) / 2,
++			size,
++			size));
++	}
++	Icon(_filter).paintInCenter(
++		p,
++		rect(),
++		(active
++			? st::lightButtonFg
++			: isOver()
++			? st::dialogsMenuIconFgOver
++			: st::dialogsMenuIconFg)->c);
++}
++
++void DialogsTypeButton::onStateChanged(
++		State was,
++		StateChangeSource source) {
++	update();
++}
++
++class DialogsSearchType final {
++public:
++	explicit DialogsSearchType(DialogsSearchTypeDescriptor &&descriptor);
++	~DialogsSearchType();
++
++	[[nodiscard]] Ui::RpWidget *button() const;
++	void setState(const Dialogs::SearchState &state);
++	void setBlocked(bool blocked);
++	void reset();
++	[[nodiscard]] bool chosen() const;
++	[[nodiscard]] bool dirty() const;
++	void invalidate();
++	[[nodiscard]] MTPMessagesFilter takeFilter();
++	[[nodiscard]] MTPMessagesFilter requestedFilter() const;
++
++private:
++	[[nodiscard]] bool shown() const;
++	bool clear();
++	void choose(Filter filter);
++	void showMenu();
++	void updateVisibility();
++
++	const not_null<QWidget*> _widget;
++	const Fn<void(bool)> _changed;
++	const base::unique_qptr<DialogsTypeButton> _button;
++	base::unique_qptr<Ui::PopupMenu> _menu;
++	Dialogs::Key _key;
++	Filter _filter = Filter::NoFilter;
++	std::optional<Filter> _requested;
++	bool _eligible = false;
++	bool _blocked = false;
++	rpl::lifetime _lifetime;
++
++};
++
++[[nodiscard]] auto Registry()
++-> base::flat_map<not_null<QWidget*>, DialogsSearchType*> & {
++	static auto result = base::flat_map<
++		not_null<QWidget*>,
++		DialogsSearchType*>();
++	return result;
++}
++
++[[nodiscard]] DialogsSearchType *Lookup(not_null<QWidget*> widget) {
++	const auto &registry = Registry();
++	const auto i = registry.find(widget);
++	return (i != end(registry)) ? i->second : nullptr;
++}
++
++DialogsSearchType::DialogsSearchType(DialogsSearchTypeDescriptor &&descriptor)
++: _widget(descriptor.widget)
++, _changed(std::move(descriptor.changed))
++, _button(base::make_unique_q<DialogsTypeButton>(descriptor.parent)) {
++	Registry().emplace(_widget, this);
++
++	_button->hide();
++	_button->setAccessibleName(Lower(u"Message type"_q));
++	_button->setClickedCallback([=] { showMenu(); });
++
++	SearchTypesValue(
++	) | rpl::skip(1) | rpl::on_next([=](bool enabled) {
++		if (!enabled && clear()) {
++			_changed(true);
++		}
++		updateVisibility();
++	}, _lifetime);
++}
++
++DialogsSearchType::~DialogsSearchType() {
++	Registry().remove(_widget);
++}
++
++Ui::RpWidget *DialogsSearchType::button() const {
++	return _button.get();
++}
++
++void DialogsSearchType::setState(const Dialogs::SearchState &state) {
++	using Tab = Dialogs::ChatSearchTab;
++	_eligible = state.inChat.owningHistory()
++		&& ((state.tab == Tab::ThisPeer) || (state.tab == Tab::ThisTopic));
++	if (_key != state.inChat || !_eligible) {
++		_key = state.inChat;
++		clear();
++	}
++	updateVisibility();
++}
++
++void DialogsSearchType::setBlocked(bool blocked) {
++	_blocked = blocked;
++	if (blocked && clear()) {
++		_changed(false);
++	}
++	updateVisibility();
++}
++
++void DialogsSearchType::reset() {
++	if (clear()) {
++		_changed(false);
++	}
++}
++
++bool DialogsSearchType::chosen() const {
++	return (_filter != Filter::NoFilter);
++}
++
++bool DialogsSearchType::dirty() const {
++	return shown() && (_requested != _filter);
++}
++
++void DialogsSearchType::invalidate() {
++	_requested = std::nullopt;
++}
++
++MTPMessagesFilter DialogsSearchType::takeFilter() {
++	_requested = _filter;
++	return SearchTypeFilter(_filter);
++}
++
++MTPMessagesFilter DialogsSearchType::requestedFilter() const {
++	return SearchTypeFilter(_requested.value_or(Filter::NoFilter));
++}
++
++bool DialogsSearchType::shown() const {
++	return SearchTypes() && _eligible && !_blocked;
++}
++
++bool DialogsSearchType::clear() {
++	_menu = nullptr;
++	if (_filter == Filter::NoFilter) {
++		return false;
++	}
++	_filter = Filter::NoFilter;
++	_button->setFilter(_filter);
++	return true;
++}
++
++void DialogsSearchType::choose(Filter filter) {
++	if (_filter == filter || !shown()) {
++		return;
++	}
++	_filter = filter;
++	_button->setFilter(filter);
++	_changed(true);
++}
++
++void DialogsSearchType::showMenu() {
++	_menu = base::make_unique_q<Ui::PopupMenu>(
++		_button.get(),
++		st::popupMenuWithIcons);
++	FillMenu(_menu.get(), _filter, [=](Filter filter) { choose(filter); });
++	_menu->popup(_button->mapToGlobal(QPoint(0, _button->height())));
++}
++
++void DialogsSearchType::updateVisibility() {
++	const auto visible = shown();
++	if (!visible) {
++		_menu = nullptr;
++	}
++	if (_button->isHidden() == visible) {
++		_button->setVisible(visible);
++	}
++}
++
++} // namespace
++
++class ComposeSearchType::Button final : public Ui::RippleButton {
++public:
++	explicit Button(QWidget *parent);
++
++	void setFilter(Filter filter);
++
++protected:
++	void paintEvent(QPaintEvent *e) override;
++
++	QImage prepareRippleMask() const override;
++	QPoint prepareRippleStartPosition() const override;
++
++private:
++	Filter _filter = Filter::NoFilter;
++
++};
++
++ComposeSearchType::Button::Button(QWidget *parent)
++: RippleButton(parent, st::dialogSearchFrom.ripple) {
++	resize(st::dialogSearchFrom.width, st::dialogSearchFrom.height);
++	setCursor(style::cur_pointer);
++}
++
++void ComposeSearchType::Button::setFilter(Filter filter) {
++	if (_filter != filter) {
++		_filter = filter;
++		update();
++	}
++}
++
++void ComposeSearchType::Button::paintEvent(QPaintEvent *e) {
++	auto p = QPainter(this);
++	const auto &st = st::dialogSearchFrom;
++	const auto active = (_filter != Filter::NoFilter);
++	if (active) {
++		auto hq = PainterHighQualityEnabler(p);
++		p.setPen(Qt::NoPen);
++		p.setBrush(st::lightButtonBgOver);
++		p.drawEllipse(QRect(
++			st.rippleAreaPosition,
++			QSize(st.rippleAreaSize, st.rippleAreaSize)));
++	}
++	paintRipple(p, st.rippleAreaPosition);
++	Icon(_filter).paintInCenter(
++		p,
++		rect(),
++		(isOver() ? st::lightButtonFgOver : st::lightButtonFg)->c);
++}
++
++QImage ComposeSearchType::Button::prepareRippleMask() const {
++	const auto size = st::dialogSearchFrom.rippleAreaSize;
++	return Ui::RippleAnimation::EllipseMask(QSize(size, size));
++}
++
++QPoint ComposeSearchType::Button::prepareRippleStartPosition() const {
++	return mapFromGlobal(QCursor::pos())
++		- st::dialogSearchFrom.rippleAreaPosition;
++}
++
++MTPMessagesFilter SearchTypeFilter(Api::SearchFilter filter) {
++	switch (filter) {
++	case Filter::Photo: return MTP_inputMessagesFilterPhotos();
++	case Filter::Video: return MTP_inputMessagesFilterVideo();
++	case Filter::File: return MTP_inputMessagesFilterDocument();
++	case Filter::Music: return MTP_inputMessagesFilterMusic();
++	case Filter::Voice: return MTP_inputMessagesFilterVoice();
++	case Filter::RoundVideo: return MTP_inputMessagesFilterRoundVideo();
++	case Filter::Gif: return MTP_inputMessagesFilterGif();
++	case Filter::Url: return MTP_inputMessagesFilterUrl();
++	case Filter::Pinned: return MTP_inputMessagesFilterPinned();
++	case Filter::NoFilter: break;
++	}
++	return MTP_inputMessagesFilterEmpty();
++}
++
++QString SearchTypeToken(Api::SearchFilter filter) {
++	return u"\ntype"_q + QString::number(int(filter));
++}
++
++ComposeSearchType::ComposeSearchType(not_null<Ui::RpWidget*> bar) {
++	if (SearchTypes()) {
++		_button = base::make_unique_q<Button>(bar.get());
++		_button->setClickedCallback([=] { showMenu(); });
++	}
++}
++
++ComposeSearchType::~ComposeSearchType() = default;
++
++Ui::RpWidget *ComposeSearchType::button() const {
++	return _button.get();
++}
++
++rpl::producer<bool> ComposeSearchType::shownValue() const {
++	if (_button) {
++		return _button->shownValue();
++	}
++	return rpl::single(false);
++}
++
++Api::SearchFilter ComposeSearchType::filter() const {
++	return _filter;
++}
++
++rpl::producer<> ComposeSearchType::changes() const {
++	return _changes.events();
++}
++
++void ComposeSearchType::setAvailable(bool available) {
++	if (!_button) {
++		return;
++	}
++	if (!available) {
++		_menu = nullptr;
++		if (_filter != Filter::NoFilter) {
++			_filter = Filter::NoFilter;
++			_button->setFilter(_filter);
++		}
++	}
++	_button->setVisible(available);
++}
++
++void ComposeSearchType::showMenu() {
++	_menu = base::make_unique_q<Ui::PopupMenu>(
++		_button.get(),
++		st::popupMenuWithIcons);
++	FillMenu(_menu.get(), _filter, [=](Filter filter) { choose(filter); });
++	_menu->setForcedOrigin(Ui::PanelAnimation::Origin::BottomLeft);
++	_menu->popup(_button->mapToGlobal(QPoint()));
++}
++
++void ComposeSearchType::choose(Api::SearchFilter filter) {
++	if (_filter == filter) {
++		return;
++	}
++	_filter = filter;
++	_button->setFilter(filter);
++	_changes.fire({});
++}
++
++Ui::RpWidget *SetupDialogsSearchType(
++		DialogsSearchTypeDescriptor &&descriptor) {
++	const auto widget = descriptor.widget;
++	return widget->lifetime().make_state<DialogsSearchType>(
++		std::move(descriptor))->button();
++}
++
++void DialogsSearchTypeState(
++		not_null<QWidget*> widget,
++		const Dialogs::SearchState &state) {
++	if (const auto type = Lookup(widget)) {
++		type->setState(state);
++	}
++}
++
++void DialogsSearchTypeBlock(not_null<QWidget*> widget, bool blocked) {
++	if (const auto type = Lookup(widget)) {
++		type->setBlocked(blocked);
++	}
++}
++
++void DialogsSearchTypeReset(not_null<QWidget*> widget) {
++	if (const auto type = Lookup(widget)) {
++		type->reset();
++	}
++}
++
++bool DialogsSearchTypeChosen(not_null<QWidget*> widget) {
++	const auto type = Lookup(widget);
++	return type && type->chosen();
++}
++
++bool DialogsSearchTypeChosenAbove(not_null<QWidget*> child) {
++	for (auto w = child->parentWidget(); w; w = w->parentWidget()) {
++		if (const auto type = Lookup(w)) {
++			return type->chosen();
++		}
++	}
++	return false;
++}
++
++bool DialogsSearchTypeDirty(not_null<QWidget*> widget) {
++	const auto type = Lookup(widget);
++	return type && type->dirty();
++}
++
++void DialogsSearchTypeInvalidate(not_null<QWidget*> widget) {
++	if (const auto type = Lookup(widget)) {
++		type->invalidate();
++	}
++}
++
++MTPMessagesFilter DialogsSearchTypeTake(not_null<QWidget*> widget) {
++	const auto type = Lookup(widget);
++	return type ? type->takeFilter() : MTP_inputMessagesFilterEmpty();
++}
++
++MTPMessagesFilter DialogsSearchTypeRequested(not_null<QWidget*> widget) {
++	const auto type = Lookup(widget);
++	return type ? type->requestedFilter() : MTP_inputMessagesFilterEmpty();
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_search_types.h b/Telegram/SourceFiles/tele/tele_search_types.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..7f8ffbb599f5258a986849da624f32d68ce93dbe
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_search_types.h
+@@ -0,0 +1,66 @@
++#pragma once
++
++#include "api/api_messages_search.h"
++#include "base/unique_qptr.h"
++
++namespace Dialogs {
++struct SearchState;
++} // namespace Dialogs
++
++namespace Ui {
++class RpWidget;
++class PopupMenu;
++} // namespace Ui
++
++namespace Tele {
++
++[[nodiscard]] MTPMessagesFilter SearchTypeFilter(Api::SearchFilter filter);
++[[nodiscard]] QString SearchTypeToken(Api::SearchFilter filter);
++
++class ComposeSearchType final {
++public:
++	explicit ComposeSearchType(not_null<Ui::RpWidget*> bar);
++	~ComposeSearchType();
++
++	[[nodiscard]] Ui::RpWidget *button() const;
++	[[nodiscard]] rpl::producer<bool> shownValue() const;
++	[[nodiscard]] Api::SearchFilter filter() const;
++	[[nodiscard]] rpl::producer<> changes() const;
++	void setAvailable(bool available);
++
++private:
++	class Button;
++
++	void showMenu();
++	void choose(Api::SearchFilter filter);
++
++	base::unique_qptr<Button> _button;
++	base::unique_qptr<Ui::PopupMenu> _menu;
++	Api::SearchFilter _filter = Api::SearchFilter::NoFilter;
++	rpl::event_stream<> _changes;
++
++};
++
++struct DialogsSearchTypeDescriptor {
++	not_null<Ui::RpWidget*> widget;
++	not_null<QWidget*> parent;
++	Fn<void(bool rerun)> changed;
++};
++
++[[nodiscard]] Ui::RpWidget *SetupDialogsSearchType(
++	DialogsSearchTypeDescriptor &&descriptor);
++void DialogsSearchTypeState(
++	not_null<QWidget*> widget,
++	const Dialogs::SearchState &state);
++void DialogsSearchTypeBlock(not_null<QWidget*> widget, bool blocked);
++void DialogsSearchTypeReset(not_null<QWidget*> widget);
++[[nodiscard]] bool DialogsSearchTypeChosen(not_null<QWidget*> widget);
++[[nodiscard]] bool DialogsSearchTypeChosenAbove(not_null<QWidget*> child);
++[[nodiscard]] bool DialogsSearchTypeDirty(not_null<QWidget*> widget);
++void DialogsSearchTypeInvalidate(not_null<QWidget*> widget);
++[[nodiscard]] MTPMessagesFilter DialogsSearchTypeTake(
++	not_null<QWidget*> widget);
++[[nodiscard]] MTPMessagesFilter DialogsSearchTypeRequested(
++	not_null<QWidget*> widget);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index 4e895ceceac6a6392af0ea5059aa2b20a761b456..69bc34c55482381ff2db6e263d5645df0b945917 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -118,6 +118,7 @@ struct Spec {
+ 		Toggle(kOptionGroupQuickReplies),
+ 		Toggle(kOptionQuickRepliesByName),
+ 		Toggle(kOptionRegexSearch),
++		Toggle(kOptionSearchTypes),
+ 		Toggle(kOptionBubbleBadges),
+ 		Toggle(kOptionOnlineInBigGroups),
+ 		Toggle(kOptionLowercase),

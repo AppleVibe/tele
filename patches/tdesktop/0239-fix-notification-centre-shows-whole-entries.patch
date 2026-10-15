@@ -8,7 +8,7 @@ Subject: [PATCH] fix: notification centre shows whole entries
  1 file changed, 100 insertions(+), 46 deletions(-)
 
 diff --git a/Telegram/SourceFiles/tele/tele_notices_section.cpp b/Telegram/SourceFiles/tele/tele_notices_section.cpp
-index 1b6e9f98c81347031a04560d3395c9a1276dcc08..a2f9822def15e2123a6dc2fd526d4078ca43727a 100644
+index 582a0fa810172be3eec8e27be023b2e7492dd1e9..bd25a430bc1fb154219a7853309654a452d45e70 100644
 --- a/Telegram/SourceFiles/tele/tele_notices_section.cpp
 +++ b/Telegram/SourceFiles/tele/tele_notices_section.cpp
 @@ -36,6 +36,7 @@ namespace {
@@ -16,10 +16,10 @@ index 1b6e9f98c81347031a04560d3395c9a1276dcc08..a2f9822def15e2123a6dc2fd526d4078
  constexpr auto kPhotoMaxHeight = 240;
  constexpr auto kIconSize = 36;
 +constexpr auto kTextLines = 6;
+ constexpr auto kButtonSkip = 6;
  
  enum class Filter : uchar {
- 	All,
-@@ -141,17 +142,6 @@ enum class Filter : uchar {
+@@ -142,17 +143,6 @@ enum class Filter : uchar {
  	return result;
  }
  
@@ -37,7 +37,7 @@ index 1b6e9f98c81347031a04560d3395c9a1276dcc08..a2f9822def15e2123a6dc2fd526d4078
  [[nodiscard]] QVariant LinkContext(
  		not_null<Window::SessionController*> controller) {
  	return QVariant::fromValue(ClickHandlerContext{
-@@ -159,7 +149,71 @@ enum class Filter : uchar {
+@@ -160,7 +150,71 @@ enum class Filter : uchar {
  	});
  }
  
@@ -110,7 +110,7 @@ index 1b6e9f98c81347031a04560d3395c9a1276dcc08..a2f9822def15e2123a6dc2fd526d4078
  public:
  	Entry(
  		QWidget *parent,
-@@ -184,10 +238,12 @@ private:
+@@ -185,10 +239,12 @@ private:
  	const not_null<Window::SessionController*> _controller;
  	const Notice _notice;
  	const bool _fresh = false;
@@ -125,7 +125,7 @@ index 1b6e9f98c81347031a04560d3395c9a1276dcc08..a2f9822def15e2123a6dc2fd526d4078
  	PeerData *_from = nullptr;
  	Ui::PeerUserpicView _userpic;
  	QImage _photo;
-@@ -203,40 +259,37 @@ Entry::Entry(
+@@ -204,40 +260,37 @@ Entry::Entry(
  	not_null<Window::SessionController*> controller,
  	const Notice &notice,
  	bool fresh)
@@ -176,7 +176,7 @@ index 1b6e9f98c81347031a04560d3395c9a1276dcc08..a2f9822def15e2123a6dc2fd526d4078
  		}
  	}
  	if (!_notice.photo.isEmpty()) {
-@@ -278,7 +331,7 @@ void Entry::refreshTime() {
+@@ -279,7 +332,7 @@ void Entry::refreshTime() {
  	if (_time != time) {
  		_time = time;
  		_timeWidth = st::normalFont->width(_time);
@@ -185,7 +185,7 @@ index 1b6e9f98c81347031a04560d3395c9a1276dcc08..a2f9822def15e2123a6dc2fd526d4078
  			resizeToWidth(width());
  		}
  		update();
-@@ -297,18 +350,27 @@ int Entry::right() const {
+@@ -298,18 +351,27 @@ int Entry::right() const {
  
  int Entry::resizeGetHeight(int newWidth) {
  	const auto padding = st::boxRowPadding.left() / 2;
@@ -220,7 +220,7 @@ index 1b6e9f98c81347031a04560d3395c9a1276dcc08..a2f9822def15e2123a6dc2fd526d4078
  	}
  	_photoRect = QRect();
  	if (!_photo.isNull()) {
-@@ -342,6 +404,7 @@ void Entry::paintEvent(QPaintEvent *e) {
+@@ -344,6 +406,7 @@ void Entry::paintEvent(QPaintEvent *e) {
  	if (_fresh) {
  		p.fillRect(rect(), st::windowBgOver);
  	}
@@ -228,7 +228,7 @@ index 1b6e9f98c81347031a04560d3395c9a1276dcc08..a2f9822def15e2123a6dc2fd526d4078
  	const auto padding = st::boxRowPadding.left() / 2;
  	const auto size = style::ConvertScale(kIconSize);
  	const auto iconLeft = st::boxRowPadding.left();
-@@ -369,26 +432,17 @@ void Entry::paintEvent(QPaintEvent *e) {
+@@ -371,26 +434,17 @@ void Entry::paintEvent(QPaintEvent *e) {
  			st::settingsIconFg->c);
  	}
  

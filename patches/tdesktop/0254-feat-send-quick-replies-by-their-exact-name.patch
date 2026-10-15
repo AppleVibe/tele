@@ -66,7 +66,7 @@ index 2f0a7d8dbddda9869b3bd51b86a2a86713952afa..878578a97f93fb4b26460234de727b5d
  	if (!options.scheduled) {
  		auto message = Api::MessageToSend(prepareSendAction(options));
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 2d6bae169441e4b837ca203364b45a80ea0a5215..9f703e168a270933a2d2320b9bbc76062fbc3807 100644
+index 583a4fee3cd70da8e8b2897e5fa9492b5662bd2b..3f64f9ca81182deedfd415ef3f8017bc188bc02a 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -2899,6 +2899,10 @@ void FillChats(SectionBuilder &builder) {
@@ -81,7 +81,7 @@ index 2d6bae169441e4b837ca203364b45a80ea0a5215..9f703e168a270933a2d2320b9bbc7606
  		builder,
  		::Tele::kOptionRegexSearch,
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 7d0bd9d95794180afdfeb956ab70f66699384c4a..a55e8e3cb7ea37f5c805b15ae75d19c3a83d8b60 100644
+index cee373a50065bbad6ad04b9eea2a324ac2ff0efe..b724d7610c922dec9fd2a03501ad6eff5a137baa 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -25,6 +25,7 @@ const char kOptionChangelogShown[] = "tele-changelog-shown";
@@ -105,7 +105,7 @@ index 7d0bd9d95794180afdfeb956ab70f66699384c4a..a55e8e3cb7ea37f5c805b15ae75d19c3
  base::options::toggle RegexSearchOption({
  	.id = kOptionRegexSearch,
  	.name = "Regex search in chats",
-@@ -1694,6 +1701,10 @@ bool GroupQuickReplies() {
+@@ -1695,6 +1702,10 @@ bool GroupQuickReplies() {
  	return GroupQuickRepliesOption.value();
  }
  

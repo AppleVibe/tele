@@ -1026,10 +1026,10 @@ index f6f981597f87d48b04492d2bf2f0acc08c47fe5c..4906accb5f46db0f59ab5a3dd8f08682
  	AddGroupTitle(builder, u"Profiles"_q);
  	AddOptionToggle(builder, ::Tele::kOptionShowDc, { u"dc"_q });
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 7936f23662a47b1a5fabd87580f5e7400cb61081..39217b89f8e9fda9e5ae8a048f2d19ad1330ea28 100644
+index 8bb6779dc92ddb0c8ea416756e34a99429865cd7..c56aebcee79fdbc565b58bbddc734dc33b85d55f 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
-@@ -1698,17 +1698,18 @@ bool KeepDeletedOwn() {
+@@ -1699,17 +1699,18 @@ bool KeepDeletedOwn() {
  }
  
  bool DeletedTrashIcon() {

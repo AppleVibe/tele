@@ -1,0 +1,205 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Wed, 7 Oct 2026 19:02:25 +0300
+Subject: [PATCH] feat: copy the owner id of sticker sets
+
+---
+ .../SourceFiles/boxes/sticker_set_box.cpp     |  2 ++
+ .../SourceFiles/settings/settings_tele.cpp    |  4 +++
+ Telegram/SourceFiles/tele/tele_options.cpp    | 11 +++++++
+ Telegram/SourceFiles/tele/tele_options.h      |  2 ++
+ Telegram/SourceFiles/tele/tele_peer_id.cpp    | 33 +++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_peer_id.h      |  9 +++++
+ .../SourceFiles/tele/tele_settings_io.cpp     |  1 +
+ 7 files changed, 62 insertions(+)
+
+diff --git a/Telegram/SourceFiles/boxes/sticker_set_box.cpp b/Telegram/SourceFiles/boxes/sticker_set_box.cpp
+index 23e34281c04e774f542af74eaaf08f7ea53171d8..9d6779ac7e11cf3540e48c06276038407330a837 100644
+--- a/Telegram/SourceFiles/boxes/sticker_set_box.cpp
++++ b/Telegram/SourceFiles/boxes/sticker_set_box.cpp
+@@ -68,6 +68,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "ui/rect.h"
+ #include "ui/vertical_list.h"
+ #include "window/window_session_controller.h"
++#include "tele/tele_peer_id.h"
+ #include "tele/tele_view_tl.h"
+ #include "styles/style_chat.h"
+ #include "styles/style_chat_helpers.h"
+@@ -1098,6 +1099,7 @@ void StickerSetBox::updateButtons() {
+ 					tr::lng_context_copy_link(tr::now),
+ 					copyLink,
+ 					&st::menuIconCopy);
++				Tele::AddCopySetOwnerAction(raw, _show, _inner->setId());
+ 				Tele::AddViewTlAction(raw, _show, _set);
+ 				if (fillSetCreatorMenu) {
+ 					fillSetCreatorMenu(raw);
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 630c68f829bb83378e7b35ea59b0f9e9cb6d70b3..9d34edd970dc23a15bb774c3027ec8c8cce9d8bf 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -3645,6 +3645,10 @@ void FillProfiles(SectionBuilder &builder) {
+ 				{},
+ 				::Info::Profile::kOptionShowPeerIdBelowAbout);
+ 		});
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionStickerSetOwner,
++		{ u"sticker"_q, u"emoji"_q, u"author"_q, u"creator"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Profiles"_q);
+ 	AddOptionToggle(builder, ::Tele::kOptionShowDc, { u"dc"_q });
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index ed39054323547414fd0ebc887c003e006317f28c..49d6b236ccf095b60c5c5a8c3c465c4282a93920 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -79,6 +79,7 @@ const char kOptionGiftStudioMainMenu[] = "tele-gift-studio-main-menu";
+ const char kOptionGiftFakeUpgrade[] = "tele-gift-fake-upgrade";
+ const char kOptionPeerIdsWithoutSpaces[] = "tele-peer-ids-without-spaces";
+ const char kOptionBotApiPeerIds[] = "tele-bot-api-peer-ids";
++const char kOptionStickerSetOwner[] = "tele-sticker-set-owner";
+ const char kOptionShowDc[] = "tele-show-dc";
+ const char kOptionMergeIdDc[] = "tele-merge-id-dc";
+ const char kOptionMediaUploadDate[] = "tele-media-upload-date";
+@@ -684,6 +685,12 @@ base::options::toggle BotApiPeerIdsOption({
+ 	.description = "Like -100 in front of channel and supergroup IDs.",
+ });
+ 
++base::options::toggle StickerSetOwnerOption({
++	.id = kOptionStickerSetOwner,
++	.name = "Copy the owner ID of sticker sets",
++	.description = "From the menu of a sticker or emoji set.",
++});
++
+ base::options::toggle ShowDcOption({
+ 	.id = kOptionShowDc,
+ 	.name = "Show data center",
+@@ -2150,6 +2157,10 @@ bool BotApiPeerIds() {
+ 	return BotApiPeerIdsOption.value();
+ }
+ 
++bool StickerSetOwner() {
++	return StickerSetOwnerOption.value();
++}
++
+ rpl::producer<> PeerIdFormatChanges() {
+ 	return rpl::merge(
+ 		PeerIdsWithoutSpacesOption.changes(),
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index e8183b4da9b967aab43084f8752b6b95a6ca2ab3..50b34c5b3cdc9297b2a513806ac29ed1957ec14b 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -74,6 +74,7 @@ extern const char kOptionGiftStudioMainMenu[];
+ extern const char kOptionGiftFakeUpgrade[];
+ extern const char kOptionPeerIdsWithoutSpaces[];
+ extern const char kOptionBotApiPeerIds[];
++extern const char kOptionStickerSetOwner[];
+ extern const char kOptionShowDc[];
+ extern const char kOptionMergeIdDc[];
+ extern const char kOptionMediaUploadDate[];
+@@ -334,6 +335,7 @@ void SetReactionsOrder(const QString &value);
+ [[nodiscard]] bool GiftFakeUpgrade();
+ [[nodiscard]] bool PeerIdsWithoutSpaces();
+ [[nodiscard]] bool BotApiPeerIds();
++[[nodiscard]] bool StickerSetOwner();
+ [[nodiscard]] rpl::producer<> PeerIdFormatChanges();
+ [[nodiscard]] bool ShowDc();
+ [[nodiscard]] bool MediaUploadDate();
+diff --git a/Telegram/SourceFiles/tele/tele_peer_id.cpp b/Telegram/SourceFiles/tele/tele_peer_id.cpp
+index 9e92bec88f3aac50c18b6be446e155176142297e..27736b2bd007b35e14fdc5df14829124ce56a80d 100644
+--- a/Telegram/SourceFiles/tele/tele_peer_id.cpp
++++ b/Telegram/SourceFiles/tele/tele_peer_id.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include "base/options.h"
+ #include "base/unixtime.h"
++#include "chat_helpers/compose/compose_show.h"
+ #include "data/data_changes.h"
+ #include "data/data_chat.h"
+ #include "data/data_document.h"
+@@ -26,6 +27,7 @@
+ #include "ui/widgets/popup_menu.h"
+ #include "window/window_session_controller.h"
+ #include "styles/style_chat_helpers.h"
++#include "styles/style_menu_icons.h"
+ 
+ namespace Tele {
+ namespace {
+@@ -417,6 +419,37 @@ QString AppendDc(QString text, int dc, const QString &separator) {
+ 	return text.isEmpty() ? label : (text + separator + label);
+ }
+ 
++[[nodiscard]] uint64 SetOwnerId(uint64 setId) {
++	// id = (owner & 0x7fffffff) << 32 | ~((owner >> 31) << 22 | counter),
++	// sets from before the band field keep the owner in the high word.
++	// see github.com/madrik1337/SPOwnerBot
++	const auto high = setId >> 32;
++	const auto low = setId & 0xffffffffULL;
++	if (!(low >> 24)) {
++		return high;
++	}
++	const auto band = (~low & 0xffffffffULL) >> 22;
++	return high + (band << 31);
++}
++
++void AddCopySetOwnerAction(
++		not_null<Ui::PopupMenu*> menu,
++		std::shared_ptr<ChatHelpers::Show> show,
++		uint64 setId) {
++	if (!StickerSetOwner() || !setId) {
++		return;
++	}
++	menu->addAction(Lower(u"Copy owner ID"_q), [=] {
++		const auto text = QString::number(SetOwnerId(setId));
++		TextUtilities::SetClipboardText({ text });
++		ShowCopiedToast(show, {
++			.text = { Lower(u"Owner ID copied to clipboard."_q) },
++			.iconLottie = u"toast/copy"_q,
++			.iconLottieSize = st::toastLottieIconSize,
++		}, { text });
++	}, &st::menuIconProfile);
++}
++
+ QString AppendUploadDate(
+ 		QString text,
+ 		const HistoryItem *item,
+diff --git a/Telegram/SourceFiles/tele/tele_peer_id.h b/Telegram/SourceFiles/tele/tele_peer_id.h
+index 76b3d970edb81a892b496dda274f019866474759..a5e6ac1e17c5e7eddefb6ab563d7154ed9d0c8b8 100644
+--- a/Telegram/SourceFiles/tele/tele_peer_id.h
++++ b/Telegram/SourceFiles/tele/tele_peer_id.h
+@@ -5,8 +5,13 @@ class PeerData;
+ class PhotoData;
+ class DocumentData;
+ 
++namespace ChatHelpers {
++class Show;
++} // namespace ChatHelpers
++
+ namespace Ui {
+ class FlatLabel;
++class PopupMenu;
+ } // namespace Ui
+ 
+ namespace Window {
+@@ -30,6 +35,10 @@ void SetupPeerDcLabel(
+ 	not_null<Window::SessionController*> controller);
+ [[nodiscard]] int MediaDc(PhotoData *photo, DocumentData *document);
+ [[nodiscard]] QString AppendDc(QString text, int dc, const QString &separator);
++void AddCopySetOwnerAction(
++	not_null<Ui::PopupMenu*> menu,
++	std::shared_ptr<ChatHelpers::Show> show,
++	uint64 setId);
+ [[nodiscard]] QString AppendUploadDate(
+ 	QString text,
+ 	const HistoryItem *item,
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index a5d22082be74b23b7971e6e999d31bdd37f8f7d0..16874916e7d83514b7c634c961cfeb036dac2861 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -167,6 +167,7 @@ struct Spec {
+ 		Toggle(Info::Profile::kOptionShowPeerIdBelowAbout),
+ 		Toggle(kOptionPeerIdsWithoutSpaces),
+ 		Toggle(kOptionBotApiPeerIds),
++		Toggle(kOptionStickerSetOwner),
+ 		Toggle(kOptionShowDc),
+ 		Toggle(kOptionMergeIdDc),
+ 		Toggle(kOptionMediaUploadDate),

@@ -14,7 +14,7 @@ Subject: [PATCH] feat: never open web apps in fullscreen
  7 files changed, 48 insertions(+), 2 deletions(-)
 
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 8d8a96342b68d76062b6b18ad793bb1044f61d0a..2d6bae169441e4b837ca203364b45a80ea0a5215 100644
+index f5cb9193c9f90a09ed6d6205a802ac6e5014e0e5..583a4fee3cd70da8e8b2897e5fa9492b5662bd2b 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3717,6 +3717,10 @@ void FillBots(SectionBuilder &builder) {
@@ -29,7 +29,7 @@ index 8d8a96342b68d76062b6b18ad793bb1044f61d0a..2d6bae169441e4b837ca203364b45a80
  }
  
 diff --git a/Telegram/SourceFiles/tele/tele_links.cpp b/Telegram/SourceFiles/tele/tele_links.cpp
-index ca549c235a462c9b036481753fe9ec84827922b5..4ad5e645168378344a66276b27fbac542ea64174 100644
+index 572ea9585e80181913cd25ef1e0b49c6693a3ece..3727df8f13189297ef19bddc8b78adfddade2fed 100644
 --- a/Telegram/SourceFiles/tele/tele_links.cpp
 +++ b/Telegram/SourceFiles/tele/tele_links.cpp
 @@ -497,6 +497,24 @@ QString PrepareOpenedLink(const QString &url) {
@@ -70,7 +70,7 @@ index e8701cda69df1040ea2f62bfc9a51e4d3d5fe6fb..76d4f02df265dbc34bc550baa186708c
  void AddOpenUncleanedAction(
  	not_null<Ui::PopupMenu*> menu,
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index d816a187ba77cfd2417b215eb0ec9a8ef2e549cc..7d0bd9d95794180afdfeb956ab70f66699384c4a 100644
+index ca0d0019963a6853d994ce7dc3c40e20ea5b0d31..cee373a50065bbad6ad04b9eea2a324ac2ff0efe 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -136,6 +136,7 @@ const char kOptionInlineAsText[] = "tele-inline-as-text";
@@ -94,7 +94,7 @@ index d816a187ba77cfd2417b215eb0ec9a8ef2e549cc..7d0bd9d95794180afdfeb956ab70f666
  base::options::toggle HideBotEditedOption({
  	.id = kOptionHideBotEdited,
  	.name = "No edited mark on bot messages",
-@@ -2548,6 +2555,10 @@ bool TrustedAppLinks() {
+@@ -2549,6 +2556,10 @@ bool TrustedAppLinks() {
  	return TrustedAppLinksOption.value();
  }
  

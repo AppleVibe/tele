@@ -10,20 +10,20 @@ Subject: [PATCH] feat: rearrange menus with groups and submenus in a menu
  .../view/history_view_context_menu.cpp        |    9 +
  .../history/view/history_view_list_widget.cpp |    4 +-
  Telegram/SourceFiles/menu/menu_send.cpp       |    2 +
- .../SourceFiles/settings/settings_tele.cpp    |   70 +-
+ .../SourceFiles/settings/settings_tele.cpp    |   68 +-
  .../tele/tele_chat_backgrounds.cpp            |   46 +-
  Telegram/SourceFiles/tele/tele_counters.cpp   |    2 +
  .../tele/tele_download_folders.cpp            |   34 +-
  Telegram/SourceFiles/tele/tele_ghost.cpp      |   31 +-
  Telegram/SourceFiles/tele/tele_menu_apply.cpp | 1047 ++++++++
  Telegram/SourceFiles/tele/tele_menu_apply.h   |   79 +
- .../SourceFiles/tele/tele_menu_editor.cpp     | 2190 +++++++++++++++++
+ .../SourceFiles/tele/tele_menu_editor.cpp     | 2216 +++++++++++++++++
  Telegram/SourceFiles/tele/tele_menu_editor.h  |   17 +
  .../SourceFiles/tele/tele_menu_layout.cpp     |  557 +++++
  Telegram/SourceFiles/tele/tele_menu_layout.h  |   66 +
  Telegram/SourceFiles/tele/tele_menu_order.cpp |  740 ------
  Telegram/SourceFiles/tele/tele_menu_order.h   |   15 -
- .../SourceFiles/tele/tele_menu_registry.cpp   | 1508 ++++++++++++
+ .../SourceFiles/tele/tele_menu_registry.cpp   | 1508 +++++++++++
  .../SourceFiles/tele/tele_menu_registry.h     |   64 +
  .../SourceFiles/tele/tele_message_menu.cpp    |  146 +-
  Telegram/SourceFiles/tele/tele_message_menu.h |    1 +
@@ -37,7 +37,7 @@ Subject: [PATCH] feat: rearrange menus with groups and submenus in a menu
  .../ui/widgets/chat_filters_tabs_strip.cpp    |    2 +
  .../window/window_filters_menu.cpp            |    2 +
  .../SourceFiles/window/window_peer_menu.cpp   |    9 +-
- 32 files changed, 5781 insertions(+), 947 deletions(-)
+ 32 files changed, 5806 insertions(+), 946 deletions(-)
  create mode 100644 Telegram/SourceFiles/tele/tele_menu_apply.cpp
  create mode 100644 Telegram/SourceFiles/tele/tele_menu_apply.h
  create mode 100644 Telegram/SourceFiles/tele/tele_menu_editor.cpp
@@ -202,7 +202,7 @@ index ce272085675ed4e345c5ed9b1f0aaadbe2ed7c9e..7666a6407fd42bb8a18dbcc42b320148
  	if (maybeShow) {
  		return AttachSendMenuEffect(
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 4906accb5f46db0f59ab5a3dd8f086829b32ac50..de7bb8201461595ec301cb92d4b35f89c628fb4b 100644
+index 4906accb5f46db0f59ab5a3dd8f086829b32ac50..0e065ac92168d9fc3a6351980f0ed4942af72477 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -39,7 +39,8 @@
@@ -287,15 +287,6 @@ index 4906accb5f46db0f59ab5a3dd8f086829b32ac50..de7bb8201461595ec301cb92d4b35f89
  }
  
  struct ButtonChoice {
-@@ -3375,7 +3396,7 @@ void FillRoot(SectionBuilder &builder) {
- 		FillNotifications);
- 	add(
- 		u"menus"_q,
--		u"Menus"_q,
-+		u"Menus (beta)"_q,
- 		st::menuIconReorder,
- 		{ u"context"_q, u"right click"_q, u"message menu"_q },
- 		FillMenus);
 @@ -3417,9 +3438,10 @@ const std::vector<Category> &Categories() {
  	if (id.isEmpty()) {
  		return nullptr;
@@ -1646,10 +1637,10 @@ index 0000000000000000000000000000000000000000..266d048d3e2710a47f561a1960be3019
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_menu_editor.cpp b/Telegram/SourceFiles/tele/tele_menu_editor.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..fcf51df5b4e9bc3b322ccc9dc77094a4db4362ed
+index 0000000000000000000000000000000000000000..85913ef5193adee130339342549ad3de8592619c
 --- /dev/null
 +++ b/Telegram/SourceFiles/tele/tele_menu_editor.cpp
-@@ -0,0 +1,2190 @@
+@@ -0,0 +1,2216 @@
 +#include "tele/tele_menu_editor.h"
 +
 +#include "base/options.h"
@@ -1885,6 +1876,15 @@ index 0000000000000000000000000000000000000000..fcf51df5b4e9bc3b322ccc9dc77094a4
 +	}
 +	const auto &option = base::options::details::Lookup(item.gate);
 +	return Lower(u"Turn on "_q) + Lower(option.name());
++}
++
++[[nodiscard]] const MenuItemInfo *OffItem(
++		MenuKind kind,
++		const MenuEntry &data) {
++	const auto item = (data.type == MenuEntry::Type::Item)
++		? LookupMenuItem(kind, data.key)
++		: nullptr;
++	return (item && !FeatureOn(*item)) ? item : nullptr;
 +}
 +
 +[[nodiscard]] bool TopLevelOnly(const MenuItemInfo &item) {
@@ -2194,7 +2194,11 @@ index 0000000000000000000000000000000000000000..fcf51df5b4e9bc3b322ccc9dc77094a4
 +	p.setFont(font);
 +	if (!hint.isEmpty()) {
 +		const auto &small = st::defaultTextStyle.font;
-+		const auto available = (textRight - textLeft) / 2;
++		const auto title = EntryTitle(_state->kind, data);
++		const auto dots = data.fresh ? st::boxRowPadding.left() : 0;
++		const auto available = std::max(
++			(textRight - textLeft) / 2,
++			textRight - textLeft - font->width(title) - dots - skip);
 +		const auto shown = small->elided(hint, available);
 +		const auto hintWidth = small->width(shown);
 +		p.setFont(small);
@@ -2578,6 +2582,12 @@ index 0000000000000000000000000000000000000000..fcf51df5b4e9bc3b322ccc9dc77094a4
 +		return;
 +	}
 +	auto &data = At(_state->layout, path);
++	if (const auto item = OffItem(_state->kind, data)) {
++		base::options::lookup<bool>(item->gate).set(true);
++		data.hidden = false;
++		changed();
++		return;
++	}
 +	data.hidden = !data.hidden;
 +	changed();
 +}
@@ -2698,10 +2708,17 @@ index 0000000000000000000000000000000000000000..fcf51df5b4e9bc3b322ccc9dc77094a4
 +		st::popupMenuWithIcons);
 +	const auto path = row.path;
 +	if (row.type != Type::Separator) {
++		const auto off = OffItem(_state->kind, data);
 +		_menu->addAction(
-+			data.hidden ? Lower(u"Show"_q) : Lower(u"Hide"_q),
++			(off
++				? FeatureHint(*off)
++				: data.hidden
++				? Lower(u"Show"_q)
++				: Lower(u"Hide"_q)),
 +			[=] { toggleHidden(path); },
-+			data.hidden ? &st::menuIconShowInChat : &st::menuIconStealth);
++			((off || data.hidden)
++				? &st::menuIconShowInChat
++				: &st::menuIconStealth));
 +	} else {
 +		const auto thick = SeparatorThick(
 +			_state->kind,
@@ -7111,7 +7128,7 @@ index d02ac4b8306b0bdbd84653aa7758a40112829203..b3c5c0a94e686b8eb1700d29be6e1359
  	} });
  }
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 39217b89f8e9fda9e5ae8a048f2d19ad1330ea28..8817839eb4c317c35a46cb3de87dc634636bd01a 100644
+index c56aebcee79fdbc565b58bbddc734dc33b85d55f..575986ec2aed5faef88019ea2ce89322e952a55b 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -104,7 +104,8 @@ const char kOptionServerUsernames[] = "tele-server-usernames";
@@ -7143,7 +7160,7 @@ index 39217b89f8e9fda9e5ae8a048f2d19ad1330ea28..8817839eb4c317c35a46cb3de87dc634
  });
  
  base::options::toggle SentToBottomOption({
-@@ -1900,22 +1905,24 @@ rpl::producer<QString> WindowTitleTemplateValue() {
+@@ -1901,22 +1906,24 @@ rpl::producer<QString> WindowTitleTemplateValue() {
  	});
  }
  

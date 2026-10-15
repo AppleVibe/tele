@@ -121,7 +121,7 @@ index b71e31ef64438eb8f35c5ee38afcbd7aa7c18a2b..24e383e8cb6ac123e227686bad801831
  	if (canToggle && type == SavedStarGiftMenuType::List) {
  		if (e.savedToProfile) {
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index c6afb43a4ed597ec863047e5d44fd5500be2c42c..832bd21a5f36afa52fdcd9d62c2e34c20afb868b 100644
+index 5c1f4ca35d9dc449babb5621d9217e66c51ddde0..a1738b0fb8c31e69e77533d09d1d3a7a8e0deb66 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -30,6 +30,7 @@
@@ -10641,7 +10641,7 @@ index 0000000000000000000000000000000000000000..e68e46cfe13ff6f8cee3a2b89b1d7584
 +
 +} // namespace Tele::GiftStudio
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index c123a42ccadb110e65af91f99c31806007e6439a..76e93a5f5aebb628555e4c5e4ee6c248119588f6 100644
+index 6e3263f96d8291e93fb5712be011b1d1b83223f4..dbd38fc2aab2f8e0df546a9997cddd61a201f6e0 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -69,6 +69,8 @@ const char kOptionStarsTools[] = "tele-stars-tools";
@@ -10671,7 +10671,7 @@ index c123a42ccadb110e65af91f99c31806007e6439a..76e93a5f5aebb628555e4c5e4ee6c248
  base::options::toggle PeerIdsWithoutSpacesOption({
  	.id = kOptionPeerIdsWithoutSpaces,
  	.name = "IDs without spaces",
-@@ -1777,6 +1790,14 @@ bool GiftSelect() {
+@@ -1778,6 +1791,14 @@ bool GiftSelect() {
  	return GiftSelectOption.value();
  }
  

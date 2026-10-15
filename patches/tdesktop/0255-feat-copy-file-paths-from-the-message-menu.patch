@@ -30,7 +30,7 @@ index 92f067accf1038f5f78c0e9ea891bbd2f7d29ae5..6be10ff8aa4c4408de7c9b756c0bfd84
  
  void ShowWhoReactedMenu(
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 9f703e168a270933a2d2320b9bbc76062fbc3807..3f313bb61f2dfc86dab502dc3e49e871c48b47fd 100644
+index 3f64f9ca81182deedfd415ef3f8017bc188bc02a..adb385a3c9e475770755415f13d97342dbcad89c 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3363,6 +3363,10 @@ void FillMenus(SectionBuilder &builder) {
@@ -140,7 +140,7 @@ index f92a71e61899387aee80d91840c1ea1a3677c0e7..cdb419c338e5162893d7595ae1c00f5b
  
  } // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index a55e8e3cb7ea37f5c805b15ae75d19c3a83d8b60..32de5c9ce1b11527f23b503f16e10d5c67acdf81 100644
+index b724d7610c922dec9fd2a03501ad6eff5a137baa..687e00b8acf640564fa1db98a172607fb9c8e822 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -116,6 +116,7 @@ const char kOptionCalcmulaPreview[] = "tele-calcmula-preview";
@@ -164,7 +164,7 @@ index a55e8e3cb7ea37f5c805b15ae75d19c3a83d8b60..32de5c9ce1b11527f23b503f16e10d5c
  base::options::toggle CopyMarkdownOption({
  	.id = kOptionCopyMarkdown,
  	.name = "Copy as Markdown and HTML",
-@@ -2406,6 +2413,10 @@ bool CopyEmojiId() {
+@@ -2407,6 +2414,10 @@ bool CopyEmojiId() {
  	return CopyEmojiIdOption.value();
  }
  

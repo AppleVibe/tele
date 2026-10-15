@@ -1,0 +1,175 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Wed, 7 Oct 2026 21:42:48 +0300
+Subject: [PATCH] feat: smooth wheel scrolling
+
+---
+ Telegram/CMakeLists.txt                         |  2 ++
+ Telegram/SourceFiles/core/application.cpp       |  2 ++
+ Telegram/SourceFiles/settings/settings_tele.cpp |  4 ++++
+ Telegram/SourceFiles/tele/tele_options.cpp      | 17 +++++++++++++++++
+ Telegram/SourceFiles/tele/tele_options.h        |  2 ++
+ Telegram/SourceFiles/tele/tele_settings_io.cpp  |  1 +
+ .../SourceFiles/tele/tele_smooth_scroll.cpp     | 16 ++++++++++++++++
+ Telegram/SourceFiles/tele/tele_smooth_scroll.h  |  7 +++++++
+ 8 files changed, 51 insertions(+)
+ create mode 100644 Telegram/SourceFiles/tele/tele_smooth_scroll.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_smooth_scroll.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 7e09f567da20259b9c0ac16206c956eb6952be96..d18a24fb0eeebfe19cfc17bca15e51d6f3538b91 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2708,6 +2708,8 @@ PRIVATE
+     tele/tele_show_pinned.h
+     tele/tele_silent.cpp
+     tele/tele_silent.h
++    tele/tele_smooth_scroll.cpp
++    tele/tele_smooth_scroll.h
+     tele/tele_spoilers.cpp
+     tele/tele_spoilers.h
+     tele/tele_stars_tools.cpp
+diff --git a/Telegram/SourceFiles/core/application.cpp b/Telegram/SourceFiles/core/application.cpp
+index 847e309bed5292c3662df9e4abe588079dbf86d7..00cf01169b623f38279919fdfc423e8d0d18ff13 100644
+--- a/Telegram/SourceFiles/core/application.cpp
++++ b/Telegram/SourceFiles/core/application.cpp
+@@ -111,6 +111,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_bubble_padding.h"
+ #include "tele/tele_freeze_watchdog.h"
+ #include "tele/tele_options.h"
++#include "tele/tele_smooth_scroll.h"
+ #include "tele/tele_start_menu.h"
+ 
+ #include <QtCore/QStandardPaths>
+@@ -368,6 +369,7 @@ void Application::run() {
+ 	Tele::StartChangelog();
+ 	Tele::StartBadges();
+ 	Tele::StartReduceMotion();
++	Tele::StartSmoothScroll();
+ 	Tele::StartListKeys();
+ 	Tele::StartMtpConsole();
+ 	Tele::StartFreezeWatchdog();
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 8be2bfde6a4b4acf15fe989d369a0850894a88a4..fb6187901d1b707f2c79f08dbd6a90ceb7bf0e00 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -2788,6 +2788,10 @@ void FillInterface(SectionBuilder &builder) {
+ 		builder,
+ 		::Tele::kOptionListKeys,
+ 		{ u"page up"_q, u"page down"_q, u"keyboard"_q, u"misclick"_q });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionSmoothScroll,
++		{ u"wheel"_q, u"mouse"_q, u"animation"_q, u"scroll"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Chat list"_q);
+ 	AddOptionToggle(builder, ::Tele::kOptionHideAllChats);
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 7ef37fbdc4db36587e35291eeeecea38f46eb88e..9b5ada0ca86b4ec30928748f1b2abdd4fbf854d7 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -57,6 +57,7 @@ const char kOptionChatListNoReorderAnimation[] = "tele-chat-list-no-reorder-anim
+ const char kOptionReduceMotion[] = "tele-reduce-motion";
+ const char kOptionReduceMotionSaved[] = "tele-reduce-motion-saved";
+ const char kOptionListKeys[] = "tele-list-keys";
++const char kOptionSmoothScroll[] = "tele-smooth-scroll";
+ const char kOptionStaticUserpicsChats[] = "tele-static-userpics-chats";
+ const char kOptionHideMentionsButton[] = "tele-hide-mentions-button";
+ const char kOptionHideReactionsButton[] = "tele-hide-reactions-button";
+@@ -563,6 +564,12 @@ base::options::toggle ListKeysOption({
+ 		"sections, and a click just outside a box doesn't close it.",
+ });
+ 
++base::options::toggle SmoothScrollOption({
++	.id = kOptionSmoothScroll,
++	.name = "Smooth wheel scrolling",
++	.description = "Eases each mouse wheel step, like profiles already do.",
++});
++
+ base::options::toggle StaticUserpicsChatsOption({
+ 	.id = kOptionStaticUserpicsChats,
+ 	.name = "Static userpics in chats and profiles",
+@@ -2070,6 +2077,16 @@ rpl::producer<bool> ListKeysValue() {
+ 	});
+ }
+ 
++rpl::producer<bool> SmoothScrollValue() {
++	return rpl::single(
++		rpl::empty
++	) | rpl::then(
++		SmoothScrollOption.changes() | rpl::to_empty
++	) | rpl::map([] {
++		return SmoothScrollOption.value();
++	});
++}
++
+ bool StaticUserpicsChats() {
+ 	return StaticUserpicsChatsOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index 8ec3e810ecd0c91a892259db9af8026acca1ba40..eef54ec51147ad0fe23f80653ecef27960cc1fc4 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -51,6 +51,7 @@ extern const char kOptionChatListNoReorderAnimation[];
+ extern const char kOptionReduceMotion[];
+ extern const char kOptionReduceMotionSaved[];
+ extern const char kOptionListKeys[];
++extern const char kOptionSmoothScroll[];
+ extern const char kOptionGhostInMenu[];
+ extern const char kOptionStaticUserpicsChats[];
+ extern const char kOptionHideMentionsButton[];
+@@ -310,6 +311,7 @@ void SetLinkPreviews(const QString &value);
+ [[nodiscard]] QString ReduceMotionSaved();
+ void SetReduceMotionSaved(const QString &value);
+ [[nodiscard]] rpl::producer<bool> ListKeysValue();
++[[nodiscard]] rpl::producer<bool> SmoothScrollValue();
+ [[nodiscard]] bool StaticUserpicsChats();
+ [[nodiscard]] rpl::producer<> StaticUserpicsChatsChanges();
+ [[nodiscard]] bool HideMentionsButton();
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index e95df488a3729bd8bece38d3d9afea147fb3ce77..bcdfaf4450be1c9ab04a6f7eb9fa8d558fc8f4e0 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -141,6 +141,7 @@ struct Spec {
+ 		Toggle(kOptionChatListNoReorderAnimation),
+ 		Toggle(kOptionReduceMotion),
+ 		Toggle(kOptionListKeys),
++		Toggle(kOptionSmoothScroll),
+ 		Toggle(kOptionLocalFolders),
+ 		Toggle(kOptionUnsortedFolder),
+ 		Toggle(kOptionSelectChats),
+diff --git a/Telegram/SourceFiles/tele/tele_smooth_scroll.cpp b/Telegram/SourceFiles/tele/tele_smooth_scroll.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..e0b2bede571db9fff706a3631b8b1aff645abc09
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_smooth_scroll.cpp
+@@ -0,0 +1,16 @@
++#include "tele/tele_smooth_scroll.h"
++
++#include "tele/tele_options.h"
++#include "ui/widgets/smooth_wheel.h"
++
++namespace Tele {
++
++void StartSmoothScroll() {
++	static auto lifetime = rpl::lifetime();
++	SmoothScrollValue(
++	) | rpl::on_next([](bool enabled) {
++		Ui::SetSmoothWheelScroll(enabled);
++	}, lifetime);
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_smooth_scroll.h b/Telegram/SourceFiles/tele/tele_smooth_scroll.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..321bef2c5bf822bbe6c9274c5d423ab204b58e3c
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_smooth_scroll.h
+@@ -0,0 +1,7 @@
++#pragma once
++
++namespace Tele {
++
++void StartSmoothScroll();
++
++} // namespace Tele

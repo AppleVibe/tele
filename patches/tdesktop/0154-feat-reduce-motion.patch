@@ -113,7 +113,7 @@ index 427ca5e96442cf6ba0741b9f1e864e599cc8d343..6630f1ba86a6ddfb53ed75daff0d7fb6
  	AddOptionToggle(builder, ::Tele::kOptionLowercase);
  	AddSkip(builder);
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 4edca38d74050be4b87b6d9e48cb1a40205efbb0..2b39103cbeb389dd5f876c58f95e0210d1186e23 100644
+index 610dcdb5d6a117df40ad9fe56b42b80cce9e127c..e58bf781388677f795218d44e17fbc1f0edea66b 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -46,6 +46,8 @@ const char kOptionJumpToFirst[] = "tele-jump-to-first";
@@ -146,7 +146,7 @@ index 4edca38d74050be4b87b6d9e48cb1a40205efbb0..2b39103cbeb389dd5f876c58f95e0210
  base::options::toggle StaticUserpicsChatsOption({
  	.id = kOptionStaticUserpicsChats,
  	.name = "Static userpics in chats and profiles",
-@@ -1232,6 +1248,22 @@ bool ChatListNoReorderAnimation() {
+@@ -1233,6 +1249,22 @@ bool ChatListNoReorderAnimation() {
  	return ChatListNoReorderAnimationOption.value();
  }
  

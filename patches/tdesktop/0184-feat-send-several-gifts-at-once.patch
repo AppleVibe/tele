@@ -84,7 +84,7 @@ index 5571da6ac9bded31345b4f41ca6ce2a6f7cb8353..216f180e36ebbadf8ab8b84e1389c42a
  			st::creditsBoxButtonLabel,
  			&st::giftBox.button.textFg);
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index e6fcbcec24c6517ef13c21b8690fad19593ce7a9..b559956ad7f6d4b4dd3960ad1bc6f2a4230d559a 100644
+index 2829683a6c16768ceb7bbf96c8736649760877b7..b36e1066a24e31ab304f8adad89b82af7df1610f 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3122,6 +3122,10 @@ void FillProfiles(SectionBuilder &builder) {
@@ -572,7 +572,7 @@ index 0000000000000000000000000000000000000000..02fec064f56f831029fedbf306e0b3ee
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 9d9e6bed50d1b0079f6f6d416d94bc9ad486d469..d4e938d95eada612b27bc1b7164924ccd658e9e0 100644
+index 04460ebe169368f45c4643a24d2d755e188751f0..463494e8286bc9ed45d31c3e9e2b5413476510ac 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -61,6 +61,7 @@ const char kOptionPinSets[] = "tele-pin-sets";
@@ -595,7 +595,7 @@ index 9d9e6bed50d1b0079f6f6d416d94bc9ad486d469..d4e938d95eada612b27bc1b7164924cc
  base::options::toggle SeeTgButtonOption({
  	.id = kOptionSeeTgButton,
  	.name = "See.tg button on collectible gifts",
-@@ -1621,6 +1627,10 @@ bool ShowRegularGiftIds() {
+@@ -1622,6 +1628,10 @@ bool ShowRegularGiftIds() {
  	return ShowRegularGiftIdsOption.value();
  }
  

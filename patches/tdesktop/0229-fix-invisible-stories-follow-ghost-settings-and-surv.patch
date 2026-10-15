@@ -650,7 +650,7 @@ index 0000000000000000000000000000000000000000..2a33c30881913776706a39ce41b80174
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 261603a80373aafc0e63a7d07e71cf39e03cac0c..62be42cd4b7f431caa15da3f836d54ac644a20a1 100644
+index b0f3315f9a68e44d2ff220a197fa7e2779c429bf..ca409e4d5bdee129944f9349bd22a78ccfcefc39 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -221,8 +221,7 @@ base::options::toggle HideStoriesOption({
@@ -663,7 +663,7 @@ index 261603a80373aafc0e63a7d07e71cf39e03cac0c..62be42cd4b7f431caa15da3f836d54ac
  });
  
  base::options::toggle GhostOption({
-@@ -1483,9 +1482,19 @@ bool HideStories() {
+@@ -1484,9 +1483,19 @@ bool HideStories() {
  	return HideStoriesOption.value();
  }
  

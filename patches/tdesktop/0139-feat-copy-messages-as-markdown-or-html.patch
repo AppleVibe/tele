@@ -683,7 +683,7 @@ index 598214820dd1bdf3d2f09192bacdc7cfe4457298..466b7531ca6d24dd0cc20f516d33f13a
  			{ [](int) { return tr::lng_context_translate(tr::now); },
  				&st::menuIconTranslate },
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index ea2401d9c002803a5dd18328a947e169129f6d1e..3b203a48ffdc8bd4bdfcc4fe7e016c6fad37872c 100644
+index 9f82f21e976edc51713b5213d39e94b401acde0d..5df50d56539c213d359f4515275b1093b90c8593 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -76,6 +76,7 @@ const char kOptionParallelUploads[] = "tele-parallel-uploads";
@@ -706,7 +706,7 @@ index ea2401d9c002803a5dd18328a947e169129f6d1e..3b203a48ffdc8bd4bdfcc4fe7e016c6f
  base::options::toggle ShotOption({
  	.id = kOptionShot,
  	.name = "Shot in the message menu",
-@@ -1375,6 +1381,10 @@ bool CopyEmojiId() {
+@@ -1376,6 +1382,10 @@ bool CopyEmojiId() {
  	return CopyEmojiIdOption.value();
  }
  

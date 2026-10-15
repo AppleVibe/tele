@@ -52,7 +52,7 @@ index c7816499148a688565c39785dac08e8ed1b22a19..ba9f3e6c9c79cf9c7bc33774f4e860e2
  	} else if (const auto edited = displayedEditBadge()) {
  		return edited->date;
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index d631ee64ed77eb76c6ac72b52acbe2c4b5fffdc3..55cf377295e8bd20e87448a208b222eacbe4c20f 100644
+index 6ffe444b280d9ad65c0943f239e5b758c4d43342..46c662aaefe65fa757345970b64072966e305625 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3521,6 +3521,10 @@ void FillBots(SectionBuilder &builder) {
@@ -138,7 +138,7 @@ index 0000000000000000000000000000000000000000..9b3b40abb67b8f5a704e660fd0ffa765
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 2ab65c233ce110ee2c8748226a535f9eb5128f18..cfbd1fac65fc5ac2142b5850b20f7000c6059074 100644
+index 1b3ff87e7fc45418fbb1c86bbe67fe90c21fa1cd..11f056afc293c14b35b78f04cf1bd93935bfb1e1 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -132,6 +132,7 @@ const char kOptionDoubleEnterSend[] = "tele-double-enter-send";
@@ -162,7 +162,7 @@ index 2ab65c233ce110ee2c8748226a535f9eb5128f18..cfbd1fac65fc5ac2142b5850b20f7000
  base::options::toggle NoRichPastePromptOption({
  	.id = kOptionNoRichPastePrompt,
  	.name = "No rich message prompt on paste",
-@@ -2452,6 +2459,14 @@ rpl::producer<> ShowStartParamChanges() {
+@@ -2453,6 +2460,14 @@ rpl::producer<> ShowStartParamChanges() {
  	return StartParamOption.changes();
  }
  

@@ -33,7 +33,7 @@ index 7b835813c8b4bca4a56883f7e715723cdb1313e7..47d930cb6fdcf94f7bbe75f062d33e9c
      tele/tele_settings_io.h
      tele/tele_settings_io_box.cpp
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index bb81628cc67f0c357b5be8ea7d685368084c4538..96f8388c69f9416c571fed90be3da3ee26e9edbb 100644
+index de7fe1bc3253c1e61a79d7f76b6286b5e271aa77..172a9d8d1848d5b30105da5bcb7cadc407c833b0 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -50,6 +50,7 @@
@@ -485,7 +485,7 @@ index 22326a1bf2e6d1cd7cfbd51abc4599e0df7e647a..58e1c6e11a6a698924d8ed6fb847cf91
  void NoteCrashReportSent(const QByteArray &result, bool freeze);
  void NoteCameOnline(not_null<UserData*> user);
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index f00ac2a3d305283ffe5cca94685969e5d58e90c5..afa10bf7c238a95e81c1c9fbff958aee5be25eaa 100644
+index 95c71ff5e875842364abfb1bc2c3e7e3b6f56238..d89a51c34a07cf4292a6c29cf821dfac2085565e 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -116,6 +116,7 @@ const char kOptionShot[] = "tele-shot";
@@ -511,7 +511,7 @@ index f00ac2a3d305283ffe5cca94685969e5d58e90c5..afa10bf7c238a95e81c1c9fbff958aee
  base::options::option<QString> TitleTemplateOption({
  	.id = kOptionTitleTemplate,
  	.name = "Title bar label",
-@@ -2221,6 +2230,14 @@ rpl::producer<> ServerUsernamesChanges() {
+@@ -2222,6 +2231,14 @@ rpl::producer<> ServerUsernamesChanges() {
  	return ServerUsernamesOption.changes();
  }
  

@@ -81,7 +81,7 @@ index 27b6de342b869f6f716d7c3e865eda5a9942b308..cdc57f43ea5fe78ee697912ae282200f
  		_field,
  		[=] { return _isInlineBot; },
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index a52792adc09fb29f591a02681fad2765f597b0dd..09988b7a0913dbb628a74ae807835efa4af30d19 100644
+index 2501664ba4524bab2d823c2e62d1c714a38c1dff..f6677d4dafd6461c405c6dd9fdfa67bd41e72cf9 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -2785,6 +2785,11 @@ void FillSending(SectionBuilder &builder) {
@@ -523,7 +523,7 @@ index 0000000000000000000000000000000000000000..79b6835cfdf16b31cde67f0e2ffb01f1
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 0f2e4819c2821adfd221d4f6a145eaa8b3779abd..637ae107e72a318c3e2f6496f40891f8d06cdfad 100644
+index ea34a244c8359f7475e59f16a92a8bb538038097..dddc2f71b76c5f8ddeda42488c0c885bb489775f 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -94,6 +94,7 @@ const char kOptionViewAsTl[] = "tele-view-as-tl";
@@ -548,7 +548,7 @@ index 0f2e4819c2821adfd221d4f6a145eaa8b3779abd..637ae107e72a318c3e2f6496f40891f8
  base::options::toggle TranslateOutOption({
  	.id = kOptionTranslateOut,
  	.name = "Translate before sending",
-@@ -1854,6 +1862,10 @@ bool CalcmulaPreview() {
+@@ -1855,6 +1863,10 @@ bool CalcmulaPreview() {
  	return CalcmulaPreviewOption.value();
  }
  

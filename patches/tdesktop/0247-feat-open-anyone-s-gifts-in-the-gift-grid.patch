@@ -1870,7 +1870,7 @@ index 740c843e193770c0b5a1f4c40ed2b550160eb7cc..99b0da4260d9c7bbbe8ba81a55d2cab9
  constexpr auto kMaxFile = 8 * 1024 * 1024;
  constexpr auto kHideTitle = 1;
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 71ff2c3876bf8426697e9055afa67d30887fd07c..d816a187ba77cfd2417b215eb0ec9a8ef2e549cc 100644
+index c842e1aee7122f7455f1537493d2a7fc63b9bce8..ca0d0019963a6853d994ce7dc3c40e20ea5b0d31 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -632,6 +632,8 @@ base::options::toggle GiftSelectOption({

@@ -220,7 +220,7 @@ index 5c693d471c66669a347e79f890b16b2e1b0fce6c..670dccca6300b599797f85900f27e39d
  	AddOptionToggle(builder, ::Tele::kOptionHideProxySponsor);
  	AddOptionToggle(
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 802a80e958b1cded9bc97c37238ffb95f7a19f3a..7936f23662a47b1a5fabd87580f5e7400cb61081 100644
+index 7c533d4608f5617480e3305c7a6509be63bdf013..8bb6779dc92ddb0c8ea416756e34a99429865cd7 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -24,6 +24,7 @@ const char kOptionChangelogShown[] = "tele-changelog-shown";
@@ -245,7 +245,7 @@ index 802a80e958b1cded9bc97c37238ffb95f7a19f3a..7936f23662a47b1a5fabd87580f5e740
  base::options::toggle LowercaseOption({
  	.id = kOptionLowercase,
  	.name = "Lowercase everything",
-@@ -1267,6 +1275,20 @@ bool GroupQuickReplies() {
+@@ -1268,6 +1276,20 @@ bool GroupQuickReplies() {
  	return GroupQuickRepliesOption.value();
  }
  

@@ -1,0 +1,374 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Thu, 8 Oct 2026 22:22:25 +0300
+Subject: [PATCH] feat: hide birthday banners and effects
+
+---
+ Telegram/CMakeLists.txt                       |  2 ++
+ .../dialogs/dialogs_top_bar_suggestion.cpp    |  4 ++-
+ .../suggestion_birthday_contacts.cpp          |  4 ++-
+ .../suggestions/suggestion_birthday_setup.cpp |  4 ++-
+ .../SourceFiles/history/history_widget.cpp    |  5 ++--
+ .../history_view_compose_controls.cpp         |  5 ++--
+ .../info/profile/info_profile_actions.cpp     |  3 ++-
+ .../info/profile/info_profile_top_bar.cpp     |  3 ++-
+ .../info/profile/info_profile_values.cpp      |  5 ++--
+ .../SourceFiles/settings/settings_tele.cpp    |  4 +++
+ Telegram/SourceFiles/tele/tele_birthdays.cpp  | 26 +++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_birthdays.h    | 12 +++++++++
+ Telegram/SourceFiles/tele/tele_options.cpp    | 15 +++++++++++
+ Telegram/SourceFiles/tele/tele_options.h      |  3 +++
+ .../SourceFiles/tele/tele_settings_io.cpp     |  1 +
+ 15 files changed, 85 insertions(+), 11 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_birthdays.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_birthdays.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 4edec165c6f0d456c62390843c76931e8f983a7e..0a081adb8be19771ff763d0df0fa7399accf9dae 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2389,6 +2389,8 @@ PRIVATE
+     tele/tele_audio_voice.h
+     tele/tele_badges.cpp
+     tele/tele_badges.h
++    tele/tele_birthdays.cpp
++    tele/tele_birthdays.h
+     tele/tele_bookmarks.cpp
+     tele/tele_bookmarks.h
+     tele/tele_bookmarks_box.cpp
+diff --git a/Telegram/SourceFiles/dialogs/dialogs_top_bar_suggestion.cpp b/Telegram/SourceFiles/dialogs/dialogs_top_bar_suggestion.cpp
+index 06aca23d81bbdd27b1c577dbd04cf62322aa4c0d..ad3a3a49e7b9fd3adb789170476b64c7b0e5f991 100644
+--- a/Telegram/SourceFiles/dialogs/dialogs_top_bar_suggestion.cpp
++++ b/Telegram/SourceFiles/dialogs/dialogs_top_bar_suggestion.cpp
+@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "dialogs/ui/dialogs_top_bar_suggestion_content.h"
+ #include "main/main_session.h"
+ #include "mainwindow.h"
++#include "tele/tele_options.h"
+ #include "tele/tele_rate_limits.h"
+ #include "ui/ui_utility.h"
+ #include "ui/wrap/slide_wrap.h"
+@@ -239,7 +240,8 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
+ 			session->api().authorizations().unreviewedChanges(),
+ 			Data::AmPremiumValue(session) | rpl::skip(1) | rpl::to_empty,
+ 			session->giftAuctions().hasActiveChanges() | rpl::to_empty,
+-			Tele::RateLimitBarChanges(session)
++			Tele::RateLimitBarChanges(session),
++			Tele::HideBirthdaysChanges()
+ 		) | rpl::on_next([=] {
+ 			const auto was = state->wrap.get();
+ 			const auto weak = base::make_weak(was);
+diff --git a/Telegram/SourceFiles/dialogs/suggestions/suggestion_birthday_contacts.cpp b/Telegram/SourceFiles/dialogs/suggestions/suggestion_birthday_contacts.cpp
+index 82f3c4711a23f63a5cffc2ee30e5deaeb30fa5c5..e8d6ad26fb2bb7a131b65abcc576c060edc75a00 100644
+--- a/Telegram/SourceFiles/dialogs/suggestions/suggestion_birthday_contacts.cpp
++++ b/Telegram/SourceFiles/dialogs/suggestions/suggestion_birthday_contacts.cpp
+@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "history/view/history_view_group_call_bar.h"
+ #include "lang/lang_keys.h"
+ #include "main/main_session.h"
++#include "tele/tele_options.h"
+ #include "ui/controls/userpic_button.h"
+ #include "ui/painter.h"
+ #include "ui/text/text_utilities.h"
+@@ -31,7 +32,8 @@ constexpr auto kSugBirthdayContacts = "BIRTHDAY_CONTACTS_TODAY"_cs;
+ 
+ bool Available(const Context &context) {
+ 	const auto session = context.session.get();
+-	return session->premiumCanBuy()
++	return !Tele::HideBirthdays()
++		&& session->premiumCanBuy()
+ 		&& session->promoSuggestions().current(kSugBirthdayContacts.utf8());
+ }
+ 
+diff --git a/Telegram/SourceFiles/dialogs/suggestions/suggestion_birthday_setup.cpp b/Telegram/SourceFiles/dialogs/suggestions/suggestion_birthday_setup.cpp
+index fe4cefd82cf6ef292927ad48ea5a777ad480baa1..46d4154e8357d8498aa454cfbc199594bd772163 100644
+--- a/Telegram/SourceFiles/dialogs/suggestions/suggestion_birthday_setup.cpp
++++ b/Telegram/SourceFiles/dialogs/suggestions/suggestion_birthday_setup.cpp
+@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "info/profile/info_profile_values.h"
+ #include "lang/lang_keys.h"
+ #include "main/main_session.h"
++#include "tele/tele_options.h"
+ #include "ui/text/text_utilities.h"
+ #include "window/window_session_controller.h"
+ 
+@@ -26,7 +27,8 @@ constexpr auto kSugSetBirthday = "BIRTHDAY_SETUP"_cs;
+ 
+ bool Available(const Context &context) {
+ 	const auto session = context.session.get();
+-	return session->promoSuggestions().current(kSugSetBirthday.utf8())
++	return !Tele::HideBirthdays()
++		&& session->promoSuggestions().current(kSugSetBirthday.utf8())
+ 		&& !Data::IsBirthdayToday(session->user()->birthday());
+ }
+ 
+diff --git a/Telegram/SourceFiles/history/history_widget.cpp b/Telegram/SourceFiles/history/history_widget.cpp
+index 7812dca193f92cdf438e24a09dc52bdb05536d93..74a86fa56f95797bf095ce5efbbfe1cf237a2dd9 100644
+--- a/Telegram/SourceFiles/history/history_widget.cpp
++++ b/Telegram/SourceFiles/history/history_widget.cpp
+@@ -182,6 +182,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_drafts_compose.h"
+ #include "tele/tele_docked_media.h"
+ #include "tele/tele_audio_voice.h"
++#include "tele/tele_birthdays.h"
+ #include "tele/tele_field_resize.h"
+ #include "tele/tele_ghost.h"
+ #include "tele/tele_shortcuts.h"
+@@ -3755,7 +3756,7 @@ void HistoryWidget::showHistory(
+ 				Info::Profile::BirthdayValue(
+ 					user
+ 				) | rpl::map(
+-					Data::IsBirthdayTodayValue
++					Tele::BirthdayTodayValue
+ 				) | rpl::flatten_latest(
+ 				) | rpl::distinct_until_changed(
+ 				) | rpl::on_next([=] {
+@@ -4240,7 +4241,7 @@ void HistoryWidget::refreshSendGiftToggle() {
+ 		&& !user->isBot()
+ 		&& ((disallowed & Type::SendHide)
+ 			|| (session().user()->disallowedGiftTypes() & Type::SendHide)
+-			|| Data::IsBirthdayToday(user->birthday()))
++			|| Tele::BirthdayToday(user->birthday()))
+ 		&& ((disallowed & all) != all);
+ 	if (!_giftToUser && has) {
+ 		_giftToUser.create(this, st::historyGiftToUser);
+diff --git a/Telegram/SourceFiles/history/view/controls/history_view_compose_controls.cpp b/Telegram/SourceFiles/history/view/controls/history_view_compose_controls.cpp
+index b4d74ca4932c7bcf0559935eb37ffa6020946901..046277775a2a53489f45419eb5817cea22dbb1a8 100644
+--- a/Telegram/SourceFiles/history/view/controls/history_view_compose_controls.cpp
++++ b/Telegram/SourceFiles/history/view/controls/history_view_compose_controls.cpp
+@@ -125,6 +125,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_drafts_compose.h"
+ #include "tele/tele_docked_media.h"
+ #include "tele/tele_audio_voice.h"
++#include "tele/tele_birthdays.h"
+ #include "tele/tele_emoji_panel.h"
+ #include "tele/tele_field_resize.h"
+ #include "tele/tele_inline_text.h"
+@@ -5836,7 +5837,7 @@ void ComposeControls::refreshSendGiftToggle() {
+ 		&& !user->isBot()
+ 		&& ((disallowed & Type::SendHide)
+ 			|| (session().user()->disallowedGiftTypes() & Type::SendHide)
+-			|| Data::IsBirthdayToday(user->birthday()))
++			|| Tele::BirthdayToday(user->birthday()))
+ 		&& ((disallowed & all) != all);
+ 	if (!_giftToUser && has) {
+ 		_giftToUser = base::make_unique_q<Ui::IconButton>(
+@@ -6438,7 +6439,7 @@ void ComposeControls::initWebpageProcess() {
+ 		Info::Profile::BirthdayValue(
+ 			user
+ 		) | rpl::map(
+-			Data::IsBirthdayTodayValue
++			Tele::BirthdayTodayValue
+ 		) | rpl::flatten_latest(
+ 		) | rpl::distinct_until_changed(
+ 		) | rpl::on_next([=] {
+diff --git a/Telegram/SourceFiles/info/profile/info_profile_actions.cpp b/Telegram/SourceFiles/info/profile/info_profile_actions.cpp
+index cf2b68114befa5497555ef9d9b74733f1b39794b..5abade883338def582a88ae1bae90944676cec36 100644
+--- a/Telegram/SourceFiles/info/profile/info_profile_actions.cpp
++++ b/Telegram/SourceFiles/info/profile/info_profile_actions.cpp
+@@ -76,6 +76,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "menu/menu_mute.h"
+ #include "settings/settings_common.h"
+ #include "support/support_helper.h"
++#include "tele/tele_birthdays.h"
+ #include "tele/tele_communities.h"
+ #include "tele/tele_local_names.h"
+ #include "tele/tele_lowercase.h"
+@@ -933,7 +934,7 @@ void DeleteContactNote(
+ 	rpl::duplicate(
+ 		birthday
+ 	) | rpl::map([](Data::Birthday value) {
+-		return Data::IsBirthdayTodayValue(value);
++		return Tele::BirthdayTodayValue(value);
+ 	}) | rpl::flatten_latest(
+ 	) | rpl::distinct_until_changed(
+ 	) | rpl::on_next([=](bool today) {
+diff --git a/Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp b/Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp
+index 9adcae4befcac10be6a5dd48fbacae2a979fc559..e0a9bf602b470fd9a3eb5b4b3f84a1a60145dfad 100644
+--- a/Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp
++++ b/Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp
+@@ -101,6 +101,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "window/window_session_controller.h"
+ #include "ui/toast/toast.h"
+ #include "boxes/sticker_set_box.h"
++#include "tele/tele_birthdays.h"
+ #include "tele/tele_calls.h"
+ #include "tele/tele_options.h"
+ #include "tele/tele_onlines.h"
+@@ -621,7 +622,7 @@ TopBar::TopBar(
+ 
+ void TopBar::setupBirthdayEffect() {
+ 	const auto user = _peer->asUser();
+-	if (!user || !Data::IsBirthdayToday(user->birthday())) {
++	if (!user || !Tele::BirthdayToday(user->birthday())) {
+ 		return;
+ 	} else if (_wrap.current() == Wrap::Side) {
+ 		return;
+diff --git a/Telegram/SourceFiles/info/profile/info_profile_values.cpp b/Telegram/SourceFiles/info/profile/info_profile_values.cpp
+index 94408f41c11fe2944bf11113fe27ae24c453ae1f..c985a25e59f34ed9ccdfe69d87b950b9c0eac19a 100644
+--- a/Telegram/SourceFiles/info/profile/info_profile_values.cpp
++++ b/Telegram/SourceFiles/info/profile/info_profile_values.cpp
+@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "data/data_premium_limits.h"
+ #include "boxes/peers/edit_peer_permissions_box.h"
+ #include "base/unixtime.h"
++#include "tele/tele_birthdays.h"
+ #include "tele/tele_streamer_mode.h"
+ #include "tele/tele_username_aliases.h"
+ 
+@@ -766,7 +767,7 @@ rpl::producer<QString> BirthdayLabelText(
+ 		rpl::producer<Data::Birthday> birthday) {
+ 	return std::move(birthday) | rpl::map([](Data::Birthday value) {
+ 		return rpl::conditional(
+-			Data::IsBirthdayTodayValue(value),
++			Tele::BirthdayTodayValue(value),
+ 			tr::lng_info_birthday_today_label(),
+ 			tr::lng_info_birthday_label());
+ 	}) | rpl::flatten_latest();
+@@ -811,7 +812,7 @@ rpl::producer<QString> BirthdayValueText(
+ 		if (!value) {
+ 			return rpl::single(QString());
+ 		}
+-		return Data::IsBirthdayTodayValue(
++		return Tele::BirthdayTodayValue(
+ 			value
+ 		) | rpl::map([=](bool today) {
+ 			auto text = Data::BirthdayText(value, fullMonth);
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 938a5abb42c7896d5048b60a5dd2e12c64594791..2f91fb9d41f2ac6c361630fa3b3154be3af81c66 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -2850,6 +2850,10 @@ void FillChats(SectionBuilder &builder) {
+ 		builder,
+ 		::Tele::kOptionStickerCaptionsShow,
+ 		{ u"text"_q, u"message"_q });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionHideBirthdays,
++		{ u"birthday"_q, u"confetti"_q, u"cake"_q, u"gift"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Panels"_q);
+ 	AddOptionToggle(
+diff --git a/Telegram/SourceFiles/tele/tele_birthdays.cpp b/Telegram/SourceFiles/tele/tele_birthdays.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..ab98137111ce37b112f00e92c40a335e4c6279ab
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_birthdays.cpp
+@@ -0,0 +1,26 @@
++#include "tele/tele_birthdays.h"
++
++#include "data/data_birthday.h"
++#include "tele/tele_options.h"
++
++namespace Tele {
++
++bool BirthdayToday(Data::Birthday date) {
++	return !HideBirthdays() && Data::IsBirthdayToday(date);
++}
++
++rpl::producer<bool> BirthdayTodayValue(Data::Birthday date) {
++	return rpl::single(
++		rpl::empty
++	) | rpl::then(
++		HideBirthdaysChanges()
++	) | rpl::map([=]() -> rpl::producer<bool> {
++		if (HideBirthdays()) {
++			return rpl::single(false);
++		}
++		return Data::IsBirthdayTodayValue(date);
++	}) | rpl::flatten_latest(
++	) | rpl::distinct_until_changed();
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_birthdays.h b/Telegram/SourceFiles/tele/tele_birthdays.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..095b176c3cb652eef8713ddf0d91c477fb3f35be
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_birthdays.h
+@@ -0,0 +1,12 @@
++#pragma once
++
++namespace Data {
++class Birthday;
++} // namespace Data
++
++namespace Tele {
++
++[[nodiscard]] bool BirthdayToday(Data::Birthday date);
++[[nodiscard]] rpl::producer<bool> BirthdayTodayValue(Data::Birthday date);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index af90b31f2919dca7a17fbfbb406b581d4bbe0b17..0ddc744ad89869868a86ee14348c7d4ae4a64b38 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -153,6 +153,7 @@ const char kOptionWebAppsNoFullscreen[] = "tele-webapps-no-fullscreen";
+ const char kOptionNoRichPastePrompt[] = "tele-no-rich-paste-prompt";
+ const char kOptionLiveMarkdown[] = "tele-live-markdown";
+ const char kOptionHideGiftButton[] = "tele-hide-gift-button";
++const char kOptionHideBirthdays[] = "tele-hide-birthdays";
+ const char kOptionSilentByDefault[] = "tele-silent-by-default";
+ const char kOptionSilentPerChat[] = "tele-silent-per-chat";
+ const char kOptionOnlineNotify[] = "tele-online-notify";
+@@ -1145,6 +1146,12 @@ base::options::toggle HideGiftButtonOption({
+ 	.name = "Hide the gift button in the message field",
+ });
+ 
++base::options::toggle HideBirthdaysOption({
++	.id = kOptionHideBirthdays,
++	.name = "Hide birthday banners and effects",
++	.description = "Includes the gift button the message field shows on birthdays.",
++});
++
+ base::options::toggle SilentByDefaultOption({
+ 	.id = kOptionSilentByDefault,
+ 	.name = "Send silently by default",
+@@ -2817,6 +2824,14 @@ rpl::producer<> HideGiftButtonChanges() {
+ 	return HideGiftButtonOption.changes();
+ }
+ 
++bool HideBirthdays() {
++	return HideBirthdaysOption.value();
++}
++
++rpl::producer<> HideBirthdaysChanges() {
++	return HideBirthdaysOption.changes();
++}
++
+ bool SilentByDefault() {
+ 	return SilentByDefaultOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index 55489fbbf983fb53ace85b8a273a51419dfcd981..5da59defe01163696e233bbefff781eb85b72e37 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -148,6 +148,7 @@ extern const char kOptionWebAppsNoFullscreen[];
+ extern const char kOptionNoRichPastePrompt[];
+ extern const char kOptionLiveMarkdown[];
+ extern const char kOptionHideGiftButton[];
++extern const char kOptionHideBirthdays[];
+ extern const char kOptionSilentByDefault[];
+ extern const char kOptionSilentPerChat[];
+ extern const char kOptionOnlineNotify[];
+@@ -459,6 +460,8 @@ void ClearMessageMenuLegacy();
+ [[nodiscard]] rpl::producer<bool> LiveMarkdownValue();
+ [[nodiscard]] bool HideGiftButton();
+ [[nodiscard]] rpl::producer<> HideGiftButtonChanges();
++[[nodiscard]] bool HideBirthdays();
++[[nodiscard]] rpl::producer<> HideBirthdaysChanges();
+ [[nodiscard]] bool SilentByDefault();
+ [[nodiscard]] rpl::producer<> SilentByDefaultChanges();
+ [[nodiscard]] bool SilentPerChat();
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index 48c79fbd774e528cdb00c01392bb88d861d54372..4a9560fe5b6ba19f491d0fa0c82ab2732f4a2e9b 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -230,6 +230,7 @@ struct Spec {
+ 		Toggle(kOptionNoRichPastePrompt),
+ 		Toggle(kOptionLiveMarkdown),
+ 		Toggle(kOptionHideGiftButton),
++		Toggle(kOptionHideBirthdays),
+ 		Toggle(kOptionSilentByDefault),
+ 		Toggle(kOptionSilentPerChat),
+ 		Toggle(kOptionOnlineNotify),

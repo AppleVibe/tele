@@ -397,7 +397,7 @@ index 94f446e5d5d4fe0e9cd935216866af14fc581392..6e2ea3ae09604619e193093d19c2ab26
  	QSize _contentSize;
  	int _topAdded = 0;
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 30c5468f65a1902253eea65e55d4aa8cb850b2fc..a52792adc09fb29f591a02681fad2765f597b0dd 100644
+index a855eaa2f5f85a8c72e08f70a1eb562e1c235f81..2501664ba4524bab2d823c2e62d1c714a38c1dff 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -2513,6 +2513,10 @@ void FillChats(SectionBuilder &builder) {
@@ -423,7 +423,7 @@ index 30c5468f65a1902253eea65e55d4aa8cb850b2fc..a52792adc09fb29f591a02681fad2765
  	AddGroupTitle(builder, u"Confirmations"_q);
  	AddOptionToggle(
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 77ffd95096978b09e5a36f41417737129b05cedb..0f2e4819c2821adfd221d4f6a145eaa8b3779abd 100644
+index 2c41d9c3f0ce9d83bae2978371527a6511960ca9..ea34a244c8359f7475e59f16a92a8bb538038097 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -167,6 +167,8 @@ const char kOptionUncountedAccounts[] = "tele-uncounted-accounts";
@@ -435,7 +435,7 @@ index 77ffd95096978b09e5a36f41417737129b05cedb..0f2e4819c2821adfd221d4f6a145eaa8
  
  namespace {
  
-@@ -1143,6 +1145,19 @@ base::options::toggle HidePhoneInProfileOption({
+@@ -1144,6 +1146,19 @@ base::options::toggle HidePhoneInProfileOption({
  	.name = "Hide phone numbers in profiles",
  });
  
@@ -455,7 +455,7 @@ index 77ffd95096978b09e5a36f41417737129b05cedb..0f2e4819c2821adfd221d4f6a145eaa8
  void MigrateHideCalls() {
  	if (!HideCallsOption.value()) {
  		return;
-@@ -2420,4 +2435,16 @@ rpl::producer<bool> HidePhoneInProfileValue() {
+@@ -2421,4 +2436,16 @@ rpl::producer<bool> HidePhoneInProfileValue() {
  	});
  }
  

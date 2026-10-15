@@ -83,7 +83,7 @@ index 91b7ebcb69126ba5444c499e9c4db55d78629c59..e3544ee5702026eed648d58b3d806c31
  		}
  		const auto history = item->history();
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index a26a47d4a75207c9f2461aec7e814c2a0a08c0e8..689c874dc341103d0acf4a4f449296517eed8709 100644
+index b2b9f26e20059db0f82a4be272e74869e5fede3d..529ab39c54d54926aaea0a91c5a2581d6504e6b7 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -66,6 +66,9 @@ const char kOptionIgnoredUsers[] = "tele-ignored-users";
@@ -124,7 +124,7 @@ index a26a47d4a75207c9f2461aec7e814c2a0a08c0e8..689c874dc341103d0acf4a4f44929651
  });
  
  base::options::toggle DeletedIconOption({
-@@ -1362,6 +1384,18 @@ bool KeepDeletedMessages() {
+@@ -1363,6 +1385,18 @@ bool KeepDeletedMessages() {
  	return KeepDeletedOption.value();
  }
  

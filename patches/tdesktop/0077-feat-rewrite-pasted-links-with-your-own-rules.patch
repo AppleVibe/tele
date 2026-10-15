@@ -9,13 +9,14 @@ Subject: [PATCH] feat: rewrite pasted links with your own rules
  Telegram/SourceFiles/boxes/send_files_box.cpp |   5 +-
  .../chat_helpers/message_field.cpp            |   5 +-
  .../SourceFiles/settings/settings_tele.cpp    |  33 +
- .../SourceFiles/tele/tele_link_rewrites.cpp   | 636 ++++++++++++++++++
+ .../SourceFiles/tele/tele_link_rewrites.cpp   | 654 ++++++++++++++++++
  .../SourceFiles/tele/tele_link_rewrites.h     |  47 ++
  .../tele/tele_link_rewrites_box.cpp           | 472 +++++++++++++
  .../SourceFiles/tele/tele_link_rewrites_box.h |  11 +
+ Telegram/SourceFiles/tele/tele_links.cpp      |   2 +-
  Telegram/SourceFiles/tele/tele_options.cpp    |  26 +
  Telegram/SourceFiles/tele/tele_options.h      |   4 +
- 11 files changed, 1242 insertions(+), 6 deletions(-)
+ 12 files changed, 1261 insertions(+), 7 deletions(-)
  create mode 100644 Telegram/SourceFiles/tele/tele_link_rewrites.cpp
  create mode 100644 Telegram/SourceFiles/tele/tele_link_rewrites.h
  create mode 100644 Telegram/SourceFiles/tele/tele_link_rewrites_box.cpp
@@ -186,10 +187,10 @@ index dc760d8d2ff556a6fa1e94e1ef703333652a1f8d..d072c676a17457741f60e357236ff64a
  
 diff --git a/Telegram/SourceFiles/tele/tele_link_rewrites.cpp b/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..b393cbd83a00921f2912ec35025fc4dc42aff274
+index 0000000000000000000000000000000000000000..a061f12c6d784583569c883e2db54ff73c92b82a
 --- /dev/null
 +++ b/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
-@@ -0,0 +1,636 @@
+@@ -0,0 +1,654 @@
 +#include "tele/tele_link_rewrites.h"
 +
 +#include "base/random.h"
@@ -355,6 +356,22 @@ index 0000000000000000000000000000000000000000..b393cbd83a00921f2912ec35025fc4dc
 +	return result;
 +}
 +
++// Rewrite targets that shut down, with the live service that replaces them.
++[[nodiscard]] QStringList ReplaceGoneTargets(QStringList targets) {
++	static const auto gone = base::flat_map<QString, QString>{
++		{ u"vxtiktok.com"_q, u"tnktok.com"_q },
++	};
++	auto result = QStringList();
++	for (const auto &target : targets) {
++		const auto i = gone.find(target);
++		const auto live = (i != end(gone)) ? i->second : target;
++		if (!result.contains(live)) {
++			result.push_back(live);
++		}
++	}
++	return result;
++}
++
 +[[nodiscard]] std::optional<LinkRewriteRule> ParseRule(
 +		const QJsonObject &object) {
 +	auto result = LinkRewriteRule{
@@ -364,7 +381,8 @@ index 0000000000000000000000000000000000000000..b393cbd83a00921f2912ec35025fc4dc
 +	if (type == u"domains"_q) {
 +		result.type = LinkRewriteType::Domains;
 +		result.from = ParseDomains(object.value(u"from"_q));
-+		result.to = ParseDomains(object.value(u"to"_q));
++		result.to = ReplaceGoneTargets(
++			ParseDomains(object.value(u"to"_q)));
 +		result.random = (object.value(u"pick"_q).toString() != u"first"_q);
 +		if (result.from.isEmpty() || result.to.isEmpty()) {
 +			return std::nullopt;
@@ -730,6 +748,7 @@ index 0000000000000000000000000000000000000000..b393cbd83a00921f2912ec35025fc4dc
 +					u"fxtwitter.com"_q,
 +					u"vxtwitter.com"_q,
 +					u"fixvx.com"_q,
++					u"samekosabax.com"_q,
 +				},
 +				true),
 +		},
@@ -744,7 +763,7 @@ index 0000000000000000000000000000000000000000..b393cbd83a00921f2912ec35025fc4dc
 +			u"TikTok"_q,
 +			DomainsPreset(
 +				{ u"tiktok.com"_q },
-+				{ u"vxtiktok.com"_q, u"tnktok.com"_q },
++				{ u"tnktok.com"_q },
 +				false),
 +		},
 +		{
@@ -1374,6 +1393,19 @@ index 0000000000000000000000000000000000000000..3deddb80121f79dd7fe1a7fc1e1633f7
 +void LinkRewritesBox(not_null<Ui::GenericBox*> box);
 +
 +} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_links.cpp b/Telegram/SourceFiles/tele/tele_links.cpp
+index ca549c235a462c9b036481753fe9ec84827922b5..572ea9585e80181913cd25ef1e0b49c6693a3ece 100644
+--- a/Telegram/SourceFiles/tele/tele_links.cpp
++++ b/Telegram/SourceFiles/tele/tele_links.cpp
+@@ -81,7 +81,7 @@ using Rules = std::vector<const QRegularExpression*>;
+ 			}
+ 		},
+ 		{
+-			u"(?:^|\\.)(?:twitter\\.com|x\\.com|fxtwitter\\.com|vxtwitter\\.com|fixupx\\.com|fixvx\\.com)$"_q,
++			u"(?:^|\\.)(?:twitter\\.com|x\\.com|fxtwitter\\.com|vxtwitter\\.com|fixupx\\.com|fixvx\\.com|samekosabax\\.com)$"_q,
+ 			{
+ 				u"s"_q, u"t"_q, u"src"_q, u"ref_src"_q, u"ref_url"_q, u"cn"_q
+ 			}
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
 index 84f26d93b79a83bac7a1cbaf7c85382e2171f84d..f48b696e5eb39f3295230e2b1f8a6ebd508251e1 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp

@@ -43,7 +43,7 @@ Subject: [PATCH] feat: notification centre
  .../SourceFiles/tele/tele_mtp_console.cpp     |   3 +-
  Telegram/SourceFiles/tele/tele_notices.cpp    | 669 ++++++++++++++++++
  Telegram/SourceFiles/tele/tele_notices.h      | 157 ++++
- .../SourceFiles/tele/tele_notices_section.cpp | 583 +++++++++++++++
+ .../SourceFiles/tele/tele_notices_section.cpp | 585 +++++++++++++++
  .../SourceFiles/tele/tele_notices_section.h   |  11 +
  .../SourceFiles/tele/tele_online_notify.cpp   |   2 +
  Telegram/SourceFiles/tele/tele_options.cpp    |  48 ++
@@ -62,7 +62,7 @@ Subject: [PATCH] feat: notification centre
  .../SourceFiles/tele/tele_translate_out.cpp   |   3 +-
  .../tele/tele_username_aliases.cpp            |  17 +-
  Telegram/SourceFiles/tele/tele_view_tl.cpp    |   5 +-
- 58 files changed, 2274 insertions(+), 126 deletions(-)
+ 58 files changed, 2276 insertions(+), 126 deletions(-)
  create mode 100644 Telegram/SourceFiles/tele/tele_flood_wait.h
  create mode 100644 Telegram/SourceFiles/tele/tele_notices.cpp
  create mode 100644 Telegram/SourceFiles/tele/tele_notices.h
@@ -303,7 +303,7 @@ index eeb56d29cc8316bd6600c26b6f8edf3a912601eb..46215298aec518d826399a6dbd960f9a
  	void syncHttpUnixtime();
  
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 0fc52d6ae022aadbe3867ec39b9f62d0b6eb5f2f..bb81628cc67f0c357b5be8ea7d685368084c4538 100644
+index aaf9e702bfaeaa037873481c050a8a509cab9205..de7fe1bc3253c1e61a79d7f76b6286b5e271aa77 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3024,6 +3024,25 @@ void FillSending(SectionBuilder &builder) {
@@ -1399,7 +1399,7 @@ index 1af2693c79f1997987472ed407d8908b44bb64d1..e4948c26de2a4178bc9ae29ddbdeac21
  		}
  		ApplyManualPreview(processor, page);
 diff --git a/Telegram/SourceFiles/tele/tele_link_rewrites.cpp b/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
-index 1cdaa791816de55c5c5598e8c6eded2eb9091663..f7cacafc0df681f624f096ac04af48acbff40cee 100644
+index 4ee63c89f24d1d1de9dc6d4beee058024ebac608..62c1c7fcb9b069bc4eff7850427b298ee9557ac9 100644
 --- a/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
 +++ b/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
 @@ -3,6 +3,7 @@
@@ -1410,7 +1410,7 @@ index 1cdaa791816de55c5c5598e8c6eded2eb9091663..f7cacafc0df681f624f096ac04af48ac
  #include "tele/tele_options.h"
  #include "ui/text/text_entity.h"
  #include "ui/toast/toast.h"
-@@ -399,7 +400,7 @@ void ShowChangesToast(
+@@ -416,7 +417,7 @@ void ShowChangesToast(
  			: Lower(u"Rewrote a %1 link"_q).arg(change.from));
  	}
  	if (!lines.isEmpty()) {
@@ -1468,7 +1468,7 @@ index cfda97f5349818aeb6dd41e5a2f3571877d00f6b..e01d1cb2349931c2a4e0a363aea6f04b
  	}
  }
 diff --git a/Telegram/SourceFiles/tele/tele_menu_editor.cpp b/Telegram/SourceFiles/tele/tele_menu_editor.cpp
-index fcf51df5b4e9bc3b322ccc9dc77094a4db4362ed..850254c46bbf0083baf7ecb7513258d6d9921077 100644
+index 85913ef5193adee130339342549ad3de8592619c..776e0012f5972c6eaa9c06fafe5ee34c03de246d 100644
 --- a/Telegram/SourceFiles/tele/tele_menu_editor.cpp
 +++ b/Telegram/SourceFiles/tele/tele_menu_editor.cpp
 @@ -11,6 +11,7 @@
@@ -1479,7 +1479,7 @@ index fcf51df5b4e9bc3b322ccc9dc77094a4db4362ed..850254c46bbf0083baf7ecb7513258d6
  #include "ui/layers/generic_box.h"
  #include "ui/painter.h"
  #include "ui/qt_object_factory.h"
-@@ -2102,14 +2103,15 @@ void MenuEditorBox(
+@@ -2128,14 +2129,15 @@ void MenuEditorBox(
  	const auto copy = [=] {
  		QGuiApplication::clipboard()->setText(
  			MenuLayoutClipboardText(kind, state->layout));
@@ -2388,10 +2388,10 @@ index 0000000000000000000000000000000000000000..22326a1bf2e6d1cd7cfbd51abc4599e0
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_notices_section.cpp b/Telegram/SourceFiles/tele/tele_notices_section.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef
+index 0000000000000000000000000000000000000000..cba2d6fa02281c3479aa7977fd7b28882c83cba0
 --- /dev/null
 +++ b/Telegram/SourceFiles/tele/tele_notices_section.cpp
-@@ -0,0 +1,583 @@
+@@ -0,0 +1,585 @@
 +#include "tele/tele_notices_section.h"
 +
 +#include "base/timer.h"
@@ -2426,6 +2426,7 @@ index 0000000000000000000000000000000000000000..e65fbfcb223d79bc8875b4b8009bbdb9
 +constexpr auto kRefreshTimeAgo = 30 * crl::time(1000);
 +constexpr auto kPhotoMaxHeight = 240;
 +constexpr auto kIconSize = 36;
++constexpr auto kButtonSkip = 6;
 +
 +enum class Filter : uchar {
 +	All,
@@ -2676,11 +2677,12 @@ index 0000000000000000000000000000000000000000..e65fbfcb223d79bc8875b4b8009bbdb9
 +	}
 +	if (!_buttons.empty()) {
 +		top += padding / 2;
++		const auto skip = style::ConvertScale(kButtonSkip);
 +		auto x = left() - st::defaultLightButton.padding.left();
 +		auto height = 0;
 +		for (const auto button : _buttons) {
 +			button->moveToLeft(x, top, newWidth);
-+			x += button->width();
++			x += button->width() + skip;
 +			height = std::max(height, button->height());
 +		}
 +		top += height;
@@ -3013,7 +3015,7 @@ index b3c5c0a94e686b8eb1700d29be6e13596912e79b..7affda5f6968d26cb3ed70b275d3071b
  }
  
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index f7fd08fcf57214975fb16e466c44a7741474d9d9..f00ac2a3d305283ffe5cca94685969e5d58e90c5 100644
+index c3f2811e3c3c261a9d6af5d1def91e5fba88885e..95c71ff5e875842364abfb1bc2c3e7e3b6f56238 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -132,6 +132,9 @@ const char kOptionHideGiftButton[] = "tele-hide-gift-button";
@@ -3056,7 +3058,7 @@ index f7fd08fcf57214975fb16e466c44a7741474d9d9..f00ac2a3d305283ffe5cca94685969e5
  base::options::toggle SilenceChatsOption({
  	.id = kOptionSilenceChats,
  	.name = "Silence chats completely",
-@@ -2321,6 +2347,28 @@ bool OnlineNotify() {
+@@ -2322,6 +2348,28 @@ bool OnlineNotify() {
  	return OnlineNotifyOption.value();
  }
  

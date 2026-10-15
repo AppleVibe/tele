@@ -180,7 +180,7 @@ index fa2a473e233310c6d769027c3d3436aef0106c4c..bb0a17d9c80be9e33bb543e3e06a3d70
  		&& _list->size() > 1
  		&& (collectionId
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index b559956ad7f6d4b4dd3960ad1bc6f2a4230d559a..ee3dec7fe7566da20d543310b49236f3e8b4ceca 100644
+index b36e1066a24e31ab304f8adad89b82af7df1610f..d7585a62288713c138a8c6916fd6c7f2add843ea 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3131,6 +3131,14 @@ void FillProfiles(SectionBuilder &builder) {
@@ -1142,7 +1142,7 @@ index 0000000000000000000000000000000000000000..674a81b9a09f7450dc279949bc2290f9
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index d4e938d95eada612b27bc1b7164924ccd658e9e0..ab221a3d006b3696aa99d1859b9c5273770d0990 100644
+index 463494e8286bc9ed45d31c3e9e2b5413476510ac..11d3d16d83b973e3cc8810b023471be65b748fea 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -64,6 +64,8 @@ const char kOptionShowRegularGiftIds[] = "tele-show-regular-gift-ids";
@@ -1172,7 +1172,7 @@ index d4e938d95eada612b27bc1b7164924ccd658e9e0..ab221a3d006b3696aa99d1859b9c5273
  base::options::toggle PeerIdsWithoutSpacesOption({
  	.id = kOptionPeerIdsWithoutSpaces,
  	.name = "IDs without spaces",
-@@ -1639,6 +1652,14 @@ bool NoCollectibleTooltip() {
+@@ -1640,6 +1653,14 @@ bool NoCollectibleTooltip() {
  	return NoCollectibleTooltipOption.value();
  }
  

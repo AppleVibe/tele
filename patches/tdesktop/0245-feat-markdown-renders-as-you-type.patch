@@ -261,7 +261,7 @@ index 06c5b57cdd03045d90233cbfbcf73f44ed0b9e6e..b4d74ca4932c7bcf0559935eb37ffa60
  	_field->setEditLinkCallback(
  		DefaultEditLinkCallback(_show, _field, &_st.boxField));
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index c719e1f100f08c0868ca4217c8c85ab80eed8fc0..8d8a96342b68d76062b6b18ad793bb1044f61d0a 100644
+index 1fc38ce6dd8d990065d2bba2a890c08727ec8d89..f5cb9193c9f90a09ed6d6205a802ac6e5014e0e5 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3179,6 +3179,10 @@ void FillSending(SectionBuilder &builder) {
@@ -984,7 +984,7 @@ index 0000000000000000000000000000000000000000..2d61b77a24559954377247864b94f855
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index ec9dcc94a6d06c560bea5c248ad91f55fc647777..71ff2c3876bf8426697e9055afa67d30887fd07c 100644
+index 4232ffd5dfb1a9ff277d9c9977ecf768de697da8..c842e1aee7122f7455f1537493d2a7fc63b9bce8 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -137,6 +137,7 @@ const char kOptionStartParam[] = "tele-start-param";
@@ -1010,7 +1010,7 @@ index ec9dcc94a6d06c560bea5c248ad91f55fc647777..71ff2c3876bf8426697e9055afa67d30
  base::options::toggle HideGiftButtonOption({
  	.id = kOptionHideGiftButton,
  	.name = "Hide the gift button in the message field",
-@@ -2549,6 +2558,16 @@ bool NoRichPastePrompt() {
+@@ -2550,6 +2559,16 @@ bool NoRichPastePrompt() {
  	return NoRichPastePromptOption.value();
  }
  

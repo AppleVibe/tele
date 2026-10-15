@@ -22,7 +22,7 @@ Subject: [PATCH] feat: copied values in the notification centre
  15 files changed, 189 insertions(+), 45 deletions(-)
 
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 38ad0b04b88fcd76626dffa4bf4636540cba0ba3..b91f08df4167b71d1c32910184f0f46283580a25 100644
+index 6f7b61ca64db40eab87aac0882249173f474e494..5161564bcd82baccd3e9ad6ac67b35fc48e0b62a 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3153,6 +3153,11 @@ void FillNotifications(SectionBuilder &builder) {
@@ -110,10 +110,10 @@ index 95fbe21f8bba4f07595fa3e62231df4c61f98292..a3913fd6237e8c072fd94cd1778f7efc
  	});
  	Ui::AddTableRow(table, rpl::single(Lower(u"Gift ID"_q)), std::move(label));
 diff --git a/Telegram/SourceFiles/tele/tele_menu_editor.cpp b/Telegram/SourceFiles/tele/tele_menu_editor.cpp
-index 850254c46bbf0083baf7ecb7513258d6d9921077..e5589bfbec9ffbcbeeed96c6cb006c56c1c6a860 100644
+index 776e0012f5972c6eaa9c06fafe5ee34c03de246d..a396f70cafa8f7131b2de878d98f0edf38acb97d 100644
 --- a/Telegram/SourceFiles/tele/tele_menu_editor.cpp
 +++ b/Telegram/SourceFiles/tele/tele_menu_editor.cpp
-@@ -2101,9 +2101,12 @@ void MenuEditorBox(
+@@ -2127,9 +2127,12 @@ void MenuEditorBox(
  		popupBelow(presets);
  	});
  	const auto copy = [=] {
@@ -347,10 +347,10 @@ index b806189e4b48fae84254700fd1100874a1976d53..71d8747134406b86656992797f19a887
 +
  } // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_notices_section.cpp b/Telegram/SourceFiles/tele/tele_notices_section.cpp
-index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd024b0b3364 100644
+index bd25a430bc1fb154219a7853309654a452d45e70..f40f2dc9a12b707bcf4c021dbcb21bf7435d3147 100644
 --- a/Telegram/SourceFiles/tele/tele_notices_section.cpp
 +++ b/Telegram/SourceFiles/tele/tele_notices_section.cpp
-@@ -44,6 +44,7 @@ enum class Filter : uchar {
+@@ -45,6 +45,7 @@ enum class Filter : uchar {
  	Limits,
  	Server,
  	Tele,
@@ -358,7 +358,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  };
  
  [[nodiscard]] QString FilterId(Filter filter) {
-@@ -53,6 +54,7 @@ enum class Filter : uchar {
+@@ -54,6 +55,7 @@ enum class Filter : uchar {
  	case Filter::Limits: return u"limits"_q;
  	case Filter::Server: return u"server"_q;
  	case Filter::Tele: return u"tele"_q;
@@ -366,7 +366,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  	}
  	Unexpected("Filter in Tele::FilterId.");
  }
-@@ -63,7 +65,8 @@ enum class Filter : uchar {
+@@ -64,7 +66,8 @@ enum class Filter : uchar {
  			Filter::Mentions,
  			Filter::Limits,
  			Filter::Server,
@@ -376,7 +376,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  		if (FilterId(filter) == id) {
  			return filter;
  		}
-@@ -79,7 +82,9 @@ enum class Filter : uchar {
+@@ -80,7 +83,9 @@ enum class Filter : uchar {
  	case Filter::Server: return (kind == NoticeKind::Server);
  	case Filter::Tele: return (kind != NoticeKind::Limit)
  		&& (kind != NoticeKind::Server)
@@ -387,7 +387,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  	}
  	Unexpected("Filter in Tele::Matches.");
  }
-@@ -93,6 +98,7 @@ enum class Filter : uchar {
+@@ -94,6 +99,7 @@ enum class Filter : uchar {
  	case NoticeKind::Crash: return st::menuIconReport;
  	case NoticeKind::Online: return st::menuIconUserShow;
  	case NoticeKind::Mention: return st::menuIconReply;
@@ -395,7 +395,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  	}
  	Unexpected("Kind in Tele::KindIcon.");
  }
-@@ -113,6 +119,7 @@ enum class Filter : uchar {
+@@ -114,6 +120,7 @@ enum class Filter : uchar {
  	case NoticeKind::Crash: return st::settingsIconBg1;
  	case NoticeKind::Online: return st::settingsIconBg6;
  	case NoticeKind::Mention: return st::settingsIconBg4;
@@ -403,7 +403,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  	}
  	Unexpected("Kind in Tele::KindColor.");
  }
-@@ -243,6 +250,7 @@ private:
+@@ -244,6 +251,7 @@ private:
  	int _timeWidth = 0;
  	int _timeTop = 0;
  	int _titleWidth = 0;
@@ -411,7 +411,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  	std::unique_ptr<Clamped> _text;
  	PeerData *_from = nullptr;
  	Ui::PeerUserpicView _userpic;
-@@ -265,6 +273,14 @@ Entry::Entry(
+@@ -266,6 +274,14 @@ Entry::Entry(
  , _fresh(fresh) {
  	const auto session = &controller->session();
  	_title.setText(st::semiboldTextStyle, _notice.title);
@@ -426,7 +426,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  	if (!_notice.text.text.isEmpty()) {
  		_text = std::make_unique<Clamped>(
  			this,
-@@ -317,6 +333,7 @@ Entry::Entry(
+@@ -318,6 +334,7 @@ Entry::Entry(
  		}
  	}
  	if (_notice.peer
@@ -434,7 +434,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  		|| (_notice.kind == NoticeKind::Update && !_buttons.empty())) {
  		setCursor(style::cur_pointer);
  	}
-@@ -362,15 +379,25 @@ int Entry::resizeGetHeight(int newWidth) {
+@@ -363,15 +380,25 @@ int Entry::resizeGetHeight(int newWidth) {
  		_timeTop += (st::semiboldFont->height - st::normalFont->height) / 2;
  		top += _title.countHeight(_titleWidth);
  	}
@@ -468,7 +468,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  	}
  	_photoRect = QRect();
  	if (!_photo.isNull()) {
-@@ -477,7 +504,7 @@ void Entry::contextMenuEvent(QContextMenuEvent *e) {
+@@ -479,7 +506,7 @@ void Entry::contextMenuEvent(QContextMenuEvent *e) {
  }
  
  void Entry::fillMenu(not_null<Ui::PopupMenu*> menu) {
@@ -477,7 +477,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  	menu->addAction(Lower(u"Copy"_q), [=] {
  		TextUtilities::SetClipboardText(TextForMimeData::Rich(
  			base::duplicate(text)));
-@@ -492,7 +519,11 @@ void Entry::fillMenu(not_null<Ui::PopupMenu*> menu) {
+@@ -494,7 +521,11 @@ void Entry::fillMenu(not_null<Ui::PopupMenu*> menu) {
  }
  
  void Entry::activate() {
@@ -490,7 +490,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  		ShowMentionNotice(_controller, _notice);
  	} else if (_notice.peer) {
  		_controller->showPeerHistory(
-@@ -593,7 +624,8 @@ base::weak_qptr<Ui::RpWidget> NoticesSection::createPinnedToTop(
+@@ -595,7 +626,8 @@ base::weak_qptr<Ui::RpWidget> NoticesSection::createPinnedToTop(
  			std::pair{ Filter::Mentions, u"Mentions"_q },
  			std::pair{ Filter::Limits, u"Limits"_q },
  			std::pair{ Filter::Server, u"Server"_q },
@@ -501,7 +501,7 @@ index a2f9822def15e2123a6dc2fd526d4078ca43727a..8af8137402460da5505bc29f4e4bcd02
  			.id = FilterId(filter),
  			.text = { Lower(name) },
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 4f7c50ed2ce914557ab67b7d3966cf1a765dc1d2..c6b0145c2610a2a3f22d789b5f44112bf38c7bae 100644
+index dd70376b29237b337e2304ffc9bdd6283bca88d0..37be2ff92e0cd777ac49e3492de450b5d7fbe113 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -144,6 +144,7 @@ const char kOptionNotices[] = "tele-notices";
@@ -526,7 +526,7 @@ index 4f7c50ed2ce914557ab67b7d3966cf1a765dc1d2..c6b0145c2610a2a3f22d789b5f44112b
  base::options::toggle NoticesMentionsOption({
  	.id = kOptionNoticesMentions,
  	.name = "Log mentions and replies",
-@@ -2577,6 +2585,10 @@ bool NoticesTeleToasts() {
+@@ -2578,6 +2586,10 @@ bool NoticesTeleToasts() {
  	return NoticesTeleToastsOption.value();
  }
  

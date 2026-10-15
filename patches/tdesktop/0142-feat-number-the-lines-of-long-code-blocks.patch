@@ -651,7 +651,7 @@ index 0000000000000000000000000000000000000000..0e4ac6c90fc08dc519c23cb7cfc457b3
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 754c9ece37e87225a6290956794d37c52f1157e9..bea3186f0edb7b00be13a65e68972b4cdeeadbed 100644
+index 7ad414b7c0bffce6cc76ad71e5fbdb8dcf13574a..2f7162539bf4f1acd30f09a540c4d6388b4a2fce 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -67,6 +67,7 @@ const char kOptionKeepDeleted[] = "tele-keep-deleted";
@@ -674,7 +674,7 @@ index 754c9ece37e87225a6290956794d37c52f1157e9..bea3186f0edb7b00be13a65e68972b4c
  base::options::toggle CopyProtectedOption({
  	.id = kOptionCopyProtected,
  	.name = "Forward protected messages as copies",
-@@ -1347,6 +1353,14 @@ rpl::producer<> RevealSpoilersChanges() {
+@@ -1348,6 +1354,14 @@ rpl::producer<> RevealSpoilersChanges() {
  	return RevealSpoilersOption.changes();
  }
  

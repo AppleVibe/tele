@@ -116,7 +116,7 @@ index 27a48568221aa1d4aa571350d899526fb4631194..62c9fa8e820c3ac2ce35ce3dfc0a4c0f
  
  } // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_notices_section.cpp b/Telegram/SourceFiles/tele/tele_notices_section.cpp
-index 8af8137402460da5505bc29f4e4bcd024b0b3364..4abc00148959f961e4a42062376e640183036951 100644
+index f40f2dc9a12b707bcf4c021dbcb21bf7435d3147..f5f401b72552a79cfa40b874bc3a8bea5d13670e 100644
 --- a/Telegram/SourceFiles/tele/tele_notices_section.cpp
 +++ b/Telegram/SourceFiles/tele/tele_notices_section.cpp
 @@ -23,6 +23,8 @@
@@ -136,9 +136,9 @@ index 8af8137402460da5505bc29f4e4bcd024b0b3364..4abc00148959f961e4a42062376e6401
 +constexpr auto kBadgeStroke = 2;
 +constexpr auto kBadgeShift = 1;
  constexpr auto kTextLines = 6;
+ constexpr auto kButtonSkip = 6;
  
- enum class Filter : uchar {
-@@ -89,7 +94,17 @@ enum class Filter : uchar {
+@@ -90,7 +95,17 @@ enum class Filter : uchar {
  	Unexpected("Filter in Tele::Matches.");
  }
  
@@ -157,7 +157,7 @@ index 8af8137402460da5505bc29f4e4bcd024b0b3364..4abc00148959f961e4a42062376e6401
  	switch (kind) {
  	case NoticeKind::Limit: return st::menuIconTimer;
  	case NoticeKind::Server: return st::menuIconInfo;
-@@ -97,7 +112,7 @@ enum class Filter : uchar {
+@@ -98,7 +113,7 @@ enum class Filter : uchar {
  	case NoticeKind::Update: return st::menuIconDownload;
  	case NoticeKind::Crash: return st::menuIconReport;
  	case NoticeKind::Online: return st::menuIconUserShow;
@@ -166,7 +166,7 @@ index 8af8137402460da5505bc29f4e4bcd024b0b3364..4abc00148959f961e4a42062376e6401
  	case NoticeKind::Copy: return st::menuIconCopy;
  	}
  	Unexpected("Kind in Tele::KindIcon.");
-@@ -238,6 +253,7 @@ protected:
+@@ -239,6 +254,7 @@ protected:
  private:
  	[[nodiscard]] int left() const;
  	[[nodiscard]] int right() const;
@@ -174,7 +174,7 @@ index 8af8137402460da5505bc29f4e4bcd024b0b3364..4abc00148959f961e4a42062376e6401
  	void showMenu(Ui::PopupMenu *menu, QPoint globalPosition);
  	void fillMenu(not_null<Ui::PopupMenu*> menu);
  	void activate();
-@@ -245,6 +261,7 @@ private:
+@@ -246,6 +262,7 @@ private:
  	const not_null<Window::SessionController*> _controller;
  	const Notice _notice;
  	const bool _fresh = false;
@@ -182,7 +182,7 @@ index 8af8137402460da5505bc29f4e4bcd024b0b3364..4abc00148959f961e4a42062376e6401
  	Ui::Text::String _title = { 1 };
  	QString _time;
  	int _timeWidth = 0;
-@@ -254,6 +271,8 @@ private:
+@@ -255,6 +272,8 @@ private:
  	std::unique_ptr<Clamped> _text;
  	PeerData *_from = nullptr;
  	Ui::PeerUserpicView _userpic;
@@ -191,7 +191,7 @@ index 8af8137402460da5505bc29f4e4bcd024b0b3364..4abc00148959f961e4a42062376e6401
  	QImage _photo;
  	QImage _photoCache;
  	QRect _photoRect;
-@@ -272,6 +291,8 @@ Entry::Entry(
+@@ -273,6 +292,8 @@ Entry::Entry(
  , _notice(notice)
  , _fresh(fresh) {
  	const auto session = &controller->session();
@@ -200,7 +200,7 @@ index 8af8137402460da5505bc29f4e4bcd024b0b3364..4abc00148959f961e4a42062376e6401
  	_title.setText(st::semiboldTextStyle, _notice.title);
  	if (!_notice.value.text.isEmpty()) {
  		_value = std::make_unique<Clamped>(
-@@ -435,7 +456,9 @@ void Entry::paintEvent(QPaintEvent *e) {
+@@ -437,7 +458,9 @@ void Entry::paintEvent(QPaintEvent *e) {
  	const auto padding = st::boxRowPadding.left() / 2;
  	const auto size = style::ConvertScale(kIconSize);
  	const auto iconLeft = st::boxRowPadding.left();
@@ -211,7 +211,7 @@ index 8af8137402460da5505bc29f4e4bcd024b0b3364..4abc00148959f961e4a42062376e6401
  		_from->paintUserpicLeft(
  			p,
  			_userpic,
-@@ -450,7 +473,7 @@ void Entry::paintEvent(QPaintEvent *e) {
+@@ -452,7 +475,7 @@ void Entry::paintEvent(QPaintEvent *e) {
  			p.setBrush(KindColor(_notice));
  			p.drawEllipse(iconLeft, padding, size, size);
  		}
@@ -220,7 +220,7 @@ index 8af8137402460da5505bc29f4e4bcd024b0b3364..4abc00148959f961e4a42062376e6401
  		icon.paint(
  			p,
  			iconLeft + (size - icon.width()) / 2,
-@@ -495,6 +518,51 @@ void Entry::paintEvent(QPaintEvent *e) {
+@@ -497,6 +520,51 @@ void Entry::paintEvent(QPaintEvent *e) {
  	}
  }
  

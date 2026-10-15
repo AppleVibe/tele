@@ -134,7 +134,7 @@ index 257a7ce51e13103e8d1950be9c7f9b63e8906e27..4564fe240aea65af93d848bc428ea8bf
  		labeled->resizeToWidth(layout->widthNoMargins());
  	}, labeled->lifetime());
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 7d806e1aae586464dd746733d478d80472027140..eb08acce7124a5ab2c6c73d031087dd01eb05dbd 100644
+index 28f71c8efe46df739269116cb7909d7e82615b9c..e045c69b107bbd35c7bc3a9fb78b5dee8a6ce250 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3431,6 +3431,10 @@ void FillProfiles(SectionBuilder &builder) {
@@ -649,7 +649,7 @@ index 317bcbd479c2fd94ba256bc63632b606f7cbe348..b9496e606f637a3da23089e6f57ab106
 +
  } // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 04a6e4e5fe9cdd9b95d84ed87d3ae691c4a6b376..f19036d48661874a1e6dc4549c488086ef0ae02b 100644
+index c61bdac49c8deec354c6cac007b455ae80aa0f40..3ffa0c68f4a8a99f907800394c26fc2b23bda921 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -202,6 +202,7 @@ const char kOptionLocalPasswordSubscriptions[] = "tele-local-password-subscripti
@@ -660,7 +660,7 @@ index 04a6e4e5fe9cdd9b95d84ed87d3ae691c4a6b376..f19036d48661874a1e6dc4549c488086
  
  namespace {
  
-@@ -1396,6 +1397,13 @@ base::options::option<QString> InvisibleNamesPhraseOption({
+@@ -1397,6 +1398,13 @@ base::options::option<QString> InvisibleNamesPhraseOption({
  	.name = "Phrase",
  });
  
@@ -674,7 +674,7 @@ index 04a6e4e5fe9cdd9b95d84ed87d3ae691c4a6b376..f19036d48661874a1e6dc4549c488086
  void MigrateHideCalls() {
  	if (!HideCallsOption.value()) {
  		return;
-@@ -2887,4 +2895,18 @@ rpl::producer<QString> InvisibleNamesPhraseValue() {
+@@ -2888,4 +2896,18 @@ rpl::producer<QString> InvisibleNamesPhraseValue() {
  	});
  }
  

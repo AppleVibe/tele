@@ -36,7 +36,7 @@ index fa111a89306ffafc36ba02bb43e868e91a59ec36..cf2b68114befa5497555ef9d9b74733f
  				st::infoProfileLabeledPadding,
  				st::popupMenuWithIcons).text;
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index de7bb8201461595ec301cb92d4b35f89c628fb4b..7cc039404f7c2414adc06d3be6aff9104cff8595 100644
+index 0e065ac92168d9fc3a6351980f0ed4942af72477..246e89f4da260a6f12956b3b6df0c04ca2370acb 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3005,6 +3005,10 @@ void FillProfiles(SectionBuilder &builder) {
@@ -51,7 +51,7 @@ index de7bb8201461595ec301cb92d4b35f89c628fb4b..7cc039404f7c2414adc06d3be6aff910
  	AddLocalNames(builder);
  	AddOptionToggle(
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 8817839eb4c317c35a46cb3de87dc634636bd01a..8d9fbe4a6d97c576042bcbb62afd9e915e4b0213 100644
+index 575986ec2aed5faef88019ea2ce89322e952a55b..0557fb2711bf906480c76af254a3bee5d4fc65e9 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -165,6 +165,7 @@ const char kOptionCounterAccounts[] = "tele-counter-accounts";
@@ -62,7 +62,7 @@ index 8817839eb4c317c35a46cb3de87dc634636bd01a..8d9fbe4a6d97c576042bcbb62afd9e91
  
  namespace {
  
-@@ -1131,6 +1132,11 @@ base::options::option<QString> TranslateOutToOption({
+@@ -1132,6 +1133,11 @@ base::options::option<QString> TranslateOutToOption({
  	.name = "Translate your message to",
  });
  
@@ -74,7 +74,7 @@ index 8817839eb4c317c35a46cb3de87dc634636bd01a..8d9fbe4a6d97c576042bcbb62afd9e91
  void MigrateHideCalls() {
  	if (!HideCallsOption.value()) {
  		return;
-@@ -2380,4 +2386,14 @@ void SetTranslateOutTo(const QString &value) {
+@@ -2381,4 +2387,14 @@ void SetTranslateOutTo(const QString &value) {
  	TranslateOutToOption.set(value);
  }
  

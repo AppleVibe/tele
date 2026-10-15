@@ -549,7 +549,7 @@ index 6ca6f13dadf0c603ed1ac565256e6bbe27b6c8a9..d6d6144f1ec5dd1d255607579b1e80a4
  	}
  	const auto session = &history->session();
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95f7a19f3a 100644
+index f8168dca1531611ab74830a28933dbf413b148ba..7c533d4608f5617480e3305c7a6509be63bdf013 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -17,6 +17,7 @@ const char kOptionGhostSchedule[] = "tele-ghost-schedule";
@@ -742,7 +742,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  base::options::toggle VoiceNoFadeOption({
  	.id = kOptionVoiceNoFade,
  	.name = "Record voice without fading",
-@@ -815,9 +887,22 @@ base::options::toggle HdPhotosOption({
+@@ -816,9 +888,22 @@ base::options::toggle HdPhotosOption({
  	.defaultValue = true,
  });
  
@@ -765,7 +765,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  });
  
  base::options::option<QString> ChatBackgroundsOption({
-@@ -826,12 +911,31 @@ base::options::option<QString> ChatBackgroundsOption({
+@@ -827,12 +912,31 @@ base::options::option<QString> ChatBackgroundsOption({
  	.description = "Chats with a background only you see, set in a chat's menu.",
  });
  
@@ -797,7 +797,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  base::options::toggle NoPhoneInHeaderOption({
  	.id = kOptionNoPhoneInHeader,
  	.name = "Names instead of phone numbers in chats",
-@@ -863,6 +967,12 @@ base::options::option<QString> LocalNamesOption({
+@@ -864,6 +968,12 @@ base::options::option<QString> LocalNamesOption({
  	.description = "Only you see them, set in a user's menu.",
  });
  
@@ -810,7 +810,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  base::options::option<QString> AppIconOption({
  	.id = kOptionAppIcon,
  	.name = "App icon",
-@@ -883,6 +993,12 @@ base::options::toggle LocalDraftsOption({
+@@ -884,6 +994,12 @@ base::options::toggle LocalDraftsOption({
  		"devices are ignored.",
  });
  
@@ -823,7 +823,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  base::options::toggle LocalPinsOption({
  	.id = kOptionLocalPins,
  	.name = "Pin chats past the limit",
-@@ -978,6 +1094,14 @@ base::options::toggle CounterSkipArchiveOption({
+@@ -979,6 +1095,14 @@ base::options::toggle CounterSkipArchiveOption({
  	.description = "Archived chats don't add to the taskbar and tray count.",
  });
  
@@ -838,7 +838,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  base::options::option<QString> UncountedAccountsOption({
  	.id = kOptionUncountedAccounts,
  	.name = "Uncounted accounts",
-@@ -1097,6 +1221,10 @@ bool ButtonPayloads() {
+@@ -1098,6 +1222,10 @@ bool ButtonPayloads() {
  	return ButtonPayloadsOption.value();
  }
  
@@ -849,7 +849,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  bool AutoUpdate() {
  	return AutoUpdateOption.value();
  }
-@@ -1267,6 +1395,10 @@ rpl::producer<QString> LinkPreviewsValue() {
+@@ -1268,6 +1396,10 @@ rpl::producer<QString> LinkPreviewsValue() {
  	});
  }
  
@@ -860,7 +860,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  bool HideAllChats() {
  	return HideAllChatsOption.value();
  }
-@@ -1459,6 +1591,10 @@ rpl::producer<bool> HideIgnoredValue() {
+@@ -1460,6 +1592,10 @@ rpl::producer<bool> HideIgnoredValue() {
  	});
  }
  
@@ -871,7 +871,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  void SetIgnoredList(const QString &value) {
  	IgnoredUsersOption.set(value);
  }
-@@ -1519,6 +1655,10 @@ rpl::producer<bool> EditHistoryValue() {
+@@ -1520,6 +1656,10 @@ rpl::producer<bool> EditHistoryValue() {
  	});
  }
  
@@ -882,7 +882,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  bool KeepDeletedMessages() {
  	return KeepDeletedOption.value();
  }
-@@ -1641,6 +1781,10 @@ bool CalcmulaPreview() {
+@@ -1642,6 +1782,10 @@ bool CalcmulaPreview() {
  	return CalcmulaPreviewOption.value();
  }
  
@@ -893,7 +893,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  bool CopyEmojiId() {
  	return CopyEmojiIdOption.value();
  }
-@@ -1779,6 +1923,10 @@ bool InlineWithoutVia() {
+@@ -1780,6 +1924,10 @@ bool InlineWithoutVia() {
  	return InlineWithoutViaOption.value();
  }
  
@@ -904,7 +904,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  bool NoRichPastePrompt() {
  	return NoRichPastePromptOption.value();
  }
-@@ -1811,6 +1959,18 @@ bool OnlineNotify() {
+@@ -1812,6 +1960,18 @@ bool OnlineNotify() {
  	return OnlineNotifyOption.value();
  }
  
@@ -923,7 +923,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  bool VoiceNoFade() {
  	return VoiceNoFadeOption.value();
  }
-@@ -1835,6 +1995,14 @@ bool HdPhotos() {
+@@ -1836,6 +1996,14 @@ bool HdPhotos() {
  	return HdPhotosOption.value();
  }
  
@@ -938,7 +938,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  bool DownloadsPerChat() {
  	return DownloadsPerChatOption.value();
  }
-@@ -1871,6 +2039,18 @@ rpl::producer<QString> UsernameAliasesValue() {
+@@ -1872,6 +2040,18 @@ rpl::producer<QString> UsernameAliasesValue() {
  	});
  }
  
@@ -957,7 +957,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  bool NoPhoneInHeader() {
  	return NoPhoneInHeaderOption.value();
  }
-@@ -1925,6 +2105,10 @@ rpl::producer<QString> LocalNamesValue() {
+@@ -1926,6 +2106,10 @@ rpl::producer<QString> LocalNamesValue() {
  	});
  }
  
@@ -968,7 +968,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  QString AppIcon() {
  	return AppIconOption.value();
  }
-@@ -1975,6 +2159,10 @@ rpl::producer<bool> LocalDraftsValue() {
+@@ -1976,6 +2160,10 @@ rpl::producer<bool> LocalDraftsValue() {
  	});
  }
  
@@ -979,7 +979,7 @@ index 19d9842800039414e0040f34fb44340bd499861a..802a80e958b1cded9bc97c37238ffb95
  bool LocalPins() {
  	return LocalPinsOption.value();
  }
-@@ -2111,12 +2299,17 @@ bool CounterSkipArchive() {
+@@ -2112,12 +2300,17 @@ bool CounterSkipArchive() {
  	return HideCountersOption.value() && CounterSkipArchiveOption.value();
  }
  

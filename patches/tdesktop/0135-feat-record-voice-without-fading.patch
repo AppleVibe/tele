@@ -4,15 +4,15 @@ Date: Wed, 30 Sep 2026 03:11:07 +0300
 Subject: [PATCH] feat: record voice without fading
 
 ---
- Telegram/CMakeLists.txt                               |  2 ++
- .../SourceFiles/media/audio/media_audio_capture.cpp   | 10 +++++++---
- Telegram/SourceFiles/settings/settings_tele.cpp       |  4 ++++
- Telegram/SourceFiles/tele/tele_options.cpp            | 10 ++++++++++
- Telegram/SourceFiles/tele/tele_options.h              |  2 ++
- Telegram/SourceFiles/tele/tele_settings_io.cpp        |  1 +
- Telegram/SourceFiles/tele/tele_voice_fade.cpp         | 11 +++++++++++
- Telegram/SourceFiles/tele/tele_voice_fade.h           |  7 +++++++
- 8 files changed, 44 insertions(+), 3 deletions(-)
+ Telegram/CMakeLists.txt                         |  2 ++
+ .../media/audio/media_audio_capture.cpp         | 17 ++++++++++++-----
+ Telegram/SourceFiles/settings/settings_tele.cpp |  4 ++++
+ Telegram/SourceFiles/tele/tele_options.cpp      | 11 +++++++++++
+ Telegram/SourceFiles/tele/tele_options.h        |  2 ++
+ Telegram/SourceFiles/tele/tele_settings_io.cpp  |  1 +
+ Telegram/SourceFiles/tele/tele_voice_fade.cpp   | 11 +++++++++++
+ Telegram/SourceFiles/tele/tele_voice_fade.h     |  7 +++++++
+ 8 files changed, 50 insertions(+), 5 deletions(-)
  create mode 100644 Telegram/SourceFiles/tele/tele_voice_fade.cpp
  create mode 100644 Telegram/SourceFiles/tele/tele_voice_fade.h
 
@@ -30,7 +30,7 @@ index 5b882db4227f93430d930b77421d7c343430ba5b..3f46a72e3b71555e29e6415fea251b65
      tele/tele_who_read.h
  )
 diff --git a/Telegram/SourceFiles/media/audio/media_audio_capture.cpp b/Telegram/SourceFiles/media/audio/media_audio_capture.cpp
-index c816566339622e87a10184c566d9806872b1dfff..5087b0677fb960ff5972e22c369e6933ae62d8eb 100644
+index c816566339622e87a10184c566d9806872b1dfff..f4ec082085f97641533026f79f51e358aeb71cb6 100644
 --- a/Telegram/SourceFiles/media/audio/media_audio_capture.cpp
 +++ b/Telegram/SourceFiles/media/audio/media_audio_capture.cpp
 @@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
@@ -41,24 +41,27 @@ index c816566339622e87a10184c566d9806872b1dfff..5087b0677fb960ff5972e22c369e6933
  
  #include <al.h>
  #include <alc.h>
-@@ -116,6 +117,7 @@ private:
+@@ -116,6 +117,8 @@ private:
  	QByteArray _captured;
  
  	bool _paused = false;
 +	int _fadeSamples = 0;
++	int _skipSamples = 0;
  
  };
  
-@@ -316,6 +318,8 @@ void Instance::Inner::start(
+@@ -316,6 +319,10 @@ void Instance::Inner::start(
  	_externalProcessing = std::move(externalProcessing);
  	_updated = std::move(updated);
  	_error = std::move(error);
 +	_fadeSamples = Tele::VoiceFadeSamples(
 +		int(kCaptureFadeInDuration * kCaptureFrequency / 1000));
++	_skipSamples = Tele::VoiceFadeSamples(
++		int(kCaptureSkipDuration * kCaptureFrequency / 1000));
  	if (_paused) {
  		_paused = false;
  	}
-@@ -500,7 +504,7 @@ void Instance::Inner::stop(Fn<void(Result&&)> callback) {
+@@ -500,7 +507,7 @@ void Instance::Inner::stop(Fn<void(Result&&)> callback) {
  
  	// Write what is left
  	if (needResult && !_captured.isEmpty()) {
@@ -67,20 +70,24 @@ index c816566339622e87a10184c566d9806872b1dfff..5087b0677fb960ff5972e22c369e6933
  		auto capturedSamples = static_cast<int>(_captured.size() / sizeof(short));
  		if ((_captured.size() % sizeof(short)) || (d->fullSamples + capturedSamples < kCaptureFrequency) || (capturedSamples < fadeSamples)) {
  			d->fullSamples = 0;
-@@ -661,7 +665,7 @@ void Instance::Inner::process() {
+@@ -660,8 +667,8 @@ void Instance::Inner::process() {
+ 		}
  
  		// Count new recording level and update view
- 		auto skipSamples = kCaptureSkipDuration * kCaptureFrequency / 1000;
+-		auto skipSamples = kCaptureSkipDuration * kCaptureFrequency / 1000;
 -		auto fadeSamples = kCaptureFadeInDuration * kCaptureFrequency / 1000;
++		auto skipSamples = _skipSamples;
 +		auto fadeSamples = _fadeSamples;
  		auto levelindex = d->fullSamples + static_cast<int>(s / sizeof(short));
  		for (auto ptr = (const short*)(_captured.constData() + s), end = (const short*)(_captured.constData() + news); ptr < end; ++ptr, ++levelindex) {
  			if (levelindex > skipSamples) {
-@@ -721,7 +725,7 @@ bool Instance::Inner::processFrame(int32 offset, int32 framesize) {
+@@ -720,8 +727,8 @@ bool Instance::Inner::processFrame(int32 offset, int32 framesize) {
+ 	auto srcSamplesData = &srcSamplesDataChannel;
  
  	//	memcpy(d->srcSamplesData[0], _captured.constData() + offset, framesize);
- 	auto skipSamples = static_cast<int>(kCaptureSkipDuration * kCaptureFrequency / 1000);
+-	auto skipSamples = static_cast<int>(kCaptureSkipDuration * kCaptureFrequency / 1000);
 -	auto fadeSamples = static_cast<int>(kCaptureFadeInDuration * kCaptureFrequency / 1000);
++	auto skipSamples = _skipSamples;
 +	auto fadeSamples = _fadeSamples;
  	if (d->fullSamples < skipSamples + fadeSamples) {
  		int32 fadedCnt = std::min(
@@ -101,7 +108,7 @@ index 9b2ab3efbc11284c697e6845694ac843af33bdbe..e26404684ff2a11c46a6311bb61c9b08
  	AddOptionToggle(
  		builder,
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 0fb9700254e174d86e9c45e886fd6f3e640c3296..513ab7be6691df929ec62d323bd0227a10a408aa 100644
+index 0fb9700254e174d86e9c45e886fd6f3e640c3296..c27d61a5658e7fc9d0643130ef6640ef381d2c96 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -91,6 +91,7 @@ const char kOptionNoRichPastePrompt[] = "tele-no-rich-paste-prompt";
@@ -112,19 +119,20 @@ index 0fb9700254e174d86e9c45e886fd6f3e640c3296..513ab7be6691df929ec62d323bd0227a
  const char kOptionConfirmSend[] = "tele-confirm-send";
  const char kOptionConfirmStickers[] = "tele-confirm-stickers";
  const char kOptionConfirmGifs[] = "tele-confirm-gifs";
-@@ -651,6 +652,11 @@ base::options::toggle SilentPerChatOption({
+@@ -651,6 +652,12 @@ base::options::toggle SilentPerChatOption({
  	.description = "Adds \"Send silently\" to the chat menu.",
  });
  
 +base::options::toggle VoiceNoFadeOption({
 +	.id = kOptionVoiceNoFade,
 +	.name = "Record voice without fading",
++	.description = "Also keeps the first 0.4 seconds, which are cut otherwise.",
 +});
 +
  base::options::toggle ConfirmSendOption({
  	.id = kOptionConfirmSend,
  	.name = "Confirm before sending",
-@@ -1503,6 +1509,10 @@ rpl::producer<> SilentPerChatChanges() {
+@@ -1503,6 +1510,10 @@ rpl::producer<> SilentPerChatChanges() {
  	return SilentPerChatOption.changes();
  }
  

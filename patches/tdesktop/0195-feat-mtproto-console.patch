@@ -4251,7 +4251,7 @@ index abd1b093b2b0dc97639c67a46086f9dabbb7a613..643e5ad8fb7351ff0d0bfb2a94875417
  	SupportReloadTemplates,
  	SupportToggleMuted,
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index cdc370832cac8740c810aca1199174f316ae4eb8..c6afb43a4ed597ec863047e5d44fd5500be2c42c 100644
+index cb23541e899a692ddb62339030812554eb844821..5c1f4ca35d9dc449babb5621d9217e66c51ddde0 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -43,6 +43,7 @@

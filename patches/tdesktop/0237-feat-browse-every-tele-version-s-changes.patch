@@ -2736,7 +2736,7 @@ index 0000000000000000000000000000000000000000..7cbe9aaee3e19f5692031f766928b87e
 +	]
 +}
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 4169fc9dd4ea945a546f01e64f54fdc99a92b5fa..38ad0b04b88fcd76626dffa4bf4636540cba0ba3 100644
+index 9a9224371f69a171629c5ce4c5fe7458fa0adb4d..6f7b61ca64db40eab87aac0882249173f474e494 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -25,6 +25,7 @@

@@ -384,7 +384,7 @@ index 2e539f4ad791be7c23b89739cbbf09072f2a8942..11d664097deaab64de4a12c511e4d048
  	std::shared_ptr<Data::DocumentMedia> _mainReactionMedia;
  	std::shared_ptr<Ui::AnimatedIcon> _mainReactionIcon;
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 55cf377295e8bd20e87448a208b222eacbe4c20f..4169fc9dd4ea945a546f01e64f54fdc99a92b5fa 100644
+index 46c662aaefe65fa757345970b64072966e305625..9a9224371f69a171629c5ce4c5fe7458fa0adb4d 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -51,6 +51,7 @@
@@ -444,7 +444,7 @@ index 55cf377295e8bd20e87448a208b222eacbe4c20f..4169fc9dd4ea945a546f01e64f54fdc9
  	AddOptionToggle(
  		builder,
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index cfbd1fac65fc5ac2142b5850b20f7000c6059074..4f7c50ed2ce914557ab67b7d3966cf1a765dc1d2 100644
+index 11f056afc293c14b35b78f04cf1bd93935bfb1e1..dd70376b29237b337e2304ffc9bdd6283bca88d0 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -56,6 +56,8 @@ const char kOptionListKeys[] = "tele-list-keys";
@@ -477,7 +477,7 @@ index cfbd1fac65fc5ac2142b5850b20f7000c6059074..4f7c50ed2ce914557ab67b7d3966cf1a
  base::options::toggle NoAiOption({
  	.id = kOptionNoAi,
  	.name = "Turn off AI features",
-@@ -1886,6 +1902,42 @@ rpl::producer<> HideReactionsButtonChanges() {
+@@ -1887,6 +1903,42 @@ rpl::producer<> HideReactionsButtonChanges() {
  	return HideReactionsButtonOption.changes();
  }
  

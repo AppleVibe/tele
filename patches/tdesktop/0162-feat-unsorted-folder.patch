@@ -345,7 +345,7 @@ index 68081d20c8884f9f406943b469b178e853dae95e..b095af590d6970719d8b9e0461833d12
  	}
  }
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 23a58ca6ce56d9ca0f45f4c78914a3beb99803be..da79d6ab9bd3e517764f13437e825705d9a4f022 100644
+index 0fac62a189cf6fdb7d9e8a006efcf0ed44bde4ea..423696ae57a126904fe3aec92bf9221880df19a4 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -131,6 +131,7 @@ const char kOptionDockedGrid[] = "tele-docked-grid";
@@ -356,7 +356,7 @@ index 23a58ca6ce56d9ca0f45f4c78914a3beb99803be..da79d6ab9bd3e517764f13437e825705
  const char kOptionBookmarks[] = "tele-bookmarks";
  const char kOptionReturnPoint[] = "tele-return-point";
  const char kOptionNoGestures[] = "tele-no-gestures";
-@@ -903,6 +904,13 @@ base::options::toggle LocalFoldersOption({
+@@ -904,6 +905,13 @@ base::options::toggle LocalFoldersOption({
  		"device.",
  });
  
@@ -370,7 +370,7 @@ index 23a58ca6ce56d9ca0f45f4c78914a3beb99803be..da79d6ab9bd3e517764f13437e825705
  base::options::toggle BookmarksOption({
  	.id = kOptionBookmarks,
  	.name = "Message bookmarks",
-@@ -1990,6 +1998,20 @@ rpl::producer<bool> LocalFoldersValue() {
+@@ -1991,6 +1999,20 @@ rpl::producer<bool> LocalFoldersValue() {
  	});
  }
  

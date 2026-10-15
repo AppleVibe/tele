@@ -193,10 +193,10 @@ index d1d0801eefb95a8284f3681773cd20ceb10ce20d..95a93cae2be558a704027578f6526a24
  struct CustomLinkPreviewArgs {
  	std::shared_ptr<Ui::Show> show;
 diff --git a/Telegram/SourceFiles/tele/tele_link_rewrites.cpp b/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
-index 4ce9d64dddefb1c54ae2ece8c9a636fdcb904c1e..1cdaa791816de55c5c5598e8c6eded2eb9091663 100644
+index f763f3f6ab5c9c1a168fafcb99302fa6b6e26fb4..4ee63c89f24d1d1de9dc6d4beee058024ebac608 100644
 --- a/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
 +++ b/Telegram/SourceFiles/tele/tele_link_rewrites.cpp
-@@ -403,6 +403,16 @@ void ShowChangesToast(
+@@ -420,6 +420,16 @@ void ShowChangesToast(
  	}
  }
  
@@ -213,7 +213,7 @@ index 4ce9d64dddefb1c54ae2ece8c9a636fdcb904c1e..1cdaa791816de55c5c5598e8c6eded2e
  void RewritePasted(
  		not_null<Ui::InputField*> field,
  		int start,
-@@ -433,6 +443,9 @@ void RewritePasted(
+@@ -450,6 +460,9 @@ void RewritePasted(
  	const auto urls = RewriteUrls(full, head, till, memo, changes);
  	if (!tags && !urls) {
  		return;
@@ -224,7 +224,7 @@ index 4ce9d64dddefb1c54ae2ece8c9a636fdcb904c1e..1cdaa791816de55c5c5598e8c6eded2e
  	const auto tail = after - end;
  	field->setTextWithTags(full, Ui::InputField::HistoryAction::NewEntry);
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index ca1cc3bf8be0b6414758b323b182948d3f230ef2..4d8a6e5ac3b1c0c23bc6ec9337524d985e76e039 100644
+index 698290ce62888935bf79bcc81a4b2d16659fdcc0..2afb900de8bcbc39f30b61193188a3fa8afc5909 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -107,6 +107,7 @@ const char kOptionUsernameAliases[] = "tele-username-aliases";
@@ -235,7 +235,7 @@ index ca1cc3bf8be0b6414758b323b182948d3f230ef2..4d8a6e5ac3b1c0c23bc6ec9337524d98
  const char kOptionLocalNames[] = "tele-local-names";
  const char kOptionAppIcon[] = "tele-app-icon";
  const char kOptionTrayIcon[] = "tele-tray-icon";
-@@ -750,6 +751,11 @@ base::options::option<QString> LinkRewritesOption({
+@@ -751,6 +752,11 @@ base::options::option<QString> LinkRewritesOption({
  	.description = "Applies to links you paste into a message.",
  });
  
@@ -247,7 +247,7 @@ index ca1cc3bf8be0b6414758b323b182948d3f230ef2..4d8a6e5ac3b1c0c23bc6ec9337524d98
  base::options::option<QString> LocalNamesOption({
  	.id = kOptionLocalNames,
  	.name = "Custom names",
-@@ -1655,6 +1661,10 @@ rpl::producer<QString> LinkRewritesValue() {
+@@ -1656,6 +1662,10 @@ rpl::producer<QString> LinkRewritesValue() {
  	});
  }
  

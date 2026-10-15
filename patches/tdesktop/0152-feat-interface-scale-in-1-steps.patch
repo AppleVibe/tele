@@ -50,7 +50,7 @@ index a45635d4258a1836ca9139d1f568b56bda9ad8d2..427ca5e96442cf6ba0741b9f1e864e59
  	AddOptionToggle(builder, ::Tele::kOptionLowercase);
  	AddSkip(builder);
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 689c874dc341103d0acf4a4f449296517eed8709..4edca38d74050be4b87b6d9e48cb1a40205efbb0 100644
+index 529ab39c54d54926aaea0a91c5a2581d6504e6b7..610dcdb5d6a117df40ad9fe56b42b80cce9e127c 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -28,6 +28,7 @@ const char kOptionHideCalls[] = "tele-hide-calls";
@@ -73,7 +73,7 @@ index 689c874dc341103d0acf4a4f449296517eed8709..4edca38d74050be4b87b6d9e48cb1a40
  base::options::toggle HideCallsOption({
  	.id = kOptionHideCalls,
  });
-@@ -1050,6 +1056,10 @@ bool LowercaseStrings() {
+@@ -1051,6 +1057,10 @@ bool LowercaseStrings() {
  	return LowercaseOption.value();
  }
  

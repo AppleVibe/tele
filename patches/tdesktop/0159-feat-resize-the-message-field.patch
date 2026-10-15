@@ -633,7 +633,7 @@ index 0000000000000000000000000000000000000000..b9fbe96c38341f87dc6d4f29214cf21c
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 5d3ebacc2577359187804529a3d96144923699ed..a52cd9d6a3c7f00da43e4701c1fe8e940adb86f1 100644
+index 1ff32248ba0fc193aac7c70db38f322a7f76d303..9136538038c482e07cd20fedd6a944f488a5dba9 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -126,6 +126,8 @@ const char kOptionLocalDrafts[] = "tele-local-drafts";
@@ -645,7 +645,7 @@ index 5d3ebacc2577359187804529a3d96144923699ed..a52cd9d6a3c7f00da43e4701c1fe8e94
  const char kOptionLocalFolders[] = "tele-local-folders";
  const char kOptionBookmarks[] = "tele-bookmarks";
  const char kOptionReturnPoint[] = "tele-return-point";
-@@ -869,6 +871,16 @@ base::options::toggle DockedGridOption({
+@@ -870,6 +872,16 @@ base::options::toggle DockedGridOption({
  	.name = "Docked media as album grid",
  });
  
@@ -662,7 +662,7 @@ index 5d3ebacc2577359187804529a3d96144923699ed..a52cd9d6a3c7f00da43e4701c1fe8e94
  base::options::toggle LocalFoldersOption({
  	.id = kOptionLocalFolders,
  	.name = "Folders past the limit",
-@@ -1896,6 +1908,32 @@ rpl::producer<> DockedGridChanges() {
+@@ -1897,6 +1909,32 @@ rpl::producer<> DockedGridChanges() {
  	return DockedGridOption.changes();
  }
  

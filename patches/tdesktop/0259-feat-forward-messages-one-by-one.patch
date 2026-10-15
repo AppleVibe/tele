@@ -1,0 +1,174 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: inteko <223821898+inteko@users.noreply.github.com>
+Date: Mon, 5 Oct 2026 00:03:40 +0400
+Subject: [PATCH] feat: forward messages one by one
+
+---
+ Telegram/CMakeLists.txt                        |  2 ++
+ .../history/history_item_helpers.cpp           |  4 +++-
+ .../SourceFiles/settings/settings_tele.cpp     |  4 ++++
+ Telegram/SourceFiles/tele/tele_forward.cpp     | 18 ++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_forward.h       | 11 +++++++++++
+ Telegram/SourceFiles/tele/tele_options.cpp     | 11 +++++++++++
+ Telegram/SourceFiles/tele/tele_options.h       |  2 ++
+ Telegram/SourceFiles/tele/tele_settings_io.cpp |  1 +
+ 8 files changed, 52 insertions(+), 1 deletion(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_forward.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_forward.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 6733cf19eef1a9175b481eeb74c4482d72691395..528caa497b50de20875f8a80b16b5f01518565d5 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2480,6 +2480,8 @@ PRIVATE
+     tele/tele_flood_wait.h
+     tele/tele_folders.cpp
+     tele/tele_folders.h
++    tele/tele_forward.cpp
++    tele/tele_forward.h
+     tele/tele_freeze_watchdog.cpp
+     tele/tele_freeze_watchdog.h
+     tele/tele_full_preview.cpp
+diff --git a/Telegram/SourceFiles/history/history_item_helpers.cpp b/Telegram/SourceFiles/history/history_item_helpers.cpp
+index d7dfd7f67f7d01f7303f56f86bad09314682e14c..0b00ff89f8aadc58d1e992cd05db564551503768 100644
+--- a/Telegram/SourceFiles/history/history_item_helpers.cpp
++++ b/Telegram/SourceFiles/history/history_item_helpers.cpp
+@@ -56,6 +56,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "ui/widgets/checkbox.h"
+ #include "ui/item_text_options.h"
+ #include "lang/lang_keys.h"
++#include "tele/tele_forward.h"
+ #include "tele/tele_local_password.h"
+ #include "tele/tele_silent.h"
+ 
+@@ -688,7 +689,8 @@ std::vector<ForwardRange> CollectForwardRanges(
+ 			continue;
+ 		}
+ 		if (result.empty()
+-			|| result.back().fromEphemeral != fromEphemeral) {
++			|| result.back().fromEphemeral != fromEphemeral
++			|| Tele::ForwardSeparately(result.back().items.back(), item)) {
+ 			result.push_back({ .fromEphemeral = fromEphemeral });
+ 		}
+ 		result.back().items.push_back(item);
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 2119f35f0cd039a9d4e20746c1e74b8f80d904c6..f07fce7a830be44e328074f157eab7ff7b7e42ed 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -3152,6 +3152,10 @@ void FillSending(SectionBuilder &builder) {
+ 				::Tele::kOptionQueueBehindMedia);
+ 		});
+ 	AddOptionToggle(builder, ::Tele::kOptionSentToBottom);
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionForwardOneByOne,
++		{ u"batch"_q, u"separately"_q, u"share"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Uploads"_q);
+ 	AddOptionToggle(builder, ::Tele::kOptionParallelUploads);
+diff --git a/Telegram/SourceFiles/tele/tele_forward.cpp b/Telegram/SourceFiles/tele/tele_forward.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..bb38609ee3c81c52ed6416ce84f3d41e8714cca4
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_forward.cpp
+@@ -0,0 +1,18 @@
++#include "tele/tele_forward.h"
++
++#include "history/history_item.h"
++#include "tele/tele_options.h"
++
++namespace Tele {
++
++bool ForwardSeparately(
++		not_null<HistoryItem*> previous,
++		not_null<HistoryItem*> item) {
++	if (!ForwardOneByOne()) {
++		return false;
++	}
++	const auto group = item->groupId();
++	return !group || (previous->groupId() != group);
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_forward.h b/Telegram/SourceFiles/tele/tele_forward.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..1cc5ad46b3933a7628bf4ac0a4f5c95b5eed2a62
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_forward.h
+@@ -0,0 +1,11 @@
++#pragma once
++
++class HistoryItem;
++
++namespace Tele {
++
++[[nodiscard]] bool ForwardSeparately(
++	not_null<HistoryItem*> previous,
++	not_null<HistoryItem*> item);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index ec673870c86765df8dab43a794d49d0e9d27684e..1498e98639535c202c83d9be175327b654c63c37 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -222,6 +222,7 @@ const char kOptionInvisibleNames[] = "tele-invisible-names";
+ const char kOptionInvisibleNamesFallback[] = "tele-invisible-names-fallback";
+ const char kOptionInvisibleNamesPhrase[] = "tele-invisible-names-phrase";
+ const char kOptionShowHiddenChars[] = "tele-show-hidden-chars";
++const char kOptionForwardOneByOne[] = "tele-forward-one-by-one";
+ 
+ namespace {
+ 
+@@ -1546,6 +1547,12 @@ base::options::toggle ShowHiddenCharsOption({
+ 		"message is made of them.",
+ });
+ 
++base::options::toggle ForwardOneByOneOption({
++	.id = kOptionForwardOneByOne,
++	.name = "Forward messages one by one",
++	.description = "Albums stay together; many at once can hit rate limits.",
++});
++
+ void MigrateHideCalls() {
+ 	if (!HideCallsOption.value()) {
+ 		return;
+@@ -3203,4 +3210,8 @@ rpl::producer<bool> ShowHiddenCharsValue() {
+ 	});
+ }
+ 
++bool ForwardOneByOne() {
++	return ForwardOneByOneOption.value();
++}
++
+ } // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index d96eb38d72e9fd4ca19a322c82ff797f53902370..acee3c14ecd9bdb252103aedb276df20999903cb 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -217,6 +217,7 @@ extern const char kOptionInvisibleNames[];
+ extern const char kOptionInvisibleNamesFallback[];
+ extern const char kOptionInvisibleNamesPhrase[];
+ extern const char kOptionShowHiddenChars[];
++extern const char kOptionForwardOneByOne[];
+ 
+ [[nodiscard]] bool HideStories();
+ [[nodiscard]] bool WatchStoriesInvisibly();
+@@ -540,5 +541,6 @@ void SetInvisibleNamesPhrase(const QString &value);
+ [[nodiscard]] rpl::producer<QString> InvisibleNamesPhraseValue();
+ [[nodiscard]] bool ShowHiddenChars();
+ [[nodiscard]] rpl::producer<bool> ShowHiddenCharsValue();
++[[nodiscard]] bool ForwardOneByOne();
+ 
+ } // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index 0937942aa556db634945274e5df76199dad602e5..2af5dc78d4673e12493d1b386e09f443d5877667 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -212,6 +212,7 @@ struct Spec {
+ 		Toggle(kOptionServerUsernames),
+ 		Toggle(kOptionNoticesServer),
+ 		Toggle(kOptionSentToBottom),
++		Toggle(kOptionForwardOneByOne),
+ 		Toggle(kOptionQueueBehindMedia),
+ 		Toggle(kOptionSendOlderReplies),
+ 		Toggle(kOptionDoubleEnterSend),

@@ -177,7 +177,7 @@ index 56d67433c1d11eec578cbf1ce74a40b12d05a6fd..1a681a292d5a92babd7e7201e86ffa52
  				TopBarNameText(namePeer, _activeChat),
  				Ui::NameTextOptions());
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 96f8388c69f9416c571fed90be3da3ee26e9edbb..7d806e1aae586464dd746733d478d80472027140 100644
+index 172a9d8d1848d5b30105da5bcb7cadc407c833b0..28f71c8efe46df739269116cb7909d7e82615b9c 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -34,6 +34,7 @@
@@ -1000,7 +1000,7 @@ index 0000000000000000000000000000000000000000..317bcbd479c2fd94ba256bc63632b606
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index afa10bf7c238a95e81c1c9fbff958aee5be25eaa..04a6e4e5fe9cdd9b95d84ed87d3ae691c4a6b376 100644
+index d89a51c34a07cf4292a6c29cf821dfac2085565e..c61bdac49c8deec354c6cac007b455ae80aa0f40 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -199,6 +199,9 @@ const char kOptionLocalPasswordSend[] = "tele-local-password-send";
@@ -1013,7 +1013,7 @@ index afa10bf7c238a95e81c1c9fbff958aee5be25eaa..04a6e4e5fe9cdd9b95d84ed87d3ae691
  
  namespace {
  
-@@ -1378,6 +1381,21 @@ base::options::toggle LocalPasswordSubscriptionsOption({
+@@ -1379,6 +1382,21 @@ base::options::toggle LocalPasswordSubscriptionsOption({
  	.defaultValue = true,
  });
  
@@ -1035,7 +1035,7 @@ index afa10bf7c238a95e81c1c9fbff958aee5be25eaa..04a6e4e5fe9cdd9b95d84ed87d3ae691
  void MigrateHideCalls() {
  	if (!HideCallsOption.value()) {
  		return;
-@@ -2819,4 +2837,54 @@ rpl::producer<> LocalPasswordHashChanges() {
+@@ -2820,4 +2838,54 @@ rpl::producer<> LocalPasswordHashChanges() {
  	return LocalPasswordOption.changes();
  }
  

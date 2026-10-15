@@ -278,7 +278,7 @@ index 0000000000000000000000000000000000000000..a23b63dbb2245f0c65006cfdda7c494f
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 513ab7be6691df929ec62d323bd0227a10a408aa..ea2401d9c002803a5dd18328a947e169129f6d1e 100644
+index c27d61a5658e7fc9d0643130ef6640ef381d2c96..9f82f21e976edc51713b5213d39e94b401acde0d 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -47,6 +47,7 @@ const char kOptionChatListNoReorderAnimation[] = "tele-chat-list-no-reorder-anim
@@ -301,7 +301,7 @@ index 513ab7be6691df929ec62d323bd0227a10a408aa..ea2401d9c002803a5dd18328a947e169
  base::options::toggle EmojiPanelClickOption({
  	.id = kOptionEmojiPanelClick,
  	.name = "Open the emoji panel by click only",
-@@ -1155,6 +1161,14 @@ rpl::producer<> HideReactionsButtonChanges() {
+@@ -1156,6 +1162,14 @@ rpl::producer<> HideReactionsButtonChanges() {
  	return HideReactionsButtonOption.changes();
  }
  

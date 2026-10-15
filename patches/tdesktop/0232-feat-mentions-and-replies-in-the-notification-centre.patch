@@ -32,7 +32,7 @@ index 6003f502d259c39e5972db69d047c6f7a41b84fe..1ca508115ff1424b196ce830534741a2
      tele/tele_notices_section.h
      tele/tele_online_notify.cpp
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 4df10e3541fc7831a463f0589f87f35beb8fb5b2..d631ee64ed77eb76c6ac72b52acbe2c4b5fffdc3 100644
+index c26a5c3ca535fe892792d789485465552a233e1e..6ffe444b280d9ad65c0943f239e5b758c4d43342 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3116,6 +3116,11 @@ void FillNotifications(SectionBuilder &builder) {
@@ -582,7 +582,7 @@ index 0000000000000000000000000000000000000000..27a48568221aa1d4aa571350d899526f
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_notices_section.cpp b/Telegram/SourceFiles/tele/tele_notices_section.cpp
-index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1276dcc08 100644
+index cba2d6fa02281c3479aa7977fd7b28882c83cba0..582a0fa810172be3eec8e27be023b2e7492dd1e9 100644
 --- a/Telegram/SourceFiles/tele/tele_notices_section.cpp
 +++ b/Telegram/SourceFiles/tele/tele_notices_section.cpp
 @@ -4,14 +4,18 @@
@@ -604,7 +604,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  #include "ui/widgets/buttons.h"
  #include "ui/widgets/labels.h"
  #include "ui/widgets/menu/menu_add_action_callback.h"
-@@ -35,6 +39,7 @@ constexpr auto kIconSize = 36;
+@@ -36,6 +40,7 @@ constexpr auto kButtonSkip = 6;
  
  enum class Filter : uchar {
  	All,
@@ -612,7 +612,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  	Limits,
  	Server,
  	Tele,
-@@ -43,6 +48,7 @@ enum class Filter : uchar {
+@@ -44,6 +49,7 @@ enum class Filter : uchar {
  [[nodiscard]] QString FilterId(Filter filter) {
  	switch (filter) {
  	case Filter::All: return u"all"_q;
@@ -620,7 +620,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  	case Filter::Limits: return u"limits"_q;
  	case Filter::Server: return u"server"_q;
  	case Filter::Tele: return u"tele"_q;
-@@ -53,6 +59,7 @@ enum class Filter : uchar {
+@@ -54,6 +60,7 @@ enum class Filter : uchar {
  [[nodiscard]] Filter FilterFromId(const QString &id) {
  	for (const auto filter : {
  			Filter::All,
@@ -628,7 +628,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  			Filter::Limits,
  			Filter::Server,
  			Filter::Tele }) {
-@@ -66,10 +73,12 @@ enum class Filter : uchar {
+@@ -67,10 +74,12 @@ enum class Filter : uchar {
  [[nodiscard]] bool Matches(Filter filter, NoticeKind kind) {
  	switch (filter) {
  	case Filter::All: return true;
@@ -642,7 +642,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  	}
  	Unexpected("Filter in Tele::Matches.");
  }
-@@ -82,6 +91,7 @@ enum class Filter : uchar {
+@@ -83,6 +92,7 @@ enum class Filter : uchar {
  	case NoticeKind::Update: return st::menuIconDownload;
  	case NoticeKind::Crash: return st::menuIconReport;
  	case NoticeKind::Online: return st::menuIconUserShow;
@@ -650,7 +650,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  	}
  	Unexpected("Kind in Tele::KindIcon.");
  }
-@@ -101,6 +111,7 @@ enum class Filter : uchar {
+@@ -102,6 +112,7 @@ enum class Filter : uchar {
  	case NoticeKind::Update: return st::settingsIconBg2;
  	case NoticeKind::Crash: return st::settingsIconBg1;
  	case NoticeKind::Online: return st::settingsIconBg6;
@@ -658,7 +658,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  	}
  	Unexpected("Kind in Tele::KindColor.");
  }
-@@ -130,6 +141,17 @@ enum class Filter : uchar {
+@@ -131,6 +142,17 @@ enum class Filter : uchar {
  	return result;
  }
  
@@ -676,7 +676,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  [[nodiscard]] QVariant LinkContext(
  		not_null<Window::SessionController*> controller) {
  	return QVariant::fromValue(ClickHandlerContext{
-@@ -166,6 +188,8 @@ private:
+@@ -167,6 +189,8 @@ private:
  	QString _time;
  	int _timeWidth = 0;
  	object_ptr<Ui::FlatLabel> _text = { nullptr };
@@ -685,7 +685,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  	QImage _photo;
  	QImage _photoCache;
  	QRect _photoRect;
-@@ -186,7 +210,12 @@ Entry::Entry(
+@@ -187,7 +211,12 @@ Entry::Entry(
  	const auto session = &controller->session();
  	_title.setText(st::semiboldTextStyle, _notice.title);
  	if (!_notice.text.text.isEmpty()) {
@@ -699,7 +699,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  		_text->setMarkedText(
  			_notice.text,
  			Core::TextContext({ .session = session }));
-@@ -206,6 +235,9 @@ Entry::Entry(
+@@ -207,6 +236,9 @@ Entry::Entry(
  			}
  			fillMenu(r.menu);
  		});
@@ -709,7 +709,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  	}
  	if (!_notice.photo.isEmpty()) {
  		_photo = NoticePhoto(session, _notice.photo);
-@@ -222,6 +254,15 @@ Entry::Entry(
+@@ -223,6 +255,15 @@ Entry::Entry(
  		});
  		_buttons.push_back(raw);
  	}
@@ -725,7 +725,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  	if (_notice.peer
  		|| (_notice.kind == NoticeKind::Update && !_buttons.empty())) {
  		setCursor(style::cur_pointer);
-@@ -304,19 +345,29 @@ void Entry::paintEvent(QPaintEvent *e) {
+@@ -306,19 +347,29 @@ void Entry::paintEvent(QPaintEvent *e) {
  	const auto padding = st::boxRowPadding.left() / 2;
  	const auto size = style::ConvertScale(kIconSize);
  	const auto iconLeft = st::boxRowPadding.left();
@@ -767,7 +767,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  
  	const auto available = width() - left() - right();
  	const auto titleWidth = std::max(
-@@ -387,7 +438,9 @@ void Entry::fillMenu(not_null<Ui::PopupMenu*> menu) {
+@@ -389,7 +440,9 @@ void Entry::fillMenu(not_null<Ui::PopupMenu*> menu) {
  }
  
  void Entry::activate() {
@@ -778,7 +778,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  		_controller->showPeerHistory(
  			PeerId(PeerIdHelper(_notice.peer)),
  			Window::SectionShow::Way::Forward);
-@@ -483,6 +536,7 @@ base::weak_qptr<Ui::RpWidget> NoticesSection::createPinnedToTop(
+@@ -485,6 +538,7 @@ base::weak_qptr<Ui::RpWidget> NoticesSection::createPinnedToTop(
  	auto tabs = std::vector<Ui::SubTabs::Tab>();
  	for (const auto &[filter, name] : {
  			std::pair{ Filter::All, u"All"_q },
@@ -787,7 +787,7 @@ index e65fbfcb223d79bc8875b4b8009bbdb98e1ba2ef..1b6e9f98c81347031a04560d3395c9a1
  			std::pair{ Filter::Server, u"Server"_q },
  			std::pair{ Filter::Tele, u"tele"_q } }) {
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 489138ad2256a24b776f7ed3b417feb5fd3e888b..2ab65c233ce110ee2c8748226a535f9eb5128f18 100644
+index 8bf96aa5d4b41640311592b3970dcf2ee95c9b11..1b3ff87e7fc45418fbb1c86bbe67fe90c21fa1cd 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -141,6 +141,7 @@ const char kOptionNotices[] = "tele-notices";
@@ -812,7 +812,7 @@ index 489138ad2256a24b776f7ed3b417feb5fd3e888b..2ab65c233ce110ee2c8748226a535f9e
  base::options::toggle SilenceChatsOption({
  	.id = kOptionSilenceChats,
  	.name = "Silence chats completely",
-@@ -2502,6 +2510,10 @@ bool NoticesTeleToasts() {
+@@ -2503,6 +2511,10 @@ bool NoticesTeleToasts() {
  	return NoticesTeleToastsOption.value();
  }
  

@@ -14,7 +14,7 @@ Subject: [PATCH] feat: make {build} the bare build number
  7 files changed, 64 insertions(+), 5 deletions(-)
 
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 0dc3f66dafb0167ab1ef696f78169bd3aa7bd4cf..a26a47d4a75207c9f2461aec7e814c2a0a08c0e8 100644
+index 8e3a922ff8bd894a899aa674833981b855a254cf..b2b9f26e20059db0f82a4be272e74869e5fede3d 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -1,6 +1,7 @@
@@ -54,7 +54,7 @@ index 0dc3f66dafb0167ab1ef696f78169bd3aa7bd4cf..a26a47d4a75207c9f2461aec7e814c2a
  base::options::option<QString> MessageMenuLayoutOption({
  	.id = kOptionMessageMenuLayout,
  	.name = "Message menu",
-@@ -882,6 +889,26 @@ void MigrateHideCalls() {
+@@ -883,6 +890,26 @@ void MigrateHideCalls() {
  	}
  }
  
@@ -81,7 +81,7 @@ index 0dc3f66dafb0167ab1ef696f78169bd3aa7bd4cf..a26a47d4a75207c9f2461aec7e814c2a
  } // namespace
  
  bool HideStories() {
-@@ -1470,14 +1497,17 @@ rpl::producer<> ServerUsernamesChanges() {
+@@ -1471,14 +1498,17 @@ rpl::producer<> ServerUsernamesChanges() {
  }
  
  QString TitleTemplate() {
@@ -99,7 +99,7 @@ index 0dc3f66dafb0167ab1ef696f78169bd3aa7bd4cf..a26a47d4a75207c9f2461aec7e814c2a
  	return rpl::single(
  		rpl::empty
  	) | rpl::then(
-@@ -1488,14 +1518,17 @@ rpl::producer<QString> TitleTemplateValue() {
+@@ -1489,14 +1519,17 @@ rpl::producer<QString> TitleTemplateValue() {
  }
  
  QString WindowTitleTemplate() {

@@ -34,7 +34,7 @@ index 17aa7d71ebcd5e451eb18b403383432f8a2dccc2..cb03e6295a4215f23dd0a9e8fcc8367e
  	}, [&](WebViewSourceLinkBotProfile) {
  		confirmOpen([=] {
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index ec464b1f0c2b7d3910fb80651e571d20af9f9daf..cf1234a0621f2ee11eb98e6cf875cf38ed3d4b2a 100644
+index 7d372e17b7831c1c45159cef46dc7da64dadeb62..fab5c4af0929b4b6ebcfd260f638766fa4894011 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3620,6 +3620,10 @@ void FillBots(SectionBuilder &builder) {
@@ -49,7 +49,7 @@ index ec464b1f0c2b7d3910fb80651e571d20af9f9daf..cf1234a0621f2ee11eb98e6cf875cf38
  }
  
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 449fcd5dbada636bb9e20dbb06f92a24575c1304..ec9dcc94a6d06c560bea5c248ad91f55fc647777 100644
+index c1fb2ce7a2244d49ba451ab5156562313aa8edc3..4232ffd5dfb1a9ff277d9c9977ecf768de697da8 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -135,6 +135,7 @@ const char kOptionInlineWithoutVia[] = "tele-inline-without-via";
@@ -73,7 +73,7 @@ index 449fcd5dbada636bb9e20dbb06f92a24575c1304..ec9dcc94a6d06c560bea5c248ad91f55
  base::options::toggle HideBotEditedOption({
  	.id = kOptionHideBotEdited,
  	.name = "No edited mark on bot messages",
-@@ -2526,6 +2533,10 @@ rpl::producer<> ShowStartParamChanges() {
+@@ -2527,6 +2534,10 @@ rpl::producer<> ShowStartParamChanges() {
  	return StartParamOption.changes();
  }
  

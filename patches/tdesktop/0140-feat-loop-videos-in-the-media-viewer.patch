@@ -115,7 +115,7 @@ index 1c06dfb6b62c643829c9ef0099e75fe2d15228fe..1d0e3d4e6dd9893e2b9e1a1af01f3dca
  	object_ptr<Ui::IconButton> _pictureInPicture;
  	object_ptr<Ui::LabelSimple> _playedAlready;
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 3b203a48ffdc8bd4bdfcc4fe7e016c6fad37872c..754c9ece37e87225a6290956794d37c52f1157e9 100644
+index 5df50d56539c213d359f4515275b1093b90c8593..7ad414b7c0bffce6cc76ad71e5fbdb8dcf13574a 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -123,6 +123,7 @@ const char kOptionHideFolderCounters[] = "tele-hide-folder-counters";
@@ -126,7 +126,7 @@ index 3b203a48ffdc8bd4bdfcc4fe7e016c6fad37872c..754c9ece37e87225a6290956794d37c5
  
  namespace {
  
-@@ -842,6 +843,11 @@ base::options::option<QString> UncountedAccountsOption({
+@@ -843,6 +844,11 @@ base::options::option<QString> UncountedAccountsOption({
  	.description = "Accounts left out of the app's unread count.",
  });
  
@@ -138,7 +138,7 @@ index 3b203a48ffdc8bd4bdfcc4fe7e016c6fad37872c..754c9ece37e87225a6290956794d37c5
  void MigrateHideCalls() {
  	if (!HideCallsOption.value()) {
  		return;
-@@ -1791,4 +1797,22 @@ rpl::producer<> UncountedAccountsChanges() {
+@@ -1792,4 +1798,22 @@ rpl::producer<> UncountedAccountsChanges() {
  	return UncountedAccountsOption.changes();
  }
  

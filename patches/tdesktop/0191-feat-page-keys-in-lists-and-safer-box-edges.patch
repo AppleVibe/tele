@@ -50,7 +50,7 @@ index b7e428452ec1dd46c06cc04745b01f3522aa8e12..e65f8afe615cf787b5c263a63181c5ec
  	if (MediaControlsManager::Supported()) {
  		_mediaControlsManager = std::make_unique<MediaControlsManager>();
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 239db30261a825f659f744585942f00f3f03e50d..14be39f87f5a0ffec6bdfc5fa29737cf10cbaae1 100644
+index 639018a5ab2260064404821f09eb16833d9b6942..68b0eeda6767fccbf02703a64f0658dbf77d527c 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -2481,6 +2481,12 @@ void FillInterface(SectionBuilder &builder) {
@@ -293,7 +293,7 @@ index 0000000000000000000000000000000000000000..effab9f7d9c7d7fd0ff045ec3ac4c491
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 030d181cd4497aab0070aac62efd3de79002b678..0401455b3d82e3b90f19c9c6fcf578967ffa4bed 100644
+index 67e85861ab10e9c3a95b709683853ea95b334da4..b0bd656d06695fe3dffc08e787a195ad58b95fde 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -51,6 +51,7 @@ const char kOptionHideListPreviews[] = "tele-hide-list-previews";
@@ -318,7 +318,7 @@ index 030d181cd4497aab0070aac62efd3de79002b678..0401455b3d82e3b90f19c9c6fcf57896
  base::options::toggle StaticUserpicsChatsOption({
  	.id = kOptionStaticUserpicsChats,
  	.name = "Static userpics in chats and profiles",
-@@ -1652,6 +1660,16 @@ void SetReduceMotionSaved(const QString &value) {
+@@ -1653,6 +1661,16 @@ void SetReduceMotionSaved(const QString &value) {
  	ReduceMotionSavedOption.set(value);
  }
  

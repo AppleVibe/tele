@@ -93,7 +93,7 @@ index d594c9c1baf64fb458d534e7636cf0c8c7ea8bea..32d2a17b26fe95090be9024bb7c2a4f1
  	if (destroyAt > 0) {
  		const auto left = std::max(
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index a44d635570ba41a023db4c44fccfd292b21c1301..c123a42ccadb110e65af91f99c31806007e6439a 100644
+index 99e5c80a17f59e21746079e5f6d82bbde98c1d18..6e3263f96d8291e93fb5712be011b1d1b83223f4 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -597,7 +597,7 @@ base::options::toggle BotApiPeerIdsOption({
@@ -105,7 +105,7 @@ index a44d635570ba41a023db4c44fccfd292b21c1301..c123a42ccadb110e65af91f99c318060
  });
  
  base::options::toggle MergeIdDcOption({
-@@ -1791,6 +1791,10 @@ rpl::producer<> PeerIdFormatChanges() {
+@@ -1792,6 +1792,10 @@ rpl::producer<> PeerIdFormatChanges() {
  		BotApiPeerIdsOption.changes());
  }
  

@@ -53,7 +53,7 @@ index 2aad537070100eb5671ceb793394189f378b737c..ffdd6a84bf174c04956aafb9801eaf98
  	const auto link = ClickHandler::getActive();
  	if (controller()->showFrozenError()) {
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 09988b7a0913dbb628a74ae807835efa4af30d19..f83559b9dcb361fc5f64070f2127fc2d6d9d6518 100644
+index f6677d4dafd6461c405c6dd9fdfa67bd41e72cf9..905fb108c5b48bdd031f806fd36b466cd578724a 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -2497,6 +2497,10 @@ void FillInterface(SectionBuilder &builder) {
@@ -1127,7 +1127,7 @@ index 0000000000000000000000000000000000000000..8b4f659e68eb50cc98942538848b11b9
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 637ae107e72a318c3e2f6496f40891f8d06cdfad..9c3e9d2844fd1a118878dee8cb0f0b918635b8c8 100644
+index dddc2f71b76c5f8ddeda42488c0c885bb489775f..a1e126b06e2b64d2de1d65925f603f64729e595a 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -154,6 +154,7 @@ const char kOptionFieldHeight[] = "tele-field-height";
@@ -1138,7 +1138,7 @@ index 637ae107e72a318c3e2f6496f40891f8d06cdfad..9c3e9d2844fd1a118878dee8cb0f0b91
  const char kOptionBookmarks[] = "tele-bookmarks";
  const char kOptionReturnPoint[] = "tele-return-point";
  const char kOptionNoGestures[] = "tele-no-gestures";
-@@ -1076,6 +1077,13 @@ base::options::toggle SelectChatsOption({
+@@ -1077,6 +1078,13 @@ base::options::toggle SelectChatsOption({
  	.name = "Select several chats",
  });
  
@@ -1152,7 +1152,7 @@ index 637ae107e72a318c3e2f6496f40891f8d06cdfad..9c3e9d2844fd1a118878dee8cb0f0b91
  base::options::toggle BookmarksOption({
  	.id = kOptionBookmarks,
  	.name = "Message bookmarks",
-@@ -2346,6 +2354,10 @@ rpl::producer<bool> SelectChatsValue() {
+@@ -2347,6 +2355,10 @@ rpl::producer<bool> SelectChatsValue() {
  	});
  }
  

@@ -12,7 +12,7 @@ Subject: [PATCH] feat: choose how quoted names of deleted messages link
  5 files changed, 103 insertions(+), 9 deletions(-)
 
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 7cc039404f7c2414adc06d3be6aff9104cff8595..30c5468f65a1902253eea65e55d4aa8cb850b2fc 100644
+index 246e89f4da260a6f12956b3b6df0c04ca2370acb..a855eaa2f5f85a8c72e08f70a1eb562e1c235f81 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -2652,6 +2652,19 @@ void FillMessages(SectionBuilder &builder) {
@@ -162,7 +162,7 @@ index 8ca7ddbd4075dea631d0f0a6e22a103cb5c254b8..ed9aaae468f591a8c4aa51c0185b01eb
  
  void QuoteDeletedCaption(Api::MessageToSend &message) {
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 8d9fbe4a6d97c576042bcbb62afd9e915e4b0213..77ffd95096978b09e5a36f41417737129b05cedb 100644
+index 0557fb2711bf906480c76af254a3bee5d4fc65e9..2c41d9c3f0ce9d83bae2978371527a6511960ca9 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -81,6 +81,7 @@ const char kOptionKeepDeletedSaved[] = "tele-keep-deleted-saved";
@@ -185,7 +185,7 @@ index 8d9fbe4a6d97c576042bcbb62afd9e915e4b0213..77ffd95096978b09e5a36f4141773712
  base::options::toggle RevealSpoilersOption({
  	.id = kOptionRevealSpoilers,
  	.name = "Reveal spoilers automatically",
-@@ -1741,6 +1747,24 @@ rpl::producer<QString> DeletedReplyValue() {
+@@ -1742,6 +1748,24 @@ rpl::producer<QString> DeletedReplyValue() {
  	});
  }
  

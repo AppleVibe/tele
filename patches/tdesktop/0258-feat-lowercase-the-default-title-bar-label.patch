@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Wed, 7 Oct 2026 18:12:41 +0300
+Subject: [PATCH] feat: lowercase the default title bar label
+
+---
+ Telegram/SourceFiles/tele/tele_build.cpp     | 4 ++--
+ Telegram/SourceFiles/tele/tele_options.cpp   | 2 +-
+ Telegram/SourceFiles/tele/tele_title_box.cpp | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/Telegram/SourceFiles/tele/tele_build.cpp b/Telegram/SourceFiles/tele/tele_build.cpp
+index ef28f22324dbb08d8461e57209c973b142b7880c..da0a8162403bc495fd4fe59932ed5dc0d745891a 100644
+--- a/Telegram/SourceFiles/tele/tele_build.cpp
++++ b/Telegram/SourceFiles/tele/tele_build.cpp
+@@ -10,8 +10,8 @@ int BuildNumber() {
+ 
+ QString TitleLabel() {
+ 	return (BuildNumber() > 0)
+-		? u"TELE #%1"_q.arg(BuildNumber())
+-		: u"TELE DEV"_q;
++		? u"tele #%1"_q.arg(BuildNumber())
++		: u"tele dev"_q;
+ }
+ 
+ QString BuildLabel() {
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 010120df532da26d2d8a9c5220b9fecfa83c2232..ec673870c86765df8dab43a794d49d0e9d27684e 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -966,7 +966,7 @@ base::options::option<QString> TitleTemplateOption({
+ 	.id = kOptionTitleTemplate,
+ 	.name = "Title bar label",
+ 	.description = "A live template, empty hides the label.",
+-	.defaultValue = u"TELE #{build}"_q,
++	.defaultValue = u"tele #{build}"_q,
+ });
+ 
+ base::options::option<QString> WindowTitleTemplateOption({
+diff --git a/Telegram/SourceFiles/tele/tele_title_box.cpp b/Telegram/SourceFiles/tele/tele_title_box.cpp
+index a7dffb734aa05ecb5e49cbe0636ee35e70d8cbfe..c3f2f6992d49a9e4889b692f93920d5721fd272c 100644
+--- a/Telegram/SourceFiles/tele/tele_title_box.cpp
++++ b/Telegram/SourceFiles/tele/tele_title_box.cpp
+@@ -108,7 +108,7 @@ struct Group {
+ 		}
+ 		: std::vector<QString>{
+ 			QString(),
+-			u"TELE #{build}"_q,
++			u"tele #{build}"_q,
+ 			u"{time:HH:mm} \u00B7 {weekday|short}"_q,
+ 			u"{name}[ \u00B7 {unread} unread]"_q,
+ 			u"{weekday|short|lower} {day} {month|short|lower} \u00B7 {time}"_q,

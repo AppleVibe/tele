@@ -90,7 +90,7 @@ index 177625eef427fe1b087f4e1dc54ad9ee65e207a6..bfa2154d71b62dd17ca18bad3a47e4b3
  		state->creditsDelegate->setContent(container->add(
  			object_ptr<PeerListContent>(container, &state->controller)));
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 14be39f87f5a0ffec6bdfc5fa29737cf10cbaae1..8cd4620d24ac01283f5ef617be0f30e2cc1cdce1 100644
+index 68b0eeda6767fccbf02703a64f0658dbf77d527c..174817a4a973270422aede555a1f28e666ec1362 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -2510,6 +2510,12 @@ void FillInterface(SectionBuilder &builder) {
@@ -107,7 +107,7 @@ index 14be39f87f5a0ffec6bdfc5fa29737cf10cbaae1..8cd4620d24ac01283f5ef617be0f30e2
  }
  
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 0401455b3d82e3b90f19c9c6fcf578967ffa4bed..d52a8099db9e412035e2ac0d85bf936f930fd8ce 100644
+index b0bd656d06695fe3dffc08e787a195ad58b95fde..865643258cfcaf4fbca1d7500984665e0fafb578 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -65,6 +65,7 @@ const char kOptionShowRegularGiftIds[] = "tele-show-regular-gift-ids";
@@ -131,7 +131,7 @@ index 0401455b3d82e3b90f19c9c6fcf578967ffa4bed..d52a8099db9e412035e2ac0d85bf936f
  base::options::toggle NoCollectibleTooltipOption({
  	.id = kOptionNoCollectibleTooltip,
  	.name = "No tooltip for collectible statuses",
-@@ -1746,6 +1753,10 @@ bool GiftSearch() {
+@@ -1747,6 +1754,10 @@ bool GiftSearch() {
  	return GiftSearchOption.value();
  }
  

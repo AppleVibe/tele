@@ -42,7 +42,7 @@ index 8349107aeb22da65e1b10139cbb444db81176a64..d0df640eca19fa7e50ff6bc1592ee9af
  }
  
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index bea3186f0edb7b00be13a65e68972b4cdeeadbed..ca1cc3bf8be0b6414758b323b182948d3f230ef2 100644
+index 2f7162539bf4f1acd30f09a540c4d6388b4a2fce..698290ce62888935bf79bcc81a4b2d16659fdcc0 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -54,6 +54,7 @@ const char kOptionPinSets[] = "tele-pin-sets";
@@ -65,7 +65,7 @@ index bea3186f0edb7b00be13a65e68972b4cdeeadbed..ca1cc3bf8be0b6414758b323b182948d
  base::options::toggle PeerIdsWithoutSpacesOption({
  	.id = kOptionPeerIdsWithoutSpaces,
  	.name = "IDs without spaces",
-@@ -1215,6 +1221,10 @@ bool SeeTgButton() {
+@@ -1216,6 +1222,10 @@ bool SeeTgButton() {
  	return SeeTgButtonOption.value();
  }
  

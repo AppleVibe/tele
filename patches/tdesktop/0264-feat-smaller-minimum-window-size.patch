@@ -1,0 +1,219 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Wed, 7 Oct 2026 18:58:56 +0300
+Subject: [PATCH] feat: smaller minimum window size
+
+---
+ Telegram/CMakeLists.txt                       |  2 ++
+ .../SourceFiles/settings/settings_tele.cpp    |  4 +++
+ Telegram/SourceFiles/tele/tele_options.cpp    | 15 +++++++++++
+ Telegram/SourceFiles/tele/tele_options.h      |  3 +++
+ .../SourceFiles/tele/tele_settings_io.cpp     |  1 +
+ .../SourceFiles/tele/tele_window_size.cpp     | 25 +++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_window_size.h  |  8 ++++++
+ Telegram/SourceFiles/window/main_window.cpp   | 15 ++++++++---
+ 8 files changed, 70 insertions(+), 3 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_window_size.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_window_size.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 2a7867713c1f4f9dcff6b91586107fbe190a05ab..2df09674e112766b1fc2a641022e002f3fcd523f 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2753,6 +2753,8 @@ PRIVATE
+     tele/tele_who_reacted.h
+     tele/tele_who_read.cpp
+     tele/tele_who_read.h
++    tele/tele_window_size.cpp
++    tele/tele_window_size.h
+ )
+ set_source_files_properties(${src_loc}/tele/tele_build.cpp
+ PROPERTIES
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 051a37dd61226409d0bde2436d680da2264808b3..0c357a7a747f0685d9ab9419df11c8d193eea5db 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -2769,6 +2769,10 @@ void FillInterface(SectionBuilder &builder) {
+ 		builder,
+ 		::Tele::kOptionScaleOnePercent,
+ 		{ u"zoom"_q, u"size"_q, u"interface"_q });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionSmallWindow,
++		{ u"window"_q, u"resize"_q, u"minimum"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Animations"_q);
+ 	AddOptionToggle(
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 049b36cd4931ebd9c03ec15ffd43db45c1f0e8a0..6f6f113abeae1a763709b55ddc4e5a9c5fa45825 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -33,6 +33,7 @@ const char kOptionCallButton[] = "tele-call-button";
+ const char kOptionGroupCallButton[] = "tele-group-call-button";
+ const char kOptionLowercase[] = "tele-lowercase";
+ const char kOptionScaleOnePercent[] = "tele-scale-1";
++const char kOptionSmallWindow[] = "tele-small-window";
+ const char kOptionHideSponsored[] = "tele-hide-sponsored";
+ const char kOptionHideProxySponsor[] = "tele-hide-proxy-sponsor";
+ const char kOptionNoLinkWarning[] = "tele-no-link-warning";
+@@ -384,6 +385,12 @@ base::options::toggle ScaleOnePercentOption({
+ 	.name = "Interface scale in 1% steps",
+ });
+ 
++base::options::toggle SmallWindowOption({
++	.id = kOptionSmallWindow,
++	.name = "Smaller minimum window size",
++	.description = "256x256 px instead of 380x480.",
++});
++
+ base::options::toggle HideCallsOption({
+ 	.id = kOptionHideCalls,
+ });
+@@ -1778,6 +1785,14 @@ bool ScaleOnePercent() {
+ 	return ScaleOnePercentOption.value();
+ }
+ 
++bool SmallWindow() {
++	return SmallWindowOption.value();
++}
++
++rpl::producer<> SmallWindowChanges() {
++	return SmallWindowOption.changes() | rpl::to_empty;
++}
++
+ QString CallButton() {
+ 	MigrateHideCalls();
+ 	return CallButtonOption.value();
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index 59d2a175d0835c1039733eb39fd1bd397a994927..b06294409c655bbfb149b03a7ece5bfd49eeca7f 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -28,6 +28,7 @@ extern const char kOptionCallButton[];
+ extern const char kOptionGroupCallButton[];
+ extern const char kOptionLowercase[];
+ extern const char kOptionScaleOnePercent[];
++extern const char kOptionSmallWindow[];
+ extern const char kOptionHideSponsored[];
+ extern const char kOptionHideProxySponsor[];
+ extern const char kOptionNoLinkWarning[];
+@@ -257,6 +258,8 @@ void SetKnownSettings(const QString &value);
+ [[nodiscard]] bool BubbleBadges();
+ [[nodiscard]] bool LowercaseStrings();
+ [[nodiscard]] bool ScaleOnePercent();
++[[nodiscard]] bool SmallWindow();
++[[nodiscard]] rpl::producer<> SmallWindowChanges();
+ [[nodiscard]] QString CallButton();
+ void SetCallButton(const QString &value);
+ [[nodiscard]] rpl::producer<QString> CallButtonValue();
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index 9daa08b7d00635ec7f170db4061e9daeaf3a7e0f..fb3aed945b8c0a203ffd74b3bccd5fcb842e5de6 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -121,6 +121,7 @@ struct Spec {
+ 		Toggle(kOptionBubbleBadges),
+ 		Toggle(kOptionLowercase),
+ 		Toggle(kOptionScaleOnePercent),
++		Toggle(kOptionSmallWindow),
+ 		Toggle(kOptionHideSponsored),
+ 		Toggle(kOptionHideProxySponsor),
+ 		Toggle(kOptionNoLinkWarning),
+diff --git a/Telegram/SourceFiles/tele/tele_window_size.cpp b/Telegram/SourceFiles/tele/tele_window_size.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..03f2ac649975b9325ba8587022adef0e748ac4ad
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_window_size.cpp
+@@ -0,0 +1,25 @@
++#include "tele/tele_window_size.h"
++
++#include "tele/tele_options.h"
++#include "ui/style/style_core_scale.h"
++
++namespace Tele {
++namespace {
++
++constexpr auto kSmallSide = 256;
++
++} // namespace
++
++int WindowMinWidth(int width) {
++	return SmallWindow()
++		? std::min(width, style::ConvertScale(kSmallSide))
++		: width;
++}
++
++int WindowMinHeight(int height) {
++	return SmallWindow()
++		? std::min(height, style::ConvertScale(kSmallSide))
++		: height;
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_window_size.h b/Telegram/SourceFiles/tele/tele_window_size.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..43bb40079cd077f011ca6ecf75df577d36663a76
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_window_size.h
+@@ -0,0 +1,8 @@
++#pragma once
++
++namespace Tele {
++
++[[nodiscard]] int WindowMinWidth(int width);
++[[nodiscard]] int WindowMinHeight(int height);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/window/main_window.cpp b/Telegram/SourceFiles/window/main_window.cpp
+index c5f30d80b4ea8f131f5046474f7af4823ecae6ab..1e6a84f6ab9431a5dda95d3e91282b1bb23b3a7a 100644
+--- a/Telegram/SourceFiles/window/main_window.cpp
++++ b/Telegram/SourceFiles/window/main_window.cpp
+@@ -48,7 +48,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "mainwidget.h" // session->content()->windowShown().
+ #include "tray.h"
+ #include "tele/tele_app_icons.h"
++#include "tele/tele_options.h"
+ #include "tele/tele_title.h"
++#include "tele/tele_window_size.h"
+ #include "styles/style_window.h"
+ #include "styles/style_dialogs.h" // ChildSkip().x() for new child windows.
+ 
+@@ -587,6 +589,10 @@ void MainWindow::init() {
+ 	) | rpl::skip(1) | rpl::on_next([=] {
+ 		updateTitle();
+ 	}, lifetime());
++	Tele::SmallWindowChanges(
++	) | rpl::on_next([=] {
++		updateMinimumSize();
++	}, lifetime());
+ 
+ 	updateTitle();
+ 	updateWindowIcon();
+@@ -669,7 +675,7 @@ void MainWindow::updatePalette() {
+ }
+ 
+ int MainWindow::computeMinWidth() const {
+-	auto result = st::windowMinWidth;
++	auto result = Tele::WindowMinWidth(st::windowMinWidth);
+ 	if (_rightColumn) {
+ 		result += _rightColumn->width();
+ 	}
+@@ -691,7 +697,9 @@ int MainWindow::computeMinHeight() const {
+ 		_screenReaderBar->resizeToWidth(st::windowMinWidth);
+ 		return _screenReaderBar->height();
+ 	}();
+-	return outdated + screenReader + st::windowMinHeight;
++	return outdated
++		+ screenReader
++		+ Tele::WindowMinHeight(st::windowMinHeight);
+ }
+ 
+ void MainWindow::refreshTitleWidget() {
+@@ -1001,7 +1009,8 @@ void MainWindow::savePosition(Qt::WindowState state) {
+ 		DEBUG_LOG(("Window Pos: Saving non-maximized position: %1, %2, %3, %4").arg(realPosition.x).arg(realPosition.y).arg(realPosition.w).arg(realPosition.h));
+ 		realPosition = withScreenInPosition(realPosition);
+ 	}
+-	if (realPosition.w >= st::windowMinWidth && realPosition.h >= st::windowMinHeight) {
++	if (realPosition.w >= Tele::WindowMinWidth(st::windowMinWidth)
++		&& realPosition.h >= Tele::WindowMinHeight(st::windowMinHeight)) {
+ 		if (realPosition.x != savedPosition.x
+ 			|| realPosition.y != savedPosition.y
+ 			|| realPosition.w != savedPosition.w

@@ -86,7 +86,7 @@ index f76975bd89392a9754145333ce5df5e3da4bd5bb..27b6de342b869f6f716d7c3e865eda5a
  }
  
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 9cd567a931c48668bf832575ca7c6429d9724905..23a58ca6ce56d9ca0f45f4c78914a3beb99803be 100644
+index 45e1418c784417d91837d791b655372a7a058032..0fac62a189cf6fdb7d9e8a006efcf0ed44bde4ea 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -142,6 +142,7 @@ const char kOptionHideAppCounter[] = "tele-hide-app-counter";
@@ -97,7 +97,7 @@ index 9cd567a931c48668bf832575ca7c6429d9724905..23a58ca6ce56d9ca0f45f4c78914a3be
  
  namespace {
  
-@@ -961,6 +962,11 @@ base::options::toggle ViewerLoopOption({
+@@ -962,6 +963,11 @@ base::options::toggle ViewerLoopOption({
  	.name = "Loop videos",
  });
  
@@ -109,7 +109,7 @@ index 9cd567a931c48668bf832575ca7c6429d9724905..23a58ca6ce56d9ca0f45f4c78914a3be
  void MigrateHideCalls() {
  	if (!HideCallsOption.value()) {
  		return;
-@@ -2062,4 +2068,12 @@ rpl::producer<bool> ViewerLoopValue() {
+@@ -2063,4 +2069,12 @@ rpl::producer<bool> ViewerLoopValue() {
  	});
  }
  

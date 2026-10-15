@@ -83,7 +83,7 @@ index 04f4614bacc1a4352685b58ece0649c6f7a9e135..df8f3d60aba81adc79991cb4e8ab02e4
  
  void CornerButtons::pollVotesClick() {
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index b69fc04a2f7c5c01a1dc56d59c6ee2c07c5db744..c403386d96f7740da5c800e2f091b855a8ee1428 100644
+index 18d53095cb4547237f96327631d9e3cb35ed1899..236950bad9ead02ecbab86ba656bdc4c8bbb66cf 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3359,6 +3359,10 @@ void FillPrivacy(SectionBuilder &builder) {
@@ -258,7 +258,7 @@ index e8052ed34d877e8a380f44a03cc88bd65c91f92b..0ba27ec963cb1fd33cf09caa5b9de273
  class IgnoredFade final {
  public:
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 83bd2934b19f3ab2f549095f6f9f11af392f404d..261603a80373aafc0e63a7d07e71cf39e03cac0c 100644
+index f8986ab041e48e0c20151d72c69389d43ff8f52f..b0f3315f9a68e44d2ff220a197fa7e2779c429bf 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -79,6 +79,7 @@ const char kOptionShowDc[] = "tele-show-dc";
@@ -281,7 +281,7 @@ index 83bd2934b19f3ab2f549095f6f9f11af392f404d..261603a80373aafc0e63a7d07e71cf39
  base::options::toggle IgnoreInMenuOption({
  	.id = kOptionIgnoreInMenu,
  	.name = "Ignore from the userpic menu",
-@@ -1985,6 +1991,10 @@ rpl::producer<bool> HideIgnoredValue() {
+@@ -1986,6 +1992,10 @@ rpl::producer<bool> HideIgnoredValue() {
  	});
  }
  

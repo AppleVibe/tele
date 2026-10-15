@@ -1,0 +1,226 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Sat, 10 Oct 2026 11:07:52 +0300
+Subject: [PATCH] feat: copy links to wallet transactions
+
+---
+ Telegram/CMakeLists.txt                       |  2 +
+ .../SourceFiles/tele/tele_wallet_links.cpp    | 77 +++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_wallet_links.h | 25 ++++++
+ .../SourceFiles/wallet/wallet_content.cpp     | 36 +++++----
+ 4 files changed, 124 insertions(+), 16 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_wallet_links.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_wallet_links.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 17d67c7f4c25d9ee984c256518c8eaf6daf68331..21798f766d70fc9f17a12fb201a85954d7bbdb83 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2788,6 +2788,8 @@ PRIVATE
+     tele/tele_voice_fade.h
+     tele/tele_voice_quality.cpp
+     tele/tele_voice_quality.h
++    tele/tele_wallet_links.cpp
++    tele/tele_wallet_links.h
+     tele/tele_who_reacted.cpp
+     tele/tele_who_reacted.h
+     tele/tele_who_read.cpp
+diff --git a/Telegram/SourceFiles/tele/tele_wallet_links.cpp b/Telegram/SourceFiles/tele/tele_wallet_links.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a984cd04c38f01c5ab8fb7a76e338d96d3024af
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_wallet_links.cpp
+@@ -0,0 +1,77 @@
++#include "tele/tele_wallet_links.h"
++
++#include "base/unique_qptr.h"
++#include "lang/lang_keys.h"
++#include "main/session/session_show.h"
++#include "tele/tele_notices.h"
++#include "ui/basic_click_handlers.h"
++#include "ui/text/text_entity.h"
++#include "ui/text/text_utilities.h"
++#include "ui/widgets/popup_menu.h"
++#include "ui/rp_widget.h"
++#include "wallet/wallet_palette.h"
++#include "styles/style_chat_helpers.h"
++#include "styles/style_menu_icons.h"
++#include "styles/style_widgets.h"
++
++#include <QtGui/QCursor>
++
++namespace Tele {
++
++QString WalletTransactionUrl(const QByteArray &hash) {
++	return hash.isEmpty()
++		? QString()
++		: (u"https://tonscan.org/tx/"_q + QString::fromLatin1(hash.toHex()));
++}
++
++QString WalletAddressUrl(const QString &friendly) {
++	return friendly.isEmpty()
++		? QString()
++		: (u"https://tonscan.org/address/"_q + friendly);
++}
++
++void AddWalletTransactionCopyLink(
++		not_null<Ui::PopupMenu*> menu,
++		std::shared_ptr<Main::SessionShow> show,
++		const QString &url) {
++	menu->addAction(tr::lng_context_copy_link(tr::now), [=] {
++		TextUtilities::SetClipboardText(TextForMimeData::Simple(url));
++		ShowCopiedToast(show, {
++			.text = { tr::lng_background_link_copied(tr::now) },
++			.iconLottie = u"toast/voip_invite"_q,
++			.iconLottieSize = st::toastLottieIconSize,
++		}, { url });
++	}, &st::menuIconLink);
++}
++
++void SetupWalletTransactionMenu(
++		not_null<Ui::RpWidget*> row,
++		std::shared_ptr<Main::SessionShow> show,
++		Fn<QByteArray()> hash) {
++	const auto menu = row->lifetime().make_state<
++		base::unique_qptr<Ui::PopupMenu>>();
++	row->events(
++	) | rpl::filter([](not_null<QEvent*> e) {
++		return e->type() == QEvent::ContextMenu;
++	}) | rpl::on_next([=](not_null<QEvent*> e) {
++		const auto url = WalletTransactionUrl(hash());
++		if (url.isEmpty()) {
++			return;
++		}
++		*menu = base::make_unique_q<Ui::PopupMenu>(
++			row,
++			st::popupMenuWithIcons);
++		const auto raw = menu->get();
++		AddWalletTransactionCopyLink(raw, show, url);
++		raw->addAction(
++			Ui::Text::FixAmpersandInAction(
++				tr::lng_channel_earn_history_out_button(tr::now)),
++			[=] { UrlClickHandler::Open(url); },
++			&st::menuIconSearch);
++		const auto scope = Wallet::WindowPaletteScope(row);
++		raw->popup(QCursor::pos());
++		e->accept();
++	}, row->lifetime());
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_wallet_links.h b/Telegram/SourceFiles/tele/tele_wallet_links.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..8a2c4e498fe8fc53f0a2db87dde155761d5af078
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_wallet_links.h
+@@ -0,0 +1,25 @@
++#pragma once
++
++namespace Main {
++class SessionShow;
++} // namespace Main
++
++namespace Ui {
++class PopupMenu;
++class RpWidget;
++} // namespace Ui
++
++namespace Tele {
++
++[[nodiscard]] QString WalletTransactionUrl(const QByteArray &hash);
++[[nodiscard]] QString WalletAddressUrl(const QString &friendly);
++void AddWalletTransactionCopyLink(
++	not_null<Ui::PopupMenu*> menu,
++	std::shared_ptr<Main::SessionShow> show,
++	const QString &url);
++void SetupWalletTransactionMenu(
++	not_null<Ui::RpWidget*> row,
++	std::shared_ptr<Main::SessionShow> show,
++	Fn<QByteArray()> hash);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/wallet/wallet_content.cpp b/Telegram/SourceFiles/wallet/wallet_content.cpp
+index f3f0e123719486e3c43771941e2faa720ba8c09e..d75aabac8945671a9ede9bc649b3d0c32a03ab5e 100644
+--- a/Telegram/SourceFiles/wallet/wallet_content.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_content.cpp
+@@ -59,6 +59,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "storage/storage_domain.h"
+ #include "tele/tele_lowercase.h"
+ #include "tele/tele_options.h"
++#include "tele/tele_wallet_links.h"
+ #include "ui/boxes/confirm_box.h"
+ #include "ui/controls/feature_list.h"
+ #include "ui/controls/table_rows.h"
+@@ -3531,8 +3532,7 @@ void AddDetailsCollectibleHeader(
+ 	collection->setClickedCallback([=] {
+ 		const auto contract = media->collection(address);
+ 		if (!contract.isEmpty()) {
+-			UrlClickHandler::Open(Core::TonExplorerUrl(
+-				session,
++			UrlClickHandler::Open(Tele::WalletAddressUrl(
+ 				FormatFriendly(contract, true)));
+ 		}
+ 	});
+@@ -4975,15 +4975,8 @@ void SetupIntroTooltip(
+ 	}, parent->lifetime());
+ }
+ 
+-[[nodiscard]] QString ExplorerTransactionUrl(
+-		not_null<Main::Session*> session,
+-		const QByteArray &traceId) {
+-	if (traceId.isEmpty()) {
+-		return QString();
+-	}
+-	return Core::TonExplorerUrl(
+-		session,
+-		u"transaction/"_q + QString::fromLatin1(traceId.toHex()));
++[[nodiscard]] QString ExplorerTransactionUrl(const QByteArray &traceId) {
++	return Tele::WalletTransactionUrl(traceId);
+ }
+ 
+ void WalletTransactionBox(
+@@ -5147,8 +5140,9 @@ void WalletTransactionBox(
+ 		toggle->setForceRippled(true);
+ 		// Read when the menu opens, not when the box was built: a served
+ 		// transaction can name the trace a message did not carry.
+-		const auto url = ExplorerTransactionUrl(session, state->item.traceId);
++		const auto url = ExplorerTransactionUrl(state->item.traceId);
+ 		if (!url.isEmpty()) {
++			Tele::AddWalletTransactionCopyLink(raw, show, url);
+ 			raw->addAction(
+ 				Ui::Text::FixAmpersandInAction(
+ 					tr::lng_channel_earn_history_out_button(tr::now)),
+@@ -14766,7 +14760,12 @@ void Content::setupContent() {
+ 					media,
+ 					click);
+ 			} else {
+-				AddHistoryRow(slot, content, click, media);
++				const auto row = AddHistoryRow(slot, content, click, media);
++				Tele::SetupWalletTransactionMenu(row, _show, [=] {
++					return _sendingRow
++						? _sendingRow->item.traceId
++						: QByteArray();
++				});
+ 			}
+ 			_sendingRow->content = std::move(content);
+ 		}
+@@ -14791,11 +14790,16 @@ void Content::setupContent() {
+ 		});
+ 		const auto addItem = [=](const TransferItem &item, ListRowKey key) {
+ 			const auto content = RowContentFromItem(item, &_show->session());
++			const auto row = AddHistoryRow(list, content, [=] {
++				ShowWalletTransactionBox(_show, item, media);
++			}, media);
++			Tele::SetupWalletTransactionMenu(
++				row,
++				_show,
++				[hash = item.traceId] { return hash; });
+ 			place->rows.push_back({
+ 				.key = std::move(key),
+-				.widget = AddHistoryRow(list, content, [=] {
+-					ShowWalletTransactionBox(_show, item, media);
+-				}, media),
++				.widget = row,
+ 			});
+ 		};
+ 		auto created = false;

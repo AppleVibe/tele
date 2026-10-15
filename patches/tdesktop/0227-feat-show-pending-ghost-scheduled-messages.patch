@@ -75,7 +75,7 @@ index 22221b65fd6f0768075bf945819b28ac228e51e4..92f067accf1038f5f78c0e9ea891bbd2
  		result.get(),
  		list->controller()->uiShow(),
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 57cdc931be506a683a8506724d4631119f568670..b69fc04a2f7c5c01a1dc56d59c6ee2c07c5db744 100644
+index 33ca1ccd1ce1195547e96d518691e731b2d696ba..18d53095cb4547237f96327631d9e3cb35ed1899 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -3325,7 +3325,14 @@ void FillPrivacy(SectionBuilder &builder) {
@@ -828,7 +828,7 @@ index 184c2c6b6132d9cc8aab82da7da727ba49969bee..8d87bdd8eaa9d94ce05cb16f4c2f88ee
  		"attached_stickers,send_as_gif,open_gif,save_gif,save_sound,"
  		"cancel_download,edit_caption,cancel_upload,download_selected,"
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 02d13965c65c3aa70ef16a004ec2ca95707a6b2b..83bd2934b19f3ab2f549095f6f9f11af392f404d 100644
+index b259c15107e389479edb7d59a2f6159fc269a22e..f8986ab041e48e0c20151d72c69389d43ff8f52f 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -14,6 +14,7 @@ const char kOptionGhostReadOnReply[] = "tele-ghost-read-on-reply";
@@ -852,7 +852,7 @@ index 02d13965c65c3aa70ef16a004ec2ca95707a6b2b..83bd2934b19f3ab2f549095f6f9f11af
  base::options::toggle GhostStoriesOption({
  	.id = kOptionGhostStories,
  	.name = "Don't mark stories as viewed",
-@@ -1519,6 +1526,17 @@ bool GhostSchedule() {
+@@ -1520,6 +1527,17 @@ bool GhostSchedule() {
  	return GhostScheduleOption.value();
  }
  

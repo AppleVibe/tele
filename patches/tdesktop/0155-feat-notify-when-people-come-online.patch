@@ -537,7 +537,7 @@ index 0000000000000000000000000000000000000000..240892670a0bbd68cf432c4b446a6985
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 2b39103cbeb389dd5f876c58f95e0210d1186e23..5f035db2140a1e2afbd5a04f0c48179ace9b7f21 100644
+index e58bf781388677f795218d44e17fbc1f0edea66b..2bf1d9508ebe3265b3dc4fe5b87a3f533bbb9c8b 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -104,6 +104,7 @@ const char kOptionNoRichPastePrompt[] = "tele-no-rich-paste-prompt";
@@ -560,7 +560,7 @@ index 2b39103cbeb389dd5f876c58f95e0210d1186e23..5f035db2140a1e2afbd5a04f0c48179a
  base::options::toggle VoiceNoFadeOption({
  	.id = kOptionVoiceNoFade,
  	.name = "Record voice without fading",
-@@ -1688,6 +1694,10 @@ rpl::producer<> SilentPerChatChanges() {
+@@ -1689,6 +1695,10 @@ rpl::producer<> SilentPerChatChanges() {
  	return SilentPerChatOption.changes();
  }
  

@@ -66,7 +66,7 @@ index 2fe888505924d81ce911eef65b2b07d265f3d2c4..455bcd0637e61bb81eb16e7883c64992
      tele/tele_gift_list.h
      tele/tele_gift_search.cpp
 diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
-index 06b7e54944095b3ed633e9cc5bbf8653a606da00..0fc52d6ae022aadbe3867ec39b9f62d0b6eb5f2f 100644
+index 28492e60224e2968568cb102ce5c91bb7fa4a491..aaf9e702bfaeaa037873481c050a8a509cab9205 100644
 --- a/Telegram/SourceFiles/settings/settings_tele.cpp
 +++ b/Telegram/SourceFiles/settings/settings_tele.cpp
 @@ -30,6 +30,7 @@
