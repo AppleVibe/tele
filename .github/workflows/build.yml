@@ -760,6 +760,14 @@ jobs:
           fi
           state=$( { find ThirdParty/cache_keys Libraries/cache_keys -type f -exec shasum -a 256 {} + 2>/dev/null || true; } | sort | shasum -a 256)
           echo "LIBS_STATE=$state" >> "$GITHUB_ENV"
+          # the trim keeps only the headers of the rust source stages, so their keys still match;
+          # clone them again so tdesktop_rust can rebuild when its own key changes. after the state
+          # above, so cloning the same revisions again doesn't push a new copy of the libraries
+          for s in tlottie wallet-engine; do
+            if [ -f "Libraries/cache_keys/$s" ] && [ ! -f "Libraries/$s/Cargo.toml" ]; then
+              rm -f "Libraries/cache_keys/$s"
+            fi
+          done
           if [ "$(cat Libraries/cache_keys/tele-prepared 2>/dev/null)" = "$LIBS_KEY" ]; then
             echo "READY=true" >> "$GITHUB_ENV"
           fi
