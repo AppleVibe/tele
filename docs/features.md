@@ -85,6 +85,7 @@ settings → tele → chats.
 | [338](../patches/tdesktop/0338-feat-design-the-money-card-with-a-gift.patch) | money's card takes the colours, pattern and model of one of your collectible gifts, picked in money's ⋮ menu → card design or synced with your gift status. transfers you send in chats use its colours too | tele → chats, on |
 | [344](../patches/tdesktop/0344-feat-hide-the-other-balances-above-the-money-card.patch) | hide the "you also have …" rows above the money card, here or by right-clicking one of them | tele → chats, off |
 | [348](../patches/tdesktop/0348-feat-put-gifts-on-the-money-card-as-stickers.patch) | put your collectible gifts on the money card as stickers: drag them from the card design box or money's collectibles tab, move them around, and click one to take it off | with 338 |
+| [353](../patches/tdesktop/0353-feat-filter-stickers-and-emoji-by-format.patch) | filter your sticker and emoji sets by format (static, animated, video or mixed), sort them, and archive or remove every shown set at once. the panel's search filters by format too, and custom emoji sets get their own list under stickers you have | tele → chats, off |
 
 ## messages
 
@@ -124,6 +125,7 @@ settings → tele → messages.
 | [280](../patches/tdesktop/0280-fix-rewrite-tiktok-links-to-tnktok-now-that-vxtiktok.patch) | tiktok links are rewritten to tnktok.com: vxtiktok.com shut down, so the preset and rules you already saved no longer use it | with 77 |
 | [287](../patches/tdesktop/0287-feat-keep-deleted-chats-and-topics.patch) | chats and topics that get deleted, or that you leave or get removed from, stay in the list with their loaded messages until you delete them again | with 19 |
 | [296](../patches/tdesktop/0296-feat-add-samekosabax-to-the-x-link-rewrites.patch) | the x preset of link rewrites can also rewrite to samekosabax.com, and its links lose x's tracking parameters too | with 77 |
+| [352](../patches/tdesktop/0352-feat-recover-deleted-channel-posts-from-forwards.patch) | open a deleted channel post from a forward of it and tele shows it again: it rebuilds the post from the forward in its place in the channel, marked like other kept deleted messages, and the time's tooltip says which forward it came from | with 19 |
 
 ## sending
 

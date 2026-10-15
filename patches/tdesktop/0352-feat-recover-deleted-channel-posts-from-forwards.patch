@@ -1,0 +1,777 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Thu, 15 Oct 2026 20:33:01 +0300
+Subject: [PATCH] feat: recover deleted channel posts from forwards
+
+---
+ Telegram/CMakeLists.txt                       |   2 +
+ Telegram/SourceFiles/history/history.cpp      |   2 +
+ .../history/history_item_components.cpp       |   5 +-
+ .../SourceFiles/history/history_widget.cpp    |   9 +-
+ .../history/view/history_view_bottom_info.cpp |   7 +-
+ .../history/view/history_view_element.cpp     |   4 +
+ .../history/view/history_view_message.cpp     |   2 +
+ .../SourceFiles/settings/settings_tele.cpp    |   5 +
+ Telegram/SourceFiles/tele/tele_deleted.cpp    |  20 ++
+ Telegram/SourceFiles/tele/tele_deleted.h      |   1 +
+ Telegram/SourceFiles/tele/tele_kept_store.cpp |  40 ++-
+ Telegram/SourceFiles/tele/tele_options.cpp    |  12 +
+ Telegram/SourceFiles/tele/tele_options.h      |   2 +
+ .../tele/tele_recover_forwarded.cpp           | 334 ++++++++++++++++++
+ .../SourceFiles/tele/tele_recover_forwarded.h |  42 +++
+ .../SourceFiles/tele/tele_settings_io.cpp     |   1 +
+ 16 files changed, 483 insertions(+), 5 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_recover_forwarded.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_recover_forwarded.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 13ce17d233a5b8c8ba7df223690f602f077929f4..4278d3495f11b0defc3b51f5193129640e453db5 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2808,6 +2808,8 @@ PRIVATE
+     tele/tele_read_log.h
+     tele/tele_recent_emoji.cpp
+     tele/tele_recent_emoji.h
++    tele/tele_recover_forwarded.cpp
++    tele/tele_recover_forwarded.h
+     tele/tele_reduce_motion.cpp
+     tele/tele_reduce_motion.h
+     tele/tele_regex_search.cpp
+diff --git a/Telegram/SourceFiles/history/history.cpp b/Telegram/SourceFiles/history/history.cpp
+index 136806c9bbb978d2d1ddbdb0153923eb18bbe27b..050eb8d13673a0d6a25fe29bf771a000e6e6e846 100644
+--- a/Telegram/SourceFiles/history/history.cpp
++++ b/Telegram/SourceFiles/history/history.cpp
+@@ -91,6 +91,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_local_drafts.h"
+ #include "tele/tele_options.h"
+ #include "tele/tele_read_log.h"
++#include "tele/tele_recover_forwarded.h"
+ #include "styles/style_dialogs.h"
+ 
+ namespace {
+@@ -629,6 +630,7 @@ not_null<HistoryItem*> History::createItem(
+ 		bool detachExistingItem,
+ 		bool newMessage) {
+ 	owner().fillMessagePeers(peer->id, message);
++	Tele::DropRecovered(this, id, message);
+ 	if (const auto result = owner().message(peer, id)) {
+ 		if (detachExistingItem) {
+ 			result->removeMainView(Data::ViewRemovalReason::Detached);
+diff --git a/Telegram/SourceFiles/history/history_item_components.cpp b/Telegram/SourceFiles/history/history_item_components.cpp
+index 171885b9a1967bc10262aede16c03f4b1018340b..e260c035f588201a34c1e4dc11b0de7576fb5c61 100644
+--- a/Telegram/SourceFiles/history/history_item_components.cpp
++++ b/Telegram/SourceFiles/history/history_item_components.cpp
+@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "history/history_item_components.h"
+ #include "tele/tele_bubble_badges.h"
+ #include "tele/tele_button_payload.h"
++#include "tele/tele_recover_forwarded.h"
+ #include "tele/tele_rich_timestamps.h"
+ #include "tele/tele_shot_sharp.h"
+ 
+@@ -395,7 +396,9 @@ void HistoryMessageForwarded::create(
+ 		Tele::WithBadgeObjects(std::move(context), st::fwdTextStyle));
+ 
+ 	text.setLink(1, fromChannel
+-		? JumpToMessageClickHandler(originalSender, originalId)
++		? Tele::ForwardOriginalLink(
++			item,
++			JumpToMessageClickHandler(originalSender, originalId))
+ 		: originalSender
+ 		? originalSender->openLink()
+ 		: HiddenSenderInfo::ForwardClickHandler());
+diff --git a/Telegram/SourceFiles/history/history_widget.cpp b/Telegram/SourceFiles/history/history_widget.cpp
+index 02b49ea269ed711a6b187a7aae5168d2917a324a..be4eae6cd35d52662b52e7205ec9671c405e20be 100644
+--- a/Telegram/SourceFiles/history/history_widget.cpp
++++ b/Telegram/SourceFiles/history/history_widget.cpp
+@@ -201,6 +201,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_sticker_captions.h"
+ #include "tele/tele_username_aliases.h"
+ #include "tele/tele_options.h"
++#include "tele/tele_recover_forwarded.h"
+ #include "media/audio/media_audio.h"
+ #include "media/audio/media_audio_capture.h"
+ #include "media/player/media_player_instance.h"
+@@ -8753,8 +8754,14 @@ int HistoryWidget::countInitialScrollTop() {
+ 		const auto item = getItemFromHistoryOrMigrated(_showAtMsgId);
+ 		const auto itemTop = _list->itemTop(item);
+ 		if (itemTop < 0) {
++			const auto recovered = Tele::RecoverForwardedPost(
++				controller(),
++				_history,
++				_showAtMsgId);
+ 			setMsgId(ShowAtUnreadMsgId);
+-			controller()->showToast(tr::lng_message_not_found(tr::now));
++			if (!recovered) {
++				controller()->showToast(tr::lng_message_not_found(tr::now));
++			}
+ 			return countInitialScrollTop();
+ 		} else {
+ 			const auto view = item->mainView();
+diff --git a/Telegram/SourceFiles/history/view/history_view_bottom_info.cpp b/Telegram/SourceFiles/history/view/history_view_bottom_info.cpp
+index 4f9b994da0be765be2f5760df605c07fec1b9b7e..3c7eb5a5c6f9122a9fa62c7c71440877b0793b46 100644
+--- a/Telegram/SourceFiles/history/view/history_view_bottom_info.cpp
++++ b/Telegram/SourceFiles/history/view/history_view_bottom_info.cpp
+@@ -215,10 +215,13 @@ TextState BottomInfo::textState(
+ 			result.customTooltipText = fullViews + fullForwards;
+ 		}
+ 	}
++	const auto deletedWidth = (_data.flags & Data::Flag::Deleted)
++		? Tele::DeletedIconWidth()
++		: 0;
+ 	const auto inTime = QRect(
+-		width() - withTicksWidth,
++		width() - withTicksWidth - deletedWidth,
+ 		0,
+-		withTicksWidth,
++		withTicksWidth + deletedWidth,
+ 		st::msgDateFont->height
+ 	).contains(position);
+ 	if (inTime) {
+diff --git a/Telegram/SourceFiles/history/view/history_view_element.cpp b/Telegram/SourceFiles/history/view/history_view_element.cpp
+index 0be3945b3e1b8f1df98c40aa4c65f6b803a31a53..4b3af1860df7d07cf25184b99b88bb05451e820c 100644
+--- a/Telegram/SourceFiles/history/view/history_view_element.cpp
++++ b/Telegram/SourceFiles/history/view/history_view_element.cpp
+@@ -78,6 +78,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_ignored.h"
+ #include "tele/tele_invisible.h"
+ #include "tele/tele_options.h"
++#include "tele/tele_recover_forwarded.h"
+ #include "tele/tele_send_order.h"
+ #include "tele/tele_shot.h"
+ #include "tele/tele_shot_sharp.h"
+@@ -769,6 +770,9 @@ QString DateTooltipText(not_null<Element*> view) {
+ 	if (const auto held = Tele::HeldBehindMediaText(item); !held.isEmpty()) {
+ 		dateText += '\n' + held;
+ 	}
++	if (const auto from = Tele::RecoveredFromText(item); !from.isEmpty()) {
++		dateText += '\n' + from;
++	}
+ 	return dateText;
+ }
+ 
+diff --git a/Telegram/SourceFiles/history/view/history_view_message.cpp b/Telegram/SourceFiles/history/view/history_view_message.cpp
+index 5228d8c12989fe768b54513d73bb852b406c19a3..48fa60faa01e5122d5f9c57d93b57057abf7c77d 100644
+--- a/Telegram/SourceFiles/history/view/history_view_message.cpp
++++ b/Telegram/SourceFiles/history/view/history_view_message.cpp
+@@ -73,6 +73,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_ignored.h"
+ #include "tele/tele_options.h"
+ #include "tele/tele_protected.h"
++#include "tele/tele_recover_forwarded.h"
+ #include "tele/tele_shot.h"
+ #include "tele/tele_shot_sharp.h"
+ #include "styles/style_chat.h"
+@@ -6428,6 +6429,7 @@ ClickHandlerPtr Message::prepareRightActionLink() const {
+ 			if (*showByThread) {
+ 				(*showByThread)(controller);
+ 			} else if (savedFromPeer && savedFromMsgId) {
++				Tele::NoteForwardJump(item, savedFromPeer, savedFromMsgId);
+ 				controller->showPeerHistory(
+ 					savedFromPeer,
+ 					Window::SectionShow::Way::Forward,
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index cf2e808aa86af56845b36ae2b73c9698cb0167b7..92414a250fc754fa8d5052bda7db7773ef63b42f 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -3084,6 +3084,11 @@ void FillMessages(SectionBuilder &builder) {
+ 				::Tele::kOptionKeepDeletedChats,
+ 				{ u"chat"_q, u"topic"_q, u"removed"_q, u"banned"_q },
+ 				::Tele::kOptionKeepDeleted);
++			AddOptionToggle(
++				builder,
++				::Tele::kOptionRecoverForwarded,
++				{ u"forward"_q, u"channel"_q, u"post"_q, u"recover"_q },
++				::Tele::kOptionKeepDeleted);
+ 			AddOptionToggle(
+ 				builder,
+ 				::Tele::kOptionKeepDeletedPersist,
+diff --git a/Telegram/SourceFiles/tele/tele_deleted.cpp b/Telegram/SourceFiles/tele/tele_deleted.cpp
+index c36c94c9c03223a63b3637d7ff341cafc216dcba..820fe13a9d17278c7ea8fc9562dd003027e240e0 100644
+--- a/Telegram/SourceFiles/tele/tele_deleted.cpp
++++ b/Telegram/SourceFiles/tele/tele_deleted.cpp
+@@ -320,6 +320,26 @@ void KeepOwnDeleted(std::vector<not_null<HistoryItem*>> &items) {
+ 	Keep(items, true);
+ }
+ 
++void KeepRecovered(std::vector<not_null<HistoryItem*>> &items) {
++	if (!KeepDeletedMessages()) {
++		return;
++	}
++	auto histories = base::flat_set<not_null<History*>>();
++	items.erase(ranges::remove_if(items, [&](not_null<HistoryItem*> item) {
++		if (!Keepable(item) || !Wanted(item)) {
++			return false;
++		}
++		const auto history = item->history();
++		SessionItems(&history->session())[history].emplace(item->id, item);
++		StoreKeptDeleted(item, false);
++		histories.emplace(history);
++		return true;
++	}), end(items));
++	for (const auto &history : histories) {
++		Get().changes.fire_copy(history);
++	}
++}
++
+ void UnkeepDeleted(not_null<HistoryItem*> item) {
+ 	if (!IsKeptDeleted(item)) {
+ 		return;
+diff --git a/Telegram/SourceFiles/tele/tele_deleted.h b/Telegram/SourceFiles/tele/tele_deleted.h
+index a662ab8a740e0b96a9b3f317516efad1f0fce0cf..530c602e3560fd2a15932391bf1d37633a6c4abd 100644
+--- a/Telegram/SourceFiles/tele/tele_deleted.h
++++ b/Telegram/SourceFiles/tele/tele_deleted.h
+@@ -15,6 +15,7 @@ namespace Tele {
+ 
+ void KeepDeleted(std::vector<not_null<HistoryItem*>> &items);
+ void KeepOwnDeleted(std::vector<not_null<HistoryItem*>> &items);
++void KeepRecovered(std::vector<not_null<HistoryItem*>> &items);
+ void UnkeepDeleted(not_null<HistoryItem*> item);
+ [[nodiscard]] bool IsKeptDeleted(not_null<const HistoryItem*> item);
+ [[nodiscard]] bool LeftOutOfLists(not_null<const HistoryItem*> item);
+diff --git a/Telegram/SourceFiles/tele/tele_kept_store.cpp b/Telegram/SourceFiles/tele/tele_kept_store.cpp
+index 60f9ad67c63d540b683c880eb897adc4cd7b20cf..01b39db88c5bf23570ce44905502f57f9816e30b 100644
+--- a/Telegram/SourceFiles/tele/tele_kept_store.cpp
++++ b/Telegram/SourceFiles/tele/tele_kept_store.cpp
+@@ -25,6 +25,7 @@
+ #include "storage/serialize_peer.h"
+ #include "storage/storage_account.h"
+ #include "tele/tele_options.h"
++#include "tele/tele_recover_forwarded.h"
+ 
+ #include <crl/crl_object_on_queue.h>
+ 
+@@ -89,6 +90,7 @@ enum class ExtraKind : quint8 {
+ constexpr auto kOutgoing = quint32(1);
+ constexpr auto kPost = quint32(2);
+ constexpr auto kHasFrom = quint32(4);
++constexpr auto kRecoveredTag = quint32(0x7E1E4652);
+ 
+ struct Entry {
+ 	TimeId stamp = 0;
+@@ -486,9 +488,40 @@ void WriteContent(QDataStream &stream, not_null<const HistoryItem*> item) {
+ 		<< quint64(via ? peerToUser(via->id).bare : 0)
+ 		<< peer;
+ 	WriteContent(stream, item);
++	if (const auto source = RecoveredFrom(item)) {
++		stream
++			<< kRecoveredTag
++			<< SerializePeerId(source->peer)
++			<< qint64(source->msgId.bare)
++			<< source->name;
++	}
+ 	return result;
+ }
+ 
++[[nodiscard]] std::optional<RecoveredSource> ReadRecovered(
++		QDataStream &stream) {
++	if (stream.atEnd()) {
++		return std::nullopt;
++	}
++	auto tag = quint32();
++	stream >> tag;
++	if (stream.status() != QDataStream::Ok || tag != kRecoveredTag) {
++		return std::nullopt;
++	}
++	auto peer = quint64();
++	auto msg = qint64();
++	auto name = QString();
++	stream >> peer >> msg >> name;
++	if (stream.status() != QDataStream::Ok) {
++		return std::nullopt;
++	}
++	return RecoveredSource{
++		.peer = DeserializePeerId(peer),
++		.msgId = MsgId(msg),
++		.name = name,
++	};
++}
++
+ [[nodiscard]] HistoryItem *DeserializeDeleted(
+ 		not_null<History*> history,
+ 		MsgId id,
+@@ -535,6 +568,7 @@ void WriteContent(QDataStream &stream, not_null<const HistoryItem*> item) {
+ 	if (!content) {
+ 		return nullptr;
+ 	}
++	const auto recovered = ReadRecovered(stream);
+ 	auto replyTo = FullReplyTo{
+ 		.messageId = FullMsgId(DeserializePeerId(replyPeer), MsgId(replyId)),
+ 		.quote = std::move(quote),
+@@ -562,7 +596,7 @@ void WriteContent(QDataStream &stream, not_null<const HistoryItem*> item) {
+ 	if (!author.isEmpty()) {
+ 		messageFlags |= MessageFlag::HasPostAuthor;
+ 	}
+-	return MakeItem(history, {
++	const auto result = MakeItem(history, {
+ 		.id = id,
+ 		.flags = messageFlags,
+ 		.from = fromId,
+@@ -572,6 +606,10 @@ void WriteContent(QDataStream &stream, not_null<const HistoryItem*> item) {
+ 		.postAuthor = author,
+ 		.groupedId = grouped,
+ 	}, *content);
++	if (recovered) {
++		SetRecoveredFrom(result, *recovered);
++	}
++	return result;
+ }
+ 
+ [[nodiscard]] QByteArray SerializeEdits(const KeptEditRecord &record) {
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 3475788a187e997a424fa25a1494af2ae47349d4..9657f221a0a9d3a328587cec7710f68d66783c84 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -114,6 +114,7 @@ const char kOptionKeepDeletedBots[] = "tele-keep-deleted-bots";
+ const char kOptionKeepDeletedSaved[] = "tele-keep-deleted-saved";
+ const char kOptionKeepDeletedOwn[] = "tele-keep-deleted-own";
+ const char kOptionKeepDeletedChats[] = "tele-keep-deleted-chats";
++const char kOptionRecoverForwarded[] = "tele-recover-forwarded";
+ const char kOptionKeepDeletedPersist[] = "tele-keep-deleted-persist";
+ const char kOptionDeletedIcon[] = "tele-deleted-icon";
+ const char kOptionDeletedOutOfLists[] = "tele-deleted-out-of-lists";
+@@ -930,6 +931,13 @@ base::options::toggle KeepDeletedChatsOption({
+ 	.description = "They stay in the list until you delete them again.",
+ });
+ 
++base::options::toggle RecoverForwardedOption({
++	.id = kOptionRecoverForwarded,
++	.name = "Recover deleted channel posts from forwards",
++	.description = "When you open one from a forward.",
++	.defaultValue = true,
++});
++
+ base::options::toggle KeepDeletedPersistOption({
+ 	.id = kOptionKeepDeletedPersist,
+ 	.name = "Keep after restart",
+@@ -2678,6 +2686,10 @@ bool KeepDeletedChats() {
+ 	return KeepDeletedOption.value() && KeepDeletedChatsOption.value();
+ }
+ 
++bool RecoverForwarded() {
++	return KeepDeletedOption.value() && RecoverForwardedOption.value();
++}
++
+ rpl::producer<bool> KeepDeletedChatsValue() {
+ 	return rpl::single(
+ 		rpl::empty
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index 9a4068724bc17b9436b4c956017b0eaf517bc4c6..f66abf32365dbab64a0a792dcf21824cc19859b3 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -109,6 +109,7 @@ extern const char kOptionKeepDeletedBots[];
+ extern const char kOptionKeepDeletedSaved[];
+ extern const char kOptionKeepDeletedOwn[];
+ extern const char kOptionKeepDeletedChats[];
++extern const char kOptionRecoverForwarded[];
+ extern const char kOptionKeepDeletedPersist[];
+ extern const char kOptionDeletedIcon[];
+ extern const char kOptionDeletedOutOfLists[];
+@@ -417,6 +418,7 @@ void SetHiddenWords(const QString &value);
+ [[nodiscard]] bool KeepDeletedOwn();
+ [[nodiscard]] bool KeepDeletedChats();
+ [[nodiscard]] rpl::producer<bool> KeepDeletedChatsValue();
++[[nodiscard]] bool RecoverForwarded();
+ [[nodiscard]] bool KeepDeletedPersist();
+ [[nodiscard]] rpl::producer<bool> KeepDeletedPersistValue();
+ [[nodiscard]] bool DeletedTrashIcon();
+diff --git a/Telegram/SourceFiles/tele/tele_recover_forwarded.cpp b/Telegram/SourceFiles/tele/tele_recover_forwarded.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..cb6f1b0621a6a1131c92d570606ed57aefed17e0
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_recover_forwarded.cpp
+@@ -0,0 +1,334 @@
++#include "tele/tele_recover_forwarded.h"
++
++#include "data/data_channel.h"
++#include "data/data_groups.h"
++#include "data/data_media_types.h"
++#include "data/data_peer.h"
++#include "data/data_session.h"
++#include "data/data_user.h"
++#include "history/history.h"
++#include "history/history_item.h"
++#include "history/history_item_components.h"
++#include "lang/lang_keys.h"
++#include "main/main_session.h"
++#include "tele/tele_delete_fail.h"
++#include "tele/tele_deleted.h"
++#include "tele/tele_lowercase.h"
++#include "tele/tele_options.h"
++#include "ui/click_handler.h"
++#include "window/window_session_controller.h"
++
++namespace Tele {
++namespace {
++
++constexpr auto kPendingTimeout = crl::time(120000);
++
++struct Pending {
++	uint64 session = 0;
++	FullMsgId forward;
++	PeerId channel = 0;
++	MsgId post = 0;
++	crl::time when = 0;
++};
++
++struct Recovered {
++	not_null<Main::Session*> session;
++	RecoveredSource source;
++};
++
++struct State {
++	Pending pending;
++	base::flat_map<not_null<const HistoryItem*>, Recovered> items;
++	base::flat_set<not_null<Main::Session*>> sessions;
++};
++
++[[nodiscard]] State &Get() {
++	static State state;
++	return state;
++}
++
++void Track(not_null<Main::Session*> session) {
++	if (!Get().sessions.emplace(session).second) {
++		return;
++	}
++	session->data().itemRemoved(
++	) | rpl::on_next([](not_null<const HistoryItem*> item) {
++		Get().items.remove(item);
++	}, session->lifetime());
++	session->lifetime().add([=] {
++		auto &state = Get();
++		state.sessions.remove(session);
++		for (auto i = begin(state.items); i != end(state.items);) {
++			if (i->second.session == session) {
++				i = state.items.erase(i);
++			} else {
++				++i;
++			}
++		}
++	});
++}
++
++[[nodiscard]] const HistoryMessageForwarded *PostForward(
++		not_null<const HistoryItem*> item,
++		not_null<PeerData*> channel) {
++	const auto forwarded = item->Get<HistoryMessageForwarded>();
++	return (forwarded
++		&& forwarded->originalSender == channel.get()
++		&& !forwarded->story
++		&& IsServerMsgId(forwarded->originalId))
++		? forwarded
++		: nullptr;
++}
++
++[[nodiscard]] QString ChatName(not_null<PeerData*> peer) {
++	return peer->isSelf() ? tr::lng_saved_messages(tr::now) : peer->name();
++}
++
++[[nodiscard]] not_null<HistoryItem*> MakePost(
++		not_null<History*> history,
++		not_null<HistoryItem*> forward,
++		not_null<const HistoryMessageForwarded*> forwarded,
++		uint64 groupedId) {
++	const auto media = forward->media();
++	auto text = forward->originalText();
++	if (text.text.isEmpty() && media) {
++		text = media->consumedMessageText();
++	}
++	auto flags = MessageFlags(MessageFlag::Post);
++	if (forward->invertMedia()) {
++		flags |= MessageFlag::InvertMedia;
++	}
++	if (!forwarded->originalPostAuthor.isEmpty()) {
++		flags |= MessageFlag::HasPostAuthor;
++	}
++	const auto via = forward->viaBot();
++	const auto result = history->makeMessage({
++		.id = forwarded->originalId,
++		.flags = flags,
++		.from = history->peer->id,
++		.date = (forwarded->originalDate
++			? forwarded->originalDate
++			: forward->date()),
++		.viaBotId = via ? peerToUser(via->id) : UserId(),
++		.postAuthor = forwarded->originalPostAuthor,
++		.groupedId = groupedId,
++	}, TextWithEntities(), MTP_messageMediaEmpty());
++	if (media) {
++		result->overrideMedia(media->clone(result));
++		if (groupedId) {
++			history->owner().groups().refreshMessage(result);
++		}
++	}
++	if (const auto page = forward->richPage()) {
++		result->applyLocalRichPage(page);
++	} else {
++		result->setText(std::move(text));
++	}
++	return result;
++}
++
++[[nodiscard]] std::vector<not_null<HistoryItem*>> Recover(
++		not_null<History*> history,
++		not_null<HistoryItem*> forward) {
++	const auto channel = history->peer;
++	auto &owner = history->owner();
++	auto members = std::vector<not_null<HistoryItem*>>();
++	if (const auto group = owner.groups().find(forward)) {
++		members = group->items;
++	}
++	if (!ranges::contains(members, forward)) {
++		members = { forward };
++	}
++	auto missing = std::vector<not_null<HistoryItem*>>();
++	for (const auto &member : members) {
++		const auto forwarded = PostForward(member, channel);
++		if (forwarded && !owner.message(channel, forwarded->originalId)) {
++			missing.push_back(member);
++		}
++	}
++	const auto groupedId = (members.size() > 1
++		&& missing.size() == members.size())
++		? forward->groupId().raw()
++		: uint64();
++	const auto source = RecoveredSource{
++		.peer = forward->history()->peer->id,
++		.msgId = forward->id,
++		.name = ChatName(forward->history()->peer),
++	};
++	Track(&history->session());
++	auto result = std::vector<not_null<HistoryItem*>>();
++	for (const auto &member : missing) {
++		const auto forwarded = PostForward(member, channel);
++		const auto item = MakePost(history, member, forwarded, groupedId);
++		SetRecoveredFrom(item, source);
++		result.push_back(item);
++	}
++	auto rejected = result;
++	KeepRecovered(rejected);
++	for (const auto &item : rejected) {
++		result.erase(ranges::remove(result, item), end(result));
++		item->destroy();
++	}
++	return result;
++}
++
++void ShowRecovered(
++		not_null<Window::SessionController*> controller,
++		std::vector<FullMsgId> ids,
++		FullMsgId target) {
++	const auto sessionId = controller->session().uniqueId();
++	crl::on_main(controller, [=] {
++		auto &session = controller->session();
++		if (session.uniqueId() != sessionId) {
++			return;
++		}
++		auto &owner = session.data();
++		for (const auto &id : ids) {
++			if (const auto item = owner.message(id)) {
++				ReinsertDeleted(item);
++			}
++		}
++		owner.sendHistoryChangeNotifications();
++		if (const auto item = owner.message(target)) {
++			auto params = Window::SectionShow(
++				Window::SectionShow::Way::Forward);
++			params.allowDuplicateInStack = true;
++			controller->showMessage(item, params);
++		}
++	});
++}
++
++} // namespace
++
++ClickHandlerPtr ForwardOriginalLink(
++		not_null<const HistoryItem*> item,
++		ClickHandlerPtr jump) {
++	const auto weak = base::make_weak(&item->history()->session());
++	const auto id = item->fullId();
++	return std::make_shared<LambdaClickHandler>([=](ClickContext context) {
++		if (const auto session = weak.get()) {
++			if (const auto forward = session->data().message(id)) {
++				const auto forwarded = forward->Get<HistoryMessageForwarded>();
++				if (forwarded && forwarded->originalSender) {
++					NoteForwardJump(
++						forward,
++						forwarded->originalSender,
++						forwarded->originalId);
++				}
++			}
++		}
++		jump->onClick(context);
++	});
++}
++
++void NoteForwardJump(
++		not_null<const HistoryItem*> forward,
++		not_null<PeerData*> peer,
++		MsgId msgId) {
++	auto &pending = Get().pending;
++	const auto forwarded = PostForward(forward, peer);
++	if (!RecoverForwarded()
++		|| !peer->isBroadcast()
++		|| !forwarded
++		|| forwarded->originalId != msgId) {
++		pending = Pending();
++		return;
++	}
++	pending = Pending{
++		.session = forward->history()->session().uniqueId(),
++		.forward = forward->fullId(),
++		.channel = peer->id,
++		.post = msgId,
++		.when = crl::now(),
++	};
++}
++
++bool RecoverForwardedPost(
++		not_null<Window::SessionController*> controller,
++		not_null<History*> history,
++		MsgId msgId) {
++	auto &pending = Get().pending;
++	if (!pending.post
++		|| pending.post != msgId
++		|| pending.channel != history->peer->id
++		|| pending.session != history->session().uniqueId()) {
++		return false;
++	}
++	const auto data = base::take(pending);
++	const auto channel = history->peer->asBroadcast();
++	if (!RecoverForwarded()
++		|| (crl::now() - data.when > kPendingTimeout)
++		|| !channel
++		|| channel->isForbidden()
++		|| (&controller->session() != &history->session())) {
++		return false;
++	}
++	auto &owner = history->owner();
++	const auto forward = owner.message(data.forward);
++	if (!forward || !PostForward(forward, channel)) {
++		return false;
++	}
++	const auto target = FullMsgId(channel->id, msgId);
++	auto ids = std::vector<FullMsgId>();
++	if (const auto existing = owner.message(target)) {
++		if (!IsKeptDeleted(existing)) {
++			return false;
++		}
++		ids.push_back(target);
++	} else {
++		for (const auto &item : Recover(history, forward)) {
++			ids.push_back(item->fullId());
++		}
++		if (!ranges::contains(ids, target)) {
++			return false;
++		}
++		ranges::sort(ids);
++	}
++	ShowRecovered(controller, std::move(ids), target);
++	return true;
++}
++
++void DropRecovered(
++		not_null<History*> history,
++		MsgId msgId,
++		const MTPMessage &message) {
++	if (Get().items.empty() || message.type() != mtpc_message) {
++		return;
++	}
++	const auto item = history->owner().message(history->peer, msgId);
++	if (item && Get().items.contains(not_null<const HistoryItem*>(item))) {
++		item->destroy();
++	}
++}
++
++const RecoveredSource *RecoveredFrom(not_null<const HistoryItem*> item) {
++	const auto &items = Get().items;
++	if (items.empty()) {
++		return nullptr;
++	}
++	const auto i = items.find(item);
++	return (i != end(items)) ? &i->second.source : nullptr;
++}
++
++void SetRecoveredFrom(not_null<HistoryItem*> item, RecoveredSource source) {
++	const auto session = &item->history()->session();
++	Track(session);
++	Get().items.emplace_or_assign(item, Recovered{
++		.session = session,
++		.source = std::move(source),
++	});
++}
++
++QString RecoveredFromText(not_null<const HistoryItem*> item) {
++	const auto source = RecoveredFrom(item);
++	if (!source || !IsKeptDeleted(item)) {
++		return QString();
++	}
++	const auto peer = item->history()->owner().peerLoaded(source->peer);
++	const auto name = peer ? ChatName(peer) : source->name;
++	return name.isEmpty()
++		? Lower(u"Recovered from a forward"_q)
++		: Lower(u"Recovered from a forward in %1"_q).arg(name);
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_recover_forwarded.h b/Telegram/SourceFiles/tele/tele_recover_forwarded.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..b5c7efc42ef03e8c6d2cb8abebd046ff24aa61bf
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_recover_forwarded.h
+@@ -0,0 +1,42 @@
++#pragma once
++
++#include "data/data_msg_id.h"
++
++class History;
++class HistoryItem;
++class PeerData;
++
++namespace Window {
++class SessionController;
++} // namespace Window
++
++namespace Tele {
++
++struct RecoveredSource {
++	PeerId peer = 0;
++	MsgId msgId = 0;
++	QString name;
++};
++
++[[nodiscard]] ClickHandlerPtr ForwardOriginalLink(
++	not_null<const HistoryItem*> item,
++	ClickHandlerPtr jump);
++void NoteForwardJump(
++	not_null<const HistoryItem*> forward,
++	not_null<PeerData*> peer,
++	MsgId msgId);
++[[nodiscard]] bool RecoverForwardedPost(
++	not_null<Window::SessionController*> controller,
++	not_null<History*> history,
++	MsgId msgId);
++void DropRecovered(
++	not_null<History*> history,
++	MsgId msgId,
++	const MTPMessage &message);
++
++[[nodiscard]] const RecoveredSource *RecoveredFrom(
++	not_null<const HistoryItem*> item);
++void SetRecoveredFrom(not_null<HistoryItem*> item, RecoveredSource source);
++[[nodiscard]] QString RecoveredFromText(not_null<const HistoryItem*> item);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index 8a802611c7765bafc26fc74a708c889646a6c5a2..aa6d2a7efc3d6a09d97f51b294b9470401e6d4bc 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -201,6 +201,7 @@ struct Spec {
+ 		Toggle(kOptionKeepDeletedSaved),
+ 		Toggle(kOptionKeepDeletedOwn),
+ 		Toggle(kOptionKeepDeletedChats),
++		Toggle(kOptionRecoverForwarded),
+ 		Toggle(kOptionKeepDeletedPersist),
+ 		Toggle(kOptionDeletedIcon),
+ 		Toggle(kOptionDeletedOutOfLists),

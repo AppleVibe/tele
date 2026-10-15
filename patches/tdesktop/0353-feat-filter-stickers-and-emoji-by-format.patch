@@ -1,0 +1,1607 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Thu, 15 Oct 2026 20:53:10 +0300
+Subject: [PATCH] feat: filter stickers and emoji by format
+
+---
+ Telegram/CMakeLists.txt                       |   2 +
+ Telegram/SourceFiles/boxes/stickers_box.cpp   | 277 +++++++-
+ Telegram/SourceFiles/boxes/stickers_box.h     |   4 +
+ .../chat_helpers/emoji_list_widget.cpp        |  58 ++
+ .../chat_helpers/emoji_list_widget.h          |   6 +
+ .../chat_helpers/stickers_list_widget.cpp     |  50 ++
+ .../chat_helpers/stickers_list_widget.h       |   6 +
+ .../settings/sections/settings_chat.cpp       |   2 +
+ .../SourceFiles/settings/settings_tele.cpp    |   4 +
+ Telegram/SourceFiles/tele/tele_options.cpp    |  21 +
+ Telegram/SourceFiles/tele/tele_options.h      |   3 +
+ .../SourceFiles/tele/tele_settings_io.cpp     |   1 +
+ .../SourceFiles/tele/tele_sticker_formats.cpp | 641 ++++++++++++++++++
+ .../SourceFiles/tele/tele_sticker_formats.h   | 111 +++
+ 14 files changed, 1167 insertions(+), 19 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_sticker_formats.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_sticker_formats.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 4278d3495f11b0defc3b51f5193129640e453db5..77093042bfe737c607c59fc9999c894cdf557778 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2868,6 +2868,8 @@ PRIVATE
+     tele/tele_start_param.h
+     tele/tele_sticker_captions.cpp
+     tele/tele_sticker_captions.h
++    tele/tele_sticker_formats.cpp
++    tele/tele_sticker_formats.h
+     tele/tele_sticker_truth.cpp
+     tele/tele_sticker_truth.h
+     tele/tele_table_selection.cpp
+diff --git a/Telegram/SourceFiles/boxes/stickers_box.cpp b/Telegram/SourceFiles/boxes/stickers_box.cpp
+index 9d90585bf92a9f88624b640fc3aba6434aaa8b8f..c768ff981dfcf7bd98ede58bf2de3483b0ce89fa 100644
+--- a/Telegram/SourceFiles/boxes/stickers_box.cpp
++++ b/Telegram/SourceFiles/boxes/stickers_box.cpp
+@@ -25,6 +25,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "main/main_session.h"
+ #include "media/clip/media_clip_reader.h"
+ #include "storage/storage_account.h"
++#include "tele/tele_lowercase.h"
++#include "tele/tele_sticker_formats.h"
+ #include "ui/boxes/boost_box.h"
+ #include "ui/effects/animations.h"
+ #include "ui/effects/ripple_animation.h"
+@@ -98,7 +100,8 @@ public:
+ 	Inner(
+ 		QWidget *parent,
+ 		std::shared_ptr<ChatHelpers::Show> show,
+-		Section section);
++		Section section,
++		bool emoji = false);
+ 	Inner(
+ 		QWidget *parent,
+ 		std::shared_ptr<ChatHelpers::Show> show,
+@@ -127,6 +130,7 @@ public:
+ 	void setRemovedSets(const StickersSetsOrder &removed);
+ 
+ 	void setRowRemovedBySetId(uint64 setId, bool removed);
++	[[nodiscard]] StickersSetsOrder teleArchived() const;
+ 
+ 	void setInstallSetCallback(Fn<void(uint64 setId)> callback) {
+ 		_installSetCallback = std::move(callback);
+@@ -275,6 +279,17 @@ private:
+ 	[[nodiscard]] int countMaxNameWidth(bool installedSet) const;
+ 	[[nodiscard]] bool skipPremium() const;
+ 
++	[[nodiscard]] std::vector<Row*> teleRows() const;
++	[[nodiscard]] bool teleRowMatches(not_null<Row*> row) const;
++	[[nodiscard]] bool teleCanDrag() const;
++	[[nodiscard]] int teleShownCount() const;
++	void teleSetView(Tele::StickerSetView view);
++	void teleResetState();
++	void teleUnview();
++	void teleApplyView();
++	void teleRemoveShown();
++	void teleSetHiddenRemoved(uint64 setId, bool removed);
++
+ 	const style::PeerListItem &_st;
+ 	const std::shared_ptr<ChatHelpers::Show> _show;
+ 	const not_null<Main::Session*> _session;
+@@ -342,6 +357,13 @@ private:
+ 	base::Timer _megagroupSetAddressChangedTimer;
+ 	mtpRequestId _megagroupSetRequestId = 0;
+ 
++	Ui::RpWidget *_teleBar = nullptr;
++	Tele::StickerSetView _teleView;
++	Tele::StickerSetView _teleShown;
++	std::vector<std::unique_ptr<Row>> _teleHidden;
++	StickersSetsOrder _teleOrder;
++	base::flat_set<uint64> _teleArchive;
++
+ };
+ 
+ StickersBox::CounterWidget::CounterWidget(
+@@ -483,6 +505,19 @@ StickersBox::StickersBox(
+ , _emojiSets(emojiSets) {
+ }
+ 
++StickersBox::StickersBox(
++	QWidget*,
++	std::shared_ptr<ChatHelpers::Show> show,
++	Data::StickersType installed)
++: _show(std::move(show))
++, _session(&_show->session())
++, _api(&_session->mtp())
++, _section(Section::Installed)
++, _isMasks(false)
++, _isEmoji(installed == Data::StickersType::Emoji)
++, _installed(0, this, _show, Section::Installed, _isEmoji) {
++}
++
+ Main::Session &StickersBox::session() const {
+ 	return *_session;
+ }
+@@ -583,6 +618,8 @@ void StickersBox::prepare() {
+ 			} else {
+ 				session().local().readArchivedStickers();
+ 			}
++		} else if (!_megagroupSet) {
++			setTitle(rpl::single(Tele::Lower(u"Emoji sets you have"_q)));
+ 		} else {
+ 			setTitle(_isEmoji
+ 				? tr::lng_emoji_group_set()
+@@ -1081,6 +1118,19 @@ void StickersBox::saveChanges() {
+ 		rebuildList(&_masks);
+ 	}
+ 
++	const auto save = [&](not_null<Inner*> inner, Data::StickersType type) {
++		const auto session = _session;
++		const auto order = inner->order();
++		const auto archived = inner->teleArchived();
++		auto removed = inner->removedSets();
++		for (const auto setId : archived) {
++			removed.removeAll(setId);
++		}
++		Tele::ArchiveStickerSets(session, type, archived, [=] {
++			session->api().saveStickerSets(order, removed, type);
++		});
++	};
++
+ 	if (_someArchivedLoaded) {
+ 		if (_isMasks) {
+ 			session().local().writeArchivedMasks();
+@@ -1089,16 +1139,12 @@ void StickersBox::saveChanges() {
+ 		}
+ 	}
+ 	if (installed) {
+-		session().api().saveStickerSets(
+-			installed->order(),
+-			installed->removedSets(),
+-			Data::StickersType::Stickers);
++		save(installed, (_isEmoji
++			? Data::StickersType::Emoji
++			: Data::StickersType::Stickers));
+ 	}
+ 	if (masks) {
+-		session().api().saveStickerSets(
+-			masks->order(),
+-			masks->removedSets(),
+-			Data::StickersType::Masks);
++		save(masks, Data::StickersType::Masks);
+ 	}
+ }
+ 
+@@ -1187,7 +1233,8 @@ bool StickersBox::Inner::Row::isArchived() const {
+ StickersBox::Inner::Inner(
+ 	QWidget *parent,
+ 	std::shared_ptr<ChatHelpers::Show> show,
+-	StickersBox::Section section)
++	StickersBox::Section section,
++	bool emoji)
+ : RpWidget(parent)
+ , _st(st::stickersRowItem)
+ , _show(std::move(show))
+@@ -1220,8 +1267,22 @@ StickersBox::Inner::Inner(
+ , _undoWidth(st::stickersUndoRemove.style.font->width(_undoText))
+ , _installedText(tr::lng_stickers_featured_installed(tr::now))
+ , _installedWidth(st::stickersTrendingInstalled.style.font->width(
+-	_installedText)) {
++	_installedText))
++, _megagroupSetEmoji(emoji) {
+ 	setup();
++	if (_isInstalledTab) {
++		_teleBar = Tele::CreateStickerSetsBar({
++			.parent = this,
++			.show = _show,
++			.emoji = emoji,
++			.changed = [=](Tele::StickerSetView view) { teleSetView(view); },
++			.shownCount = [=] { return teleShownCount(); },
++			.removeShown = [=] { teleRemoveShown(); },
++		});
++		if (_teleBar) {
++			_teleBar->move(0, st::lineWidth);
++		}
++	}
+ }
+ 
+ StickersBox::Inner::Inner(
+@@ -1337,7 +1398,9 @@ void StickersBox::Inner::paintEvent(QPaintEvent *e) {
+ 		p.setPen(st::noContactsColor);
+ 		p.drawText(
+ 			QRect(0, _itemsTop, width(), st::noContactsHeight),
+-			tr::lng_contacts_loading(tr::now),
++			((_teleShown.filter != Tele::StickerFormat::All)
++				? Tele::Lower(u"No sets."_q)
++				: tr::lng_contacts_loading(tr::now)),
+ 			style::al_center);
+ 	} else {
+ 		p.translate(0, _itemsTop);
+@@ -1494,7 +1557,7 @@ void StickersBox::Inner::paintRow(
+ 	if (!_megagroupSet && _isInstalledTab) {
+ 		const auto &icon = st::stickersReorderIcon;
+ 		stickerSkip += icon.width() + st::stickersReorderSkip;
+-		if (!row->isRecentSet()) {
++		if (!row->isRecentSet() && teleCanDrag()) {
+ 			icon.paint(
+ 				p,
+ 				_st.photoPosition.x(),
+@@ -2021,7 +2084,10 @@ void StickersBox::Inner::updateSelected() {
+ 			} else {
+ 				actionSel = -1;
+ 			}
+-			if (!_megagroupSet && _isInstalledTab && !row->isRecentSet()) {
++			if (!_megagroupSet
++				&& _isInstalledTab
++				&& !row->isRecentSet()
++				&& teleCanDrag()) {
+ 				const auto dragAreaWidth = _st.photoPosition.x()
+ 					+ st::stickersReorderIcon.width()
+ 					+ st::stickersReorderSkip;
+@@ -2178,9 +2244,12 @@ void StickersBox::Inner::checkGroupLevel(Fn<void()> done) {
+ }
+ 
+ void StickersBox::Inner::setRowRemovedBySetId(uint64 setId, bool removed) {
++	_teleArchive.remove(setId);
+ 	const auto index = getRowIndex(setId);
+ 	if (index >= 0) {
+ 		setRowRemoved(index, removed);
++	} else {
++		teleSetHiddenRemoved(setId, removed);
+ 	}
+ }
+ 
+@@ -2426,7 +2495,8 @@ void StickersBox::Inner::rebuildMegagroupSet() {
+ }
+ 
+ void StickersBox::Inner::rebuild(bool masks) {
+-	_itemsTop = st::lineWidth;
++	teleUnview();
++	_itemsTop = st::lineWidth + (_teleBar ? _teleBar->height() : 0);
+ 
+ 	if (_megagroupSet) {
+ 		_itemsTop += st::groupStickersFieldPadding.top()
+@@ -2476,7 +2546,7 @@ void StickersBox::Inner::rebuild(bool masks) {
+ 			? tr::lng_emoji_group_from_your(tr::now)
+ 			: tr::lng_stickers_group_from_your(tr::now));
+ 		updateControlsGeometry();
+-	} else if (_isInstalledTab) {
++	} else if (_isInstalledTab && !_megagroupSetEmoji) {
+ 		const auto cloudIt = sets.find((_section == Section::Masks)
+ 			? Data::Stickers::CloudRecentAttachedSetId
+ 			: Data::Stickers::CloudRecentSetId); // Section::Installed.
+@@ -2761,9 +2831,9 @@ Data::StickersSetFlags StickersBox::Inner::fillSetFlags(
+ template <typename Check>
+ StickersSetsOrder StickersBox::Inner::collectSets(Check check) const {
+ 	auto result = StickersSetsOrder();
+-	result.reserve(_rows.size());
+-	for (const auto &row : _rows) {
+-		if (check(row.get())) {
++	result.reserve(_rows.size() + _teleHidden.size());
++	for (const auto row : teleRows()) {
++		if (check(row)) {
+ 			result.push_back(row->set->id);
+ 		}
+ 	}
+@@ -2808,6 +2878,7 @@ void StickersBox::Inner::repaintRow(int index) {
+ }
+ 
+ void StickersBox::Inner::setFullOrder(const StickersSetsOrder &order) {
++	teleUnview();
+ 	for (const auto setId : order) {
+ 		const auto index = getRowIndex(setId);
+ 		if (index >= 0) {
+@@ -2822,9 +2893,11 @@ void StickersBox::Inner::setFullOrder(const StickersSetsOrder &order) {
+ }
+ 
+ void StickersBox::Inner::setRemovedSets(const StickersSetsOrder &removed) {
++	teleUnview();
+ 	for (auto i = 0, count = int(_rows.size()); i != count; ++i) {
+ 		setRowRemoved(i, removed.contains(_rows[i]->set->id));
+ 	}
++	teleApplyView();
+ }
+ 
+ void StickersBox::Inner::visibleTopBottomUpdated(
+@@ -2895,6 +2968,172 @@ void StickersBox::Inner::updateScrollbarWidth() {
+ 	}
+ }
+ 
++std::vector<StickersBox::Inner::Row*> StickersBox::Inner::teleRows() const {
++	auto result = std::vector<Row*>();
++	result.reserve(_rows.size() + _teleHidden.size());
++	if (!_teleShown.active()) {
++		for (const auto &row : _rows) {
++			result.push_back(row.get());
++		}
++		return result;
++	}
++	auto shown = base::flat_set<uint64>();
++	auto hidden = base::flat_map<uint64, Row*>();
++	for (const auto &row : _rows) {
++		shown.emplace(row->set->id);
++	}
++	for (const auto &row : _teleHidden) {
++		hidden.emplace(row->set->id, row.get());
++	}
++	const auto inOrder = (_teleShown.sort == Tele::StickerSetSort::Upstream);
++	auto next = 0;
++	for (const auto setId : _teleOrder) {
++		if (const auto i = hidden.find(setId); i != end(hidden)) {
++			result.push_back(i->second);
++		} else if (shown.contains(setId) && next < int(_rows.size())) {
++			result.push_back(inOrder
++				? _rows[next++].get()
++				: _rows[getRowIndex(setId)].get());
++		}
++	}
++	return result;
++}
++
++bool StickersBox::Inner::teleRowMatches(not_null<Row*> row) const {
++	if (_teleView.filter == Tele::StickerFormat::All) {
++		return true;
++	} else if (row->isRecentSet()) {
++		return false;
++	}
++	return Tele::FormatMatches(_teleView.filter, Tele::SetFormat(row->set));
++}
++
++bool StickersBox::Inner::teleCanDrag() const {
++	return (_teleShown.sort == Tele::StickerSetSort::Upstream);
++}
++
++int StickersBox::Inner::teleShownCount() const {
++	return int(ranges::count_if(_rows, [](const std::unique_ptr<Row> &row) {
++		return !row->removed && !row->isRecentSet();
++	}));
++}
++
++void StickersBox::Inner::teleSetView(Tele::StickerSetView view) {
++	_teleView = view;
++	teleApplyView();
++}
++
++void StickersBox::Inner::teleResetState() {
++	setSelected(SelectedRow());
++	setPressed(SelectedRow());
++	setActionSel(-1);
++	setActionDown(-1);
++	_shiftingAnimation.stop();
++	_aboveShadowFadeStart = 0;
++	_aboveShadowFadeOpacity = anim::value();
++	_above = _dragging = _started = -1;
++	for (const auto &row : _rows) {
++		row->yShift = anim::value();
++	}
++}
++
++void StickersBox::Inner::teleUnview() {
++	if (!_teleShown.active()) {
++		return;
++	}
++	teleResetState();
++	const auto order = teleRows();
++	auto all = base::flat_map<Row*, std::unique_ptr<Row>>();
++	for (auto &row : _rows) {
++		const auto raw = row.get();
++		all.emplace(raw, std::move(row));
++	}
++	for (auto &row : _teleHidden) {
++		const auto raw = row.get();
++		all.emplace(raw, std::move(row));
++	}
++	_rows.clear();
++	_teleHidden.clear();
++	for (const auto row : order) {
++		if (const auto i = all.find(row); i != end(all) && i->second) {
++			_rows.push_back(std::move(i->second));
++		}
++	}
++	for (auto &[raw, row] : all) {
++		if (row) {
++			_rows.push_back(std::move(row));
++		}
++	}
++	_teleOrder.clear();
++	_teleShown = Tele::StickerSetView();
++	_shiftingStartTimes.assign(_rows.size(), 0);
++}
++
++void StickersBox::Inner::teleApplyView() {
++	teleUnview();
++	if (_teleView.active()) {
++		teleResetState();
++		for (const auto &row : _rows) {
++			_teleOrder.push_back(row->set->id);
++		}
++		auto shown = std::vector<std::unique_ptr<Row>>();
++		for (auto &row : _rows) {
++			if (teleRowMatches(row.get())) {
++				shown.push_back(std::move(row));
++			} else {
++				_teleHidden.push_back(std::move(row));
++			}
++		}
++		if (_teleView.sort != Tele::StickerSetSort::Upstream) {
++			const auto sort = _teleView.sort;
++			ranges::stable_sort(shown, [&](
++					const std::unique_ptr<Row> &a,
++					const std::unique_ptr<Row> &b) {
++				if (a->isRecentSet() != b->isRecentSet()) {
++					return a->isRecentSet();
++				}
++				return Tele::SetSortedBefore(
++					sort,
++					a->set,
++					a->count,
++					b->set,
++					b->count);
++			});
++		}
++		_rows = std::move(shown);
++		_shiftingStartTimes.assign(_rows.size(), 0);
++		_teleShown = _teleView;
++	}
++	updateSize();
++	update();
++}
++
++void StickersBox::Inner::teleRemoveShown() {
++	for (auto i = 0, count = int(_rows.size()); i != count; ++i) {
++		const auto row = _rows[i].get();
++		if (row->removed || row->isRecentSet()) {
++			continue;
++		} else if (!_megagroupSetEmoji) {
++			_teleArchive.emplace(row->set->id);
++		}
++		setRowRemoved(i, true);
++	}
++}
++
++void StickersBox::Inner::teleSetHiddenRemoved(uint64 setId, bool removed) {
++	for (const auto &row : _teleHidden) {
++		if (row->set->id == setId) {
++			row->removed = removed;
++		}
++	}
++}
++
++StickersSetsOrder StickersBox::Inner::teleArchived() const {
++	return collectSets([&](Row *row) {
++		return row->removed && _teleArchive.contains(row->set->id);
++	});
++}
++
+ StickersBox::Inner::~Inner() {
+ 	clear();
+ }
+diff --git a/Telegram/SourceFiles/boxes/stickers_box.h b/Telegram/SourceFiles/boxes/stickers_box.h
+index 3b011d7cb98191560cb0c8b3e040c19ce4ce47c6..ca856660fa2bb7ba144e8354f5b45b320293be7a 100644
+--- a/Telegram/SourceFiles/boxes/stickers_box.h
++++ b/Telegram/SourceFiles/boxes/stickers_box.h
+@@ -56,6 +56,10 @@ public:
+ 		QWidget*,
+ 		std::shared_ptr<ChatHelpers::Show> show,
+ 		const std::vector<StickerSetIdentifier> &emojiSets);
++	StickersBox(
++		QWidget*,
++		std::shared_ptr<ChatHelpers::Show> show,
++		Data::StickersType installed);
+ 	~StickersBox();
+ 
+ 	[[nodiscard]] Main::Session &session() const;
+diff --git a/Telegram/SourceFiles/chat_helpers/emoji_list_widget.cpp b/Telegram/SourceFiles/chat_helpers/emoji_list_widget.cpp
+index d23886ab1811ebe75a55edc02df6a06f16c815a2..87dd32f72054162d09f3a101f96c1b5232d0f6a8 100644
+--- a/Telegram/SourceFiles/chat_helpers/emoji_list_widget.cpp
++++ b/Telegram/SourceFiles/chat_helpers/emoji_list_widget.cpp
+@@ -60,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "window/window_session_controller.h"
+ #include "tele/tele_message_menu.h"
+ #include "tele/tele_pin_sets.h"
++#include "tele/tele_sticker_formats.h"
+ #include "tele/tele_view_tl.h"
+ #include "tele/scripting/tele_script_panels.h"
+ #include "styles/style_chat_helpers.h"
+@@ -658,12 +659,66 @@ void EmojiListWidget::setupSearch() {
+ 		});
+ 		_searchQueries.fire_copy(_nextSearchQuery);
+ 	}, session, type);
++	if (_mode == Mode::Full) {
++		_teleFormats = Tele::AddSearchFormatButton(
++			this,
++			_search.get(),
++			st(),
++			[=] {
++				_searchSelectedSetId = 0;
++				showSearchResults();
++			});
++	}
++}
++
++void EmojiListWidget::teleFilterSearch() {
++	const auto format = Tele::SearchFormat(_teleFormats);
++	if (format == Tele::StickerFormat::All) {
++		return;
++	}
++	const auto owner = &session().data();
++	_searchResults.erase(
++		ranges::remove_if(_searchResults, [&](const RecentOne &one) {
++			const auto id = std::get_if<RecentEmojiDocument>(&one.id.data);
++			return !id
++				|| !Tele::FormatMatches(
++					format,
++					Tele::DocumentFormat(owner->document(id->id)));
++		}),
++		end(_searchResults));
++	const auto shortcuts = _searchShortcutSets.size();
++	_searchShortcutSets.erase(
++		ranges::remove_if(_searchShortcutSets, [&](const CustomSet &set) {
++			return (set.id != _searchSelectedSetId)
++				&& !Tele::FormatMatches(
++					format,
++					Tele::SearchSetFormat(set.set));
++		}),
++		end(_searchShortcutSets));
++	if (_searchShortcutSets.size() != shortcuts) {
++		refreshSearchShortcutsScroll(width());
++	}
++	for (auto &set : _searchSets) {
++		set.list.erase(
++			ranges::remove_if(set.list, [&](const CustomOne &one) {
++				return !Tele::FormatMatches(
++					format,
++					Tele::DocumentFormat(one.document));
++			}),
++			end(set.list));
++	}
++	_searchSets.erase(
++		ranges::remove_if(_searchSets, [](const CustomSet &set) {
++			return set.list.empty();
++		}),
++		end(_searchSets));
+ }
+ 
+ void EmojiListWidget::setSearchRightReserved(int value) {
+ 	if (_search) {
+ 		_search->setRightReserved(value);
+ 	}
++	Tele::SetSearchFormatReserved(_teleFormats, value);
+ }
+ 
+ rpl::producer<std::vector<QString>> EmojiListWidget::searchQueries() const {
+@@ -706,6 +761,8 @@ void EmojiListWidget::applyNextSearchQuery() {
+ 			_searchShortcutsScroll = 0;
+ 			_searchShortcutsScrollMax = 0;
+ 			_searchShortcutsDragging = false;
++		} else {
++			teleFilterSearch();
+ 		}
+ 		resizeToWidth(width());
+ 		_recentShownCount = searching
+@@ -1151,6 +1208,7 @@ void EmojiListWidget::showSearchResults() {
+ 		}
+ 		fillCloudSearchResults();
+ 	}
++	teleFilterSearch();
+ 
+ 	resizeToWidth(width());
+ 	_recentShownCount = _searchResults.size();
+diff --git a/Telegram/SourceFiles/chat_helpers/emoji_list_widget.h b/Telegram/SourceFiles/chat_helpers/emoji_list_widget.h
+index fafbee9f2afec3a8584048543833ff3d3c1c3222..236fa29646d3f0282e760f0368dc3cffbdef9f5f 100644
+--- a/Telegram/SourceFiles/chat_helpers/emoji_list_widget.h
++++ b/Telegram/SourceFiles/chat_helpers/emoji_list_widget.h
+@@ -26,6 +26,10 @@ namespace Core {
+ struct RecentEmojiId;
+ } // namespace Core
+ 
++namespace Tele {
++class SearchFormatButton;
++} // namespace Tele
++
+ namespace Data {
+ class StickersSet;
+ } // namespace Data
+@@ -329,6 +333,7 @@ private:
+ 	void unloadCustomIn(const SectionInfo &info);
+ 
+ 	void setupSearch();
++	void teleFilterSearch();
+ 	[[nodiscard]] std::vector<EmojiPtr> collectPlainSearchResults();
+ 	void appendPremiumSearchResults();
+ 	void sendSearchRequest();
+@@ -503,6 +508,7 @@ private:
+ 	QMargins _mediaPreviewMargins;
+ 	bool _mediaPreviewPanelStyle = true;
+ 	std::unique_ptr<Ui::TabbedSearch> _search;
++	Tele::SearchFormatButton *_teleFormats = nullptr;
+ 	MTP::Sender _api;
+ 	const int _staticCount = 0;
+ 	StickersListFooter *_footer = nullptr;
+diff --git a/Telegram/SourceFiles/chat_helpers/stickers_list_widget.cpp b/Telegram/SourceFiles/chat_helpers/stickers_list_widget.cpp
+index e355ebe15fdff2c21fa41d31e7b1165bd623dbb3..85ed1913b2013f99c24769271511f35e63945f95 100644
+--- a/Telegram/SourceFiles/chat_helpers/stickers_list_widget.cpp
++++ b/Telegram/SourceFiles/chat_helpers/stickers_list_widget.cpp
+@@ -60,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "tele/tele_view_tl.h"
+ #include "tele/tele_past_limit.h"
+ #include "tele/tele_sticker_captions.h"
++#include "tele/tele_sticker_formats.h"
+ #include "tele/scripting/tele_script_panels.h"
+ #include "styles/style_chat_helpers.h"
+ #include "styles/style_window.h"
+@@ -821,6 +822,7 @@ void StickersListWidget::refreshSearchRows(
+ 			fillFoundStickersRow(foundStickersIt->second);
+ 		}
+ 	}
++	teleFilterSearch();
+ 	if (!cloudSets && _searchNextQuery.isEmpty()) {
+ 		showStickerSet(!_mySets.empty()
+ 			? _mySets[0].id
+@@ -2903,6 +2905,9 @@ base::unique_qptr<Ui::PopupMenu> FillStickerSetContextMenu(
+ 		},
+ 		&icons.menuSetCopyLink);
+ 	Tele::AddViewTlAction(menu.get(), show, set->identifier());
++	if (isEmoji && installed) {
++		Tele::AddEmojiSetsAction(menu.get(), show);
++	}
+ 	if (installed) {
+ 		menu->addSeparator();
+ 		menu->addAction(
+@@ -4057,6 +4062,51 @@ void StickersListWidget::setupSearch() {
+ 	_search = MakeSearch(this, st(), [=](std::vector<QString> &&query) {
+ 		applySearchQuery(std::move(query));
+ 	}, session, type);
++	if (_mode == Mode::Full) {
++		_teleFormats = Tele::AddSearchFormatButton(
++			this,
++			_search.get(),
++			st(),
++			[=] {
++				_searchSelectedSetId = 0;
++				showSearchResults();
++			});
++	}
++}
++
++void StickersListWidget::teleFilterSearch() {
++	const auto format = Tele::SearchFormat(_teleFormats);
++	if (format == Tele::StickerFormat::All) {
++		return;
++	}
++	const auto shortcuts = _searchShortcutSets.size();
++	_searchShortcutSets.erase(
++		ranges::remove_if(_searchShortcutSets, [&](const Set &set) {
++			return (set.id != _searchSelectedSetId)
++				&& (!set.set
++					|| !Tele::FormatMatches(
++						format,
++						Tele::SearchSetFormat(set.set)));
++		}),
++		end(_searchShortcutSets));
++	if (_searchShortcutSets.size() != shortcuts) {
++		refreshSearchShortcutsScroll(width());
++	}
++	for (auto &set : _searchSets) {
++		set.stickers.erase(
++			ranges::remove_if(set.stickers, [&](const Sticker &sticker) {
++				return !Tele::FormatMatches(
++					format,
++					Tele::DocumentFormat(sticker.document));
++			}),
++			end(set.stickers));
++		set.count = int(set.stickers.size());
++	}
++	_searchSets.erase(
++		ranges::remove_if(_searchSets, [](const Set &set) {
++			return set.stickers.empty();
++		}),
++		end(_searchSets));
+ }
+ 
+ void StickersListWidget::applySearchQuery(std::vector<QString> &&query) {
+diff --git a/Telegram/SourceFiles/chat_helpers/stickers_list_widget.h b/Telegram/SourceFiles/chat_helpers/stickers_list_widget.h
+index dd9d6d70c5e5cf0612347a28f86a9dd7d6beb1c9..86214fd38c607e3422b0d99954f45a9e3d87d5eb 100644
+--- a/Telegram/SourceFiles/chat_helpers/stickers_list_widget.h
++++ b/Telegram/SourceFiles/chat_helpers/stickers_list_widget.h
+@@ -45,6 +45,10 @@ class DocumentMedia;
+ class StickersSet;
+ } // namespace Data
+ 
++namespace Tele {
++class SearchFormatButton;
++} // namespace Tele
++
+ namespace Media::Clip {
+ class ReaderPointer;
+ enum class Notification;
+@@ -275,6 +279,7 @@ private:
+ 		bool skipPremium);
+ 
+ 	void setupSearch();
++	void teleFilterSearch();
+ 	void preloadMoreOfficial();
+ 	QSize boundingBoxSize() const;
+ 
+@@ -476,6 +481,7 @@ private:
+ 	const ComposeFeatures _features;
+ 	Ui::RoundRect _overBg;
+ 	std::unique_ptr<Ui::TabbedSearch> _search;
++	Tele::SearchFormatButton *_teleFormats = nullptr;
+ 	MTP::Sender _api;
+ 	std::unique_ptr<LocalStickersManager> _localSetsManager;
+ 	ChannelData *_megagroupSet = nullptr;
+diff --git a/Telegram/SourceFiles/settings/sections/settings_chat.cpp b/Telegram/SourceFiles/settings/sections/settings_chat.cpp
+index 0f48c2eaa80a66cf280abd50fd6d137e9d8dd7be..d681f1cd421305404f8a5a44ace4cb0d9102b403 100644
+--- a/Telegram/SourceFiles/settings/sections/settings_chat.cpp
++++ b/Telegram/SourceFiles/settings/sections/settings_chat.cpp
+@@ -81,6 +81,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "main/main_session.h"
+ #include "main/main_session_settings.h"
+ #include "mainwidget.h"
++#include "tele/tele_sticker_formats.h"
+ #include "styles/style_chat_helpers.h" // stickersRemove
+ #include "styles/style_settings.h"
+ #include "styles/style_layers.h"
+@@ -1558,6 +1559,7 @@ void SetupStickersEmoji(
+ 			{ .rippleShape = true },
+ 		} });
+ 	}
++	Tele::AddEmojiSetsButton(container, controller);
+ 
+ 	const auto emojiSetsButton = AddButtonWithIcon(
+ 		container,
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 92414a250fc754fa8d5052bda7db7773ef63b42f..ac63eb866d3e21f622741fa16ee7861ecb3515a2 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -2878,6 +2878,10 @@ void FillChats(SectionBuilder &builder) {
+ 		builder,
+ 		::Tele::kOptionMediaPastLimit,
+ 		{ u"favorites"_q, u"faved"_q });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionStickerFormats,
++		{ u"static"_q, u"animated"_q, u"video"_q, u"archive"_q, u"sort"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Reactions"_q);
+ 	AddReactionsMenu(builder);
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 9657f221a0a9d3a328587cec7710f68d66783c84..ca087a59d42c129d8247de02759938ac69ca2f21 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -81,6 +81,7 @@ const char kOptionEmojiPanelClick[] = "tele-emoji-panel-click";
+ const char kOptionAttachMenuClick[] = "tele-attach-menu-click";
+ const char kOptionPinSets[] = "tele-pin-sets";
+ const char kOptionMediaPastLimit[] = "tele-media-past-limit";
++const char kOptionStickerFormats[] = "tele-sticker-formats";
+ const char kOptionShowGiftIds[] = "tele-show-gift-ids";
+ const char kOptionShowRegularGiftIds[] = "tele-show-regular-gift-ids";
+ const char kOptionGiftQuantity[] = "tele-gift-quantity";
+@@ -735,6 +736,12 @@ base::options::toggle MediaPastLimitOption({
+ 	.description = "Extra ones stay on this device.",
+ });
+ 
++base::options::toggle StickerFormatsOption({
++	.id = kOptionStickerFormats,
++	.name = "Filter stickers and emoji by format",
++	.description = "In your sets and the panel's search.",
++});
++
+ base::options::toggle ShowGiftIdsOption({
+ 	.id = kOptionShowGiftIds,
+ 	.name = "IDs on collectible gifts",
+@@ -2467,6 +2474,20 @@ rpl::producer<> MediaPastLimitChanges() {
+ 	return MediaPastLimitOption.changes();
+ }
+ 
++bool StickerFormats() {
++	return StickerFormatsOption.value();
++}
++
++rpl::producer<bool> StickerFormatsValue() {
++	return rpl::single(
++		rpl::empty
++	) | rpl::then(
++		StickerFormatsOption.changes()
++	) | rpl::map([] {
++		return StickerFormatsOption.value();
++	});
++}
++
+ bool ShowGiftIds() {
+ 	return ShowGiftIdsOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index f66abf32365dbab64a0a792dcf21824cc19859b3..a6938ec6aff723ccc2da54a1c36da63618cf7f24 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -76,6 +76,7 @@ extern const char kOptionEmojiPanelClick[];
+ extern const char kOptionAttachMenuClick[];
+ extern const char kOptionPinSets[];
+ extern const char kOptionMediaPastLimit[];
++extern const char kOptionStickerFormats[];
+ extern const char kOptionShowGiftIds[];
+ extern const char kOptionShowRegularGiftIds[];
+ extern const char kOptionGiftQuantity[];
+@@ -375,6 +376,8 @@ void SetMoneyHideBalances(bool hidden);
+ [[nodiscard]] rpl::producer<> PinSetsChanges();
+ [[nodiscard]] bool MediaPastLimit();
+ [[nodiscard]] rpl::producer<> MediaPastLimitChanges();
++[[nodiscard]] bool StickerFormats();
++[[nodiscard]] rpl::producer<bool> StickerFormatsValue();
+ [[nodiscard]] bool ShowGiftIds();
+ [[nodiscard]] bool ShowRegularGiftIds();
+ [[nodiscard]] bool GiftQuantity();
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index aa6d2a7efc3d6a09d97f51b294b9470401e6d4bc..e578c2bf4a42cfd87ba2f9959ffef8585b1cfeec 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -169,6 +169,7 @@ struct Spec {
+ 		Toggle(kOptionAttachMenuClick),
+ 		Toggle(kOptionPinSets),
+ 		Toggle(kOptionMediaPastLimit),
++		Toggle(kOptionStickerFormats),
+ 		Toggle(kOptionShowGiftIds),
+ 		Toggle(kOptionShowRegularGiftIds),
+ 		Toggle(kOptionGiftQuantity),
+diff --git a/Telegram/SourceFiles/tele/tele_sticker_formats.cpp b/Telegram/SourceFiles/tele/tele_sticker_formats.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..c95459a4e8d1bc8917f42518364fd0a39d1ba5ec
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_sticker_formats.cpp
+@@ -0,0 +1,641 @@
++#include "tele/tele_sticker_formats.h"
++
++#include "apiwrap.h"
++#include "base/weak_qptr.h"
++#include "boxes/stickers_box.h"
++#include "chat_helpers/compose/compose_show.h"
++#include "data/data_document.h"
++#include "data/data_session.h"
++#include "data/stickers/data_stickers.h"
++#include "data/stickers/data_stickers_set.h"
++#include "main/main_session.h"
++#include "settings/settings_common.h"
++#include "storage/storage_account.h"
++#include "tele/tele_lowercase.h"
++#include "tele/tele_options.h"
++#include "ui/boxes/confirm_box.h"
++#include "ui/controls/tabbed_search.h"
++#include "ui/widgets/buttons.h"
++#include "ui/widgets/popup_menu.h"
++#include "ui/wrap/slide_wrap.h"
++#include "ui/wrap/vertical_layout.h"
++#include "ui/painter.h"
++#include "ui/ui_utility.h"
++#include "window/window_session_controller.h"
++#include "styles/style_boxes.h"
++#include "styles/style_chat_helpers.h"
++#include "styles/style_layers.h"
++#include "styles/style_media_player.h"
++#include "styles/style_menu_icons.h"
++#include "styles/style_settings.h"
++#include "styles/style_widgets.h"
++
++namespace Tele {
++namespace {
++
++using SetFlag = Data::StickersSetFlag;
++
++struct FormatName {
++	StickerFormat format = StickerFormat::All;
++	const char *name = nullptr;
++};
++
++constexpr auto kSetFormats = std::array{
++	FormatName{ StickerFormat::All, "All" },
++	FormatName{ StickerFormat::Static, "Static" },
++	FormatName{ StickerFormat::Animated, "Animated" },
++	FormatName{ StickerFormat::Video, "Video" },
++	FormatName{ StickerFormat::Mixed, "Mixed" },
++};
++
++constexpr auto kSearchFormats = std::array{
++	FormatName{ StickerFormat::All, "All" },
++	FormatName{ StickerFormat::Static, "Static" },
++	FormatName{ StickerFormat::Animated, "Animated" },
++	FormatName{ StickerFormat::Video, "Video" },
++};
++
++[[nodiscard]] QString Name(StickerFormat format) {
++	for (const auto &entry : kSetFormats) {
++		if (entry.format == format) {
++			return Lower(QString::fromLatin1(entry.name));
++		}
++	}
++	return QString();
++}
++
++[[nodiscard]] QString SortName(StickerSetSort sort, bool emoji) {
++	switch (sort) {
++	case StickerSetSort::Upstream: return Lower(u"Upstream order"_q);
++	case StickerSetSort::Format: return Lower(u"Format"_q);
++	case StickerSetSort::Name: return Lower(u"Name"_q);
++	case StickerSetSort::Count: return emoji
++		? Lower(u"Emoji count"_q)
++		: Lower(u"Sticker count"_q);
++	}
++	return QString();
++}
++
++template <typename List>
++[[nodiscard]] StickerFormat FormatOf(const List &list) {
++	auto result = StickerFormat::Unknown;
++	for (const auto document : list) {
++		const auto format = DocumentFormat(document);
++		if (format == StickerFormat::Unknown) {
++			continue;
++		} else if (result == StickerFormat::Unknown) {
++			result = format;
++		} else if (result != format) {
++			return StickerFormat::Mixed;
++		}
++	}
++	return result;
++}
++
++[[nodiscard]] int Rank(StickerFormat format) {
++	switch (format) {
++	case StickerFormat::Static: return 0;
++	case StickerFormat::Animated: return 1;
++	case StickerFormat::Video: return 2;
++	case StickerFormat::Mixed: return 3;
++	case StickerFormat::All:
++	case StickerFormat::Unknown: break;
++	}
++	return 4;
++}
++
++[[nodiscard]] int CompareNames(
++		not_null<Data::StickersSet*> a,
++		not_null<Data::StickersSet*> b) {
++	return QString::localeAwareCompare(a->title.toLower(), b->title.toLower());
++}
++
++void PopupBelow(
++		base::unique_qptr<Ui::PopupMenu> &menu,
++		not_null<QWidget*> button) {
++	menu->popup(button->mapToGlobal(QPoint(0, button->height())));
++}
++
++class StickerSetsBar final : public Ui::RpWidget {
++public:
++	StickerSetsBar(QWidget *parent, StickerSetsBarDescriptor &&descriptor);
++
++protected:
++	void paintEvent(QPaintEvent *e) override;
++
++private:
++	void refreshLabels();
++	void layout(int outer);
++	void showFormatMenu();
++	void showSortMenu();
++	void confirmRemove();
++
++	const std::shared_ptr<ChatHelpers::Show> _show;
++	const bool _emoji = false;
++	const Fn<void(StickerSetView)> _changed;
++	const Fn<int()> _shownCount;
++	const Fn<void()> _removeShown;
++	const not_null<Ui::LinkButton*> _format;
++	const not_null<Ui::LinkButton*> _sort;
++	const not_null<Ui::LinkButton*> _remove;
++	base::unique_qptr<Ui::PopupMenu> _menu;
++	StickerSetView _view;
++
++};
++
++StickerSetsBar::StickerSetsBar(
++	QWidget *parent,
++	StickerSetsBarDescriptor &&descriptor)
++: RpWidget(parent)
++, _show(std::move(descriptor.show))
++, _emoji(descriptor.emoji)
++, _changed(std::move(descriptor.changed))
++, _shownCount(std::move(descriptor.shownCount))
++, _removeShown(std::move(descriptor.removeShown))
++, _format(Ui::CreateChild<Ui::LinkButton>(this, QString()))
++, _sort(Ui::CreateChild<Ui::LinkButton>(this, QString()))
++, _remove(Ui::CreateChild<Ui::LinkButton>(
++	this,
++	Lower(u"Remove all shown"_q))) {
++	_format->setClickedCallback([=] { showFormatMenu(); });
++	_sort->setClickedCallback([=] { showSortMenu(); });
++	_remove->setClickedCallback([=] { confirmRemove(); });
++	refreshLabels();
++
++	const auto container = descriptor.parent;
++	container->widthValue(
++	) | rpl::on_next([=](int width) {
++		layout(width);
++	}, lifetime());
++	show();
++}
++
++void StickerSetsBar::refreshLabels() {
++	_format->setText(Lower(u"Format: "_q) + Name(_view.filter));
++	_sort->setText(Lower(u"Sort: "_q) + SortName(_view.sort, _emoji));
++	_remove->setVisible(_view.filter != StickerFormat::All);
++	layout(width());
++}
++
++void StickerSetsBar::layout(int outer) {
++	const auto padding = st::boxRowPadding;
++	const auto skip = st::boxLittleSkip;
++	resize(outer, _format->height() + 2 * skip + st::lineWidth);
++	_format->moveToLeft(padding.left(), skip, outer);
++	_sort->moveToLeft(
++		padding.left() + _format->width() + 2 * skip,
++		skip,
++		outer);
++	_remove->moveToRight(padding.right(), skip, outer);
++}
++
++void StickerSetsBar::paintEvent(QPaintEvent *e) {
++	auto p = QPainter(this);
++	p.fillRect(
++		QRect(0, height() - st::lineWidth, width(), st::lineWidth),
++		st::shadowFg);
++}
++
++void StickerSetsBar::showFormatMenu() {
++	_menu = base::make_unique_q<Ui::PopupMenu>(
++		_format.get(),
++		st::popupMenuWithIcons);
++	for (const auto &entry : kSetFormats) {
++		const auto format = entry.format;
++		_menu->addAction(Name(format), crl::guard(this, [=] {
++			if (_view.filter != format) {
++				_view.filter = format;
++				refreshLabels();
++				_changed(_view);
++			}
++		}), (_view.filter == format) ? &st::mediaPlayerMenuCheck : nullptr);
++	}
++	PopupBelow(_menu, _format);
++}
++
++void StickerSetsBar::showSortMenu() {
++	_menu = base::make_unique_q<Ui::PopupMenu>(
++		_sort.get(),
++		st::popupMenuWithIcons);
++	for (const auto sort : {
++			StickerSetSort::Upstream,
++			StickerSetSort::Format,
++			StickerSetSort::Name,
++			StickerSetSort::Count }) {
++		_menu->addAction(SortName(sort, _emoji), crl::guard(this, [=] {
++			if (_view.sort != sort) {
++				_view.sort = sort;
++				refreshLabels();
++				_changed(_view);
++			}
++		}), (_view.sort == sort) ? &st::mediaPlayerMenuCheck : nullptr);
++	}
++	PopupBelow(_menu, _sort);
++}
++
++void StickerSetsBar::confirmRemove() {
++	const auto count = _shownCount();
++	if (!count) {
++		_show->showToast(Lower(u"No sets to remove."_q));
++		return;
++	}
++	const auto sets = QString::number(count)
++		+ ((count == 1) ? u" set"_q : u" sets"_q);
++	const auto text = _emoji
++		? (u"Remove "_q + sets + '?')
++		: (u"Archive "_q
++			+ sets
++			+ u"? You can add them back from Archived."_q);
++	const auto weak = base::make_weak(this);
++	_show->showBox(Ui::MakeConfirmBox({
++		.text = Lower(text),
++		.confirmed = [=](Fn<void()> close) {
++			close();
++			if (weak) {
++				_removeShown();
++			}
++		},
++		.confirmText = Lower(_emoji ? u"Remove"_q : u"Archive"_q),
++		.confirmStyle = _emoji ? &st::attentionBoxButton : nullptr,
++	}));
++}
++
++[[nodiscard]] int &SaveGeneration(
++		not_null<Main::Session*> session,
++		Data::StickersType type) {
++	static auto generations = base::flat_map<
++		std::pair<Main::Session*, Data::StickersType>,
++		int>();
++	const auto key = std::make_pair(session.get(), type);
++	if (!generations.contains(key)) {
++		session->lifetime().add([=] {
++			generations.remove(key);
++		});
++	}
++	return generations[key];
++}
++
++struct ArchiveState {
++	std::vector<MTPInputStickerSet> inputs;
++	Fn<void()> done;
++	int index = 0;
++	bool failed = false;
++	bool stickers = false;
++	bool masks = false;
++};
++
++void SendArchive(
++		not_null<Main::Session*> session,
++		std::shared_ptr<ArchiveState> state) {
++	if (state->index >= int(state->inputs.size())) {
++		if (const auto done = base::take(state->done)) {
++			done();
++		}
++		if (state->failed) {
++			auto &stickers = session->data().stickers();
++			if (state->stickers) {
++				stickers.setLastUpdate(0);
++				session->api().updateStickers();
++			}
++			if (state->masks) {
++				stickers.setLastMasksUpdate(0);
++				session->api().updateMasks();
++			}
++		}
++		return;
++	}
++	const auto input = state->inputs[state->index++];
++	session->api().request(MTPmessages_InstallStickerSet(
++		input,
++		MTP_boolTrue()
++	)).done([=] {
++		SendArchive(session, state);
++	}).fail([=] {
++		state->failed = true;
++		SendArchive(session, state);
++	}).send();
++}
++
++} // namespace
++
++class SearchFormatButton final : public Ui::AbstractButton {
++public:
++	SearchFormatButton(
++		QWidget *parent,
++		not_null<Ui::RpWidget*> owner,
++		not_null<Ui::TabbedSearch*> search,
++		const style::EmojiPan &st,
++		Fn<void()> changed);
++
++	[[nodiscard]] StickerFormat format() const {
++		return _format;
++	}
++	void setReserved(int reserved);
++
++protected:
++	void paintEvent(QPaintEvent *e) override;
++	void onStateChanged(State was, StateChangeSource source) override;
++
++private:
++	void setShown(bool shown);
++	void applyReserved();
++	void updatePosition();
++	void showMenu();
++	[[nodiscard]] int skip() const;
++
++	const not_null<Ui::RpWidget*> _parent;
++	const not_null<Ui::TabbedSearch*> _search;
++	const style::EmojiPan &_st;
++	const Fn<void()> _changed;
++	base::unique_qptr<Ui::PopupMenu> _menu;
++	StickerFormat _format = StickerFormat::All;
++	int _reserved = 0;
++	bool _shown = false;
++
++};
++
++SearchFormatButton::SearchFormatButton(
++	QWidget *parent,
++	not_null<Ui::RpWidget*> owner,
++	not_null<Ui::TabbedSearch*> search,
++	const style::EmojiPan &st,
++	Fn<void()> changed)
++: AbstractButton(parent)
++, _parent(owner)
++, _search(search)
++, _st(st)
++, _changed(std::move(changed)) {
++	resize(_st.search.height, _st.search.height);
++	setCursor(style::cur_pointer);
++	hide();
++	setClickedCallback([=] { showMenu(); });
++
++	rpl::combine(
++		_search->queryValue(),
++		StickerFormatsValue()
++	) | rpl::on_next([=](const std::vector<QString> &query, bool on) {
++		const auto searching = ranges::any_of(query, [](const QString &q) {
++			return !q.trimmed().isEmpty();
++		});
++		const auto shown = on && searching;
++		if (!shown && _format != StickerFormat::All) {
++			_format = StickerFormat::All;
++			if (searching) {
++				_changed();
++			}
++		}
++		setShown(shown);
++	}, lifetime());
++
++	_parent->widthValue(
++	) | rpl::on_next([=](int) {
++		updatePosition();
++	}, lifetime());
++}
++
++int SearchFormatButton::skip() const {
++	return _st.search.groupSkip;
++}
++
++void SearchFormatButton::setReserved(int reserved) {
++	_reserved = reserved;
++	applyReserved();
++}
++
++void SearchFormatButton::setShown(bool shown) {
++	if (_shown == shown) {
++		return;
++	}
++	_shown = shown;
++	if (!shown) {
++		_menu = nullptr;
++	}
++	setVisible(shown);
++	applyReserved();
++}
++
++void SearchFormatButton::applyReserved() {
++	_search->setRightReserved(_reserved
++		+ (_shown ? (width() + skip()) : 0));
++	updatePosition();
++}
++
++void SearchFormatButton::updatePosition() {
++	move(
++		_parent->width() - _st.searchMargin.right() - _reserved - width(),
++		_st.searchMargin.top());
++	raise();
++}
++
++void SearchFormatButton::paintEvent(QPaintEvent *e) {
++	auto p = QPainter(this);
++	auto hq = PainterHighQualityEnabler(p);
++	const auto active = (_format != StickerFormat::All);
++	p.setPen(Qt::NoPen);
++	p.setBrush((active || isOver()) ? _st.search.bgActive : _st.search.bg);
++	const auto radius = height() / 2.;
++	p.drawRoundedRect(rect(), radius, radius);
++	st::menuIconTagFilter.paintInCenter(
++		p,
++		rect(),
++		(active ? _st.search.fgActive : _st.search.fg)->c);
++}
++
++void SearchFormatButton::onStateChanged(
++		State was,
++		StateChangeSource source) {
++	update();
++}
++
++void SearchFormatButton::showMenu() {
++	_menu = base::make_unique_q<Ui::PopupMenu>(
++		this,
++		st::popupMenuWithIcons);
++	for (const auto &entry : kSearchFormats) {
++		const auto format = entry.format;
++		_menu->addAction(Name(format), crl::guard(this, [=] {
++			if (_format != format) {
++				_format = format;
++				update();
++				_changed();
++			}
++		}), (_format == format) ? &st::mediaPlayerMenuCheck : nullptr);
++	}
++	PopupBelow(_menu, this);
++}
++
++StickerFormat DocumentFormat(not_null<DocumentData*> document) {
++	const auto sticker = document->sticker();
++	if (!sticker) {
++		return StickerFormat::Unknown;
++	}
++	switch (sticker->type) {
++	case StickerType::Webp: return StickerFormat::Static;
++	case StickerType::Tgs: return StickerFormat::Animated;
++	case StickerType::Webm: return StickerFormat::Video;
++	}
++	return StickerFormat::Unknown;
++}
++
++StickerFormat SetFormat(not_null<Data::StickersSet*> set) {
++	if ((set->flags & SetFlag::NotLoaded) || set->stickers.isEmpty()) {
++		return StickerFormat::Unknown;
++	}
++	return FormatOf(set->stickers);
++}
++
++StickerFormat SearchSetFormat(not_null<Data::StickersSet*> set) {
++	const auto result = SetFormat(set);
++	return (result != StickerFormat::Unknown)
++		? result
++		: FormatOf(set->covers);
++}
++
++bool FormatMatches(StickerFormat filter, StickerFormat format) {
++	return (filter == StickerFormat::All) || (filter == format);
++}
++
++bool SetSortedBefore(
++		StickerSetSort sort,
++		not_null<Data::StickersSet*> a,
++		int aCount,
++		not_null<Data::StickersSet*> b,
++		int bCount) {
++	switch (sort) {
++	case StickerSetSort::Upstream: return false;
++	case StickerSetSort::Name: return CompareNames(a, b) < 0;
++	case StickerSetSort::Format: {
++		const auto aRank = Rank(SetFormat(a));
++		const auto bRank = Rank(SetFormat(b));
++		return (aRank != bRank)
++			? (aRank < bRank)
++			: (CompareNames(a, b) < 0);
++	}
++	case StickerSetSort::Count:
++		return (aCount != bCount)
++			? (aCount > bCount)
++			: (CompareNames(a, b) < 0);
++	}
++	return false;
++}
++
++Ui::RpWidget *CreateStickerSetsBar(StickerSetsBarDescriptor &&descriptor) {
++	if (!StickerFormats()) {
++		return nullptr;
++	}
++	return Ui::CreateChild<StickerSetsBar>(
++		descriptor.parent.get(),
++		std::move(descriptor));
++}
++
++void ArchiveStickerSets(
++		not_null<Main::Session*> session,
++		Data::StickersType saveType,
++		const QList<uint64> &ids,
++		Fn<void()> done) {
++	auto &stickers = session->data().stickers();
++	const auto &sets = stickers.sets();
++	auto state = std::make_shared<ArchiveState>();
++	const auto generation = ++SaveGeneration(session, saveType);
++	state->done = [=] {
++		if (SaveGeneration(session, saveType) == generation) {
++			done();
++		}
++	};
++	for (const auto id : ids) {
++		const auto i = sets.find(id);
++		if (i == end(sets)) {
++			continue;
++		}
++		const auto set = i->second.get();
++		const auto type = set->type();
++		if (type == Data::StickersType::Emoji
++			|| (set->flags & SetFlag::Archived)) {
++			continue;
++		}
++		const auto masks = (type == Data::StickersType::Masks);
++		auto &order = masks
++			? stickers.maskSetsOrderRef()
++			: stickers.setsOrderRef();
++		order.removeAll(id);
++		auto &archived = masks
++			? stickers.archivedMaskSetsOrderRef()
++			: stickers.archivedSetsOrderRef();
++		if (!archived.contains(id)) {
++			archived.push_front(id);
++		}
++		set->flags |= SetFlag::Archived;
++		state->inputs.push_back(set->mtpInput());
++		(masks ? state->masks : state->stickers) = true;
++	}
++	if (state->stickers) {
++		session->local().writeInstalledStickers();
++		session->local().writeArchivedStickers();
++		stickers.notifyUpdated(Data::StickersType::Stickers);
++	}
++	if (state->masks) {
++		session->local().writeInstalledMasks();
++		session->local().writeArchivedMasks();
++		stickers.notifyUpdated(Data::StickersType::Masks);
++	}
++	SendArchive(session, state);
++}
++
++SearchFormatButton *AddSearchFormatButton(
++		not_null<Ui::RpWidget*> parent,
++		not_null<Ui::TabbedSearch*> search,
++		const style::EmojiPan &st,
++		Fn<void()> changed) {
++	return Ui::CreateChild<SearchFormatButton>(
++		parent.get(),
++		parent,
++		search,
++		st,
++		std::move(changed));
++}
++
++void SetSearchFormatReserved(SearchFormatButton *button, int reserved) {
++	if (button) {
++		button->setReserved(reserved);
++	}
++}
++
++StickerFormat SearchFormat(const SearchFormatButton *button) {
++	return (button && StickerFormats())
++		? button->format()
++		: StickerFormat::All;
++}
++
++void AddEmojiSetsButton(
++		not_null<Ui::VerticalLayout*> container,
++		not_null<Window::SessionController*> controller) {
++	const auto wrap = container->add(
++		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
++			container,
++			object_ptr<Ui::VerticalLayout>(container)));
++	const auto button = Settings::AddButtonWithIcon(
++		wrap->entity(),
++		rpl::single(Lower(u"Emoji sets you have"_q)),
++		st::settingsButton,
++		{ &st::menuIconEmoji });
++	button->addClickHandler([=] {
++		controller->show(Box<StickersBox>(
++			controller->uiShow(),
++			Data::StickersType::Emoji));
++	});
++	wrap->toggleOn(StickerFormatsValue());
++	wrap->finishAnimating();
++}
++
++void AddEmojiSetsAction(
++		not_null<Ui::PopupMenu*> menu,
++		std::shared_ptr<ChatHelpers::Show> show) {
++	if (!StickerFormats()) {
++		return;
++	}
++	menu->addAction(Lower(u"Manage emoji sets"_q), [=] {
++		show->showBox(Box<StickersBox>(show, Data::StickersType::Emoji));
++	}, &st::menuIconEmoji);
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_sticker_formats.h b/Telegram/SourceFiles/tele/tele_sticker_formats.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..1330e0f52253b7e4272bf699e4f12e24f7a9360d
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_sticker_formats.h
+@@ -0,0 +1,111 @@
++#pragma once
++
++class DocumentData;
++
++namespace Data {
++class StickersSet;
++enum class StickersType : uchar;
++} // namespace Data
++
++namespace Main {
++class Session;
++} // namespace Main
++
++namespace Ui {
++class RpWidget;
++class TabbedSearch;
++class PopupMenu;
++class VerticalLayout;
++} // namespace Ui
++
++namespace style {
++struct EmojiPan;
++} // namespace style
++
++namespace ChatHelpers {
++class Show;
++} // namespace ChatHelpers
++
++namespace Window {
++class SessionController;
++} // namespace Window
++
++namespace Tele {
++
++enum class StickerFormat : uchar {
++	All,
++	Static,
++	Animated,
++	Video,
++	Mixed,
++	Unknown,
++};
++
++enum class StickerSetSort : uchar {
++	Upstream,
++	Format,
++	Name,
++	Count,
++};
++
++struct StickerSetView {
++	StickerFormat filter = StickerFormat::All;
++	StickerSetSort sort = StickerSetSort::Upstream;
++
++	[[nodiscard]] bool active() const {
++		return (filter != StickerFormat::All)
++			|| (sort != StickerSetSort::Upstream);
++	}
++
++	friend inline bool operator==(
++		const StickerSetView &,
++		const StickerSetView &) = default;
++};
++
++[[nodiscard]] StickerFormat DocumentFormat(
++	not_null<DocumentData*> document);
++[[nodiscard]] StickerFormat SetFormat(not_null<Data::StickersSet*> set);
++[[nodiscard]] StickerFormat SearchSetFormat(
++	not_null<Data::StickersSet*> set);
++[[nodiscard]] bool FormatMatches(StickerFormat filter, StickerFormat format);
++[[nodiscard]] bool SetSortedBefore(
++	StickerSetSort sort,
++	not_null<Data::StickersSet*> a,
++	int aCount,
++	not_null<Data::StickersSet*> b,
++	int bCount);
++
++struct StickerSetsBarDescriptor {
++	not_null<Ui::RpWidget*> parent;
++	std::shared_ptr<ChatHelpers::Show> show;
++	bool emoji = false;
++	Fn<void(StickerSetView)> changed;
++	Fn<int()> shownCount;
++	Fn<void()> removeShown;
++};
++[[nodiscard]] Ui::RpWidget *CreateStickerSetsBar(
++	StickerSetsBarDescriptor &&descriptor);
++
++void ArchiveStickerSets(
++	not_null<Main::Session*> session,
++	Data::StickersType type,
++	const QList<uint64> &ids,
++	Fn<void()> done);
++
++class SearchFormatButton;
++[[nodiscard]] SearchFormatButton *AddSearchFormatButton(
++	not_null<Ui::RpWidget*> parent,
++	not_null<Ui::TabbedSearch*> search,
++	const style::EmojiPan &st,
++	Fn<void()> changed);
++void SetSearchFormatReserved(SearchFormatButton *button, int reserved);
++[[nodiscard]] StickerFormat SearchFormat(const SearchFormatButton *button);
++
++void AddEmojiSetsButton(
++	not_null<Ui::VerticalLayout*> container,
++	not_null<Window::SessionController*> controller);
++void AddEmojiSetsAction(
++	not_null<Ui::PopupMenu*> menu,
++	std::shared_ptr<ChatHelpers::Show> show);
++
++} // namespace Tele

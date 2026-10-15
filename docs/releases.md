@@ -2,7 +2,7 @@
 
 every tele patch, grouped by the release that brought it, newest first. [features](features.md) has the same rows grouped by settings page. release notes and the in-app what's new are made from these rows, so their format is strict: see [the patch row](development.md#the-patch-row).
 
-all 359 patches, newest release first.
+all 361 patches, newest release first.
 
 ### [tele 21](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.21)
 
@@ -26,6 +26,8 @@ all 359 patches, newest release first.
 | [349](../patches/tdesktop/0349-fix-confirm-stickers-sent-from-sticker-set-boxes.patch) | stickers sent from a sticker set's box also wait for a second click | with 130 |
 | [350](../patches/tdesktop/0350-feat-blurred-profile-photo-background-out-of-beta.patch) | the blurred photo background of profiles is out of beta | with 309 |
 | [351](../patches/tdesktop/0351-feat-web-platform-workers-files-sound-webviews-stori.patch) | scripts get the web platform (urls, abort signals, structured clone, intl, websockets, workers, full webcrypto, compression and images), a file area of their own, sounds, webview panels, npm packages, stories, gifts and stars, tele's own data, video chats, the media viewer, banners, selection, compose state, search providers, sticker and gif panels, mini apps, inline answers and buttons under messages. scripts installed from a link check for updates, gettele.app has a catalog of scripts, and new scripts show up in the scripts manager without a restart | with 312 |
+| [352](../patches/tdesktop/0352-feat-recover-deleted-channel-posts-from-forwards.patch) | open a deleted channel post from a forward of it and tele shows it again: it rebuilds the post from the forward in its place in the channel, marked like other kept deleted messages, and the time's tooltip says which forward it came from | with 19 |
+| [353](../patches/tdesktop/0353-feat-filter-stickers-and-emoji-by-format.patch) | filter your sticker and emoji sets by format (static, animated, video or mixed), sort them, and archive or remove every shown set at once. the panel's search filters by format too, and custom emoji sets get their own list under stickers you have | tele → chats, off |
 | [1008](../patches/Telegram/lib_ui/0008-feat-glide-at-the-screen-refresh-rate.patch) | the part of smoother glides that lives in the ui library: a glide ticks at the monitor's refresh rate while other animations keep their pace | with 277 |
 
 ### [tele 20](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.20)
