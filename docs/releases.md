@@ -2,7 +2,7 @@
 
 every tele patch, grouped by the release that brought it, newest first. [features](features.md) has the same rows grouped by settings page. release notes and the in-app what's new are made from these rows, so their format is strict: see [the patch row](development.md#the-patch-row).
 
-all 332 patches, newest release first.
+all 333 patches, newest release first.
 
 ### [tele 22](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.22)
 
@@ -10,6 +10,7 @@ all 332 patches, newest release first.
 |---|---|---|
 | [323](../patches/tdesktop/0323-fix-glides-in-boxes-no-longer-blank-the-chats-under-.patch) | gliding in a box, settings or another panel no longer turns the chat list and the chat behind it black | with 308 |
 | [324](../patches/tdesktop/0324-fix-updates-on-macos-keep-the-dock-icon.patch) | on macos, an update replaces what's inside tele.app instead of the whole app, so tele stays on its dock icon instead of showing up as a second one. the update to this version still makes one duplicate | with 6 |
+| [325](../patches/tdesktop/0325-fix-listing-accounts-from-a-script-no-longer-crashes.patch) | tele no longer crashes at startup with two or more accounts when a script lists your accounts as soon as it starts | with 302 |
 
 ### [tele 21](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.21)
 

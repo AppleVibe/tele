@@ -19707,6 +19707,8 @@ lists the logged-in accounts in tele's order (the order of the account switcher)
 - **grant:** `accounts`.
 - **returns:** `AccountInfo[]`; the script's own account is always there, marked with `self: true`.
 - **throws:** `TeleError` `not-granted` without the grant.
+- **notes:**
+  - while tele is starting, the list has only the accounts loaded so far, none of them `active`. call it again later, for example from a timer, for the full list.
 
 Example:
 
