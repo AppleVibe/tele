@@ -1,0 +1,460 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Fri, 16 Oct 2026 12:46:49 +0300
+Subject: [PATCH] fix: gifts in money look like gift cards instead of a blurry
+ avatar
+
+---
+ Telegram/CMakeLists.txt                       |   2 +
+ Telegram/SourceFiles/tele/tele_gift_tile.cpp  | 220 ++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_gift_tile.h    |  59 +++++
+ .../wallet/wallet_collectible_media.cpp       |  19 +-
+ .../wallet/wallet_collectibles.cpp            |  15 +-
+ .../SourceFiles/wallet/wallet_content.cpp     |  12 +
+ 6 files changed, 314 insertions(+), 13 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_gift_tile.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_gift_tile.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 77093042bfe737c607c59fc9999c894cdf557778..37d913aed472aeb9ee7fc99d89302c2894154997 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2652,6 +2652,8 @@ PRIVATE
+     tele/tele_gift_studio_video.h
+     tele/tele_gift_studio_widgets.cpp
+     tele/tele_gift_studio_widgets.h
++    tele/tele_gift_tile.cpp
++    tele/tele_gift_tile.h
+     tele/tele_gift_list.cpp
+     tele/tele_gift_list.h
+     tele/tele_gift_search.cpp
+diff --git a/Telegram/SourceFiles/tele/tele_gift_tile.cpp b/Telegram/SourceFiles/tele/tele_gift_tile.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..eb3bb16a30540e94ff5b69eed420f5f957ebdc34
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_gift_tile.cpp
+@@ -0,0 +1,220 @@
++#include "tele/tele_gift_tile.h"
++
++#include "data/data_document.h"
++#include "data/data_document_media.h"
++#include "data/data_session.h"
++#include "data/data_star_gift.h"
++#include "data/stickers/data_custom_emoji.h"
++#include "history/view/media/history_view_sticker_player_abstract.h"
++#include "main/main_session.h"
++#include "tele/tele_money_card.h"
++#include "ui/emoji_config.h"
++#include "ui/painter.h"
++#include "ui/power_saving.h"
++#include "ui/text/text_custom_emoji.h"
++#include "ui/top_background_gradient.h"
++
++#include <QtGui/QRadialGradient>
++
++namespace Tele {
++namespace {
++
++constexpr auto kModelSide = 0.62;
++constexpr auto kPatternSide = 0.14;
++constexpr auto kPatternSpread = 12;
++
++void PaintPattern(
++		QPainter &p,
++		not_null<Ui::Text::CustomEmoji*> emoji,
++		const QColor &color,
++		QSize size) {
++	const auto ratio = style::DevicePixelRatio();
++	const auto large = Ui::Emoji::GetSizeLarge() / ratio;
++	const auto side = std::min(size.width(), size.height());
++	const auto spread = side / float64(kPatternSpread);
++	const auto area = QRectF(QPointF(), QSizeF(size)).marginsAdded(
++		{ spread, spread, spread, spread });
++	for (const auto &point : Ui::PatternBgPoints()) {
++		const auto symbol = side * kPatternSide * point.scale;
++		p.save();
++		p.setOpacity(point.opacity);
++		p.translate(
++			area.x() + point.position.x() * area.width(),
++			area.y() + point.position.y() * area.height());
++		p.scale(symbol / large, symbol / large);
++		emoji->paint(p, {
++			.textColor = color,
++			.position = QPoint(-large / 2, -large / 2),
++			.paused = true,
++		});
++		p.restore();
++	}
++}
++
++} // namespace
++
++GiftTile::GiftTile(
++	not_null<Main::Session*> session,
++	bool animated,
++	Fn<void()> repaint)
++: _session(session)
++, _animated(animated)
++, _repaint(std::move(repaint)) {
++}
++
++GiftTile::~GiftTile() = default;
++
++void GiftTile::setGift(const std::shared_ptr<Data::UniqueGift> &gift) {
++	if (_gift == gift) {
++		return;
++	}
++	_gift = gift;
++	_background = QImage();
++	_backgroundRadius = -1;
++	_backgroundPatterned = false;
++	_modelLifetime.destroy();
++	_player = nullptr;
++	_playerSide = 0;
++	_media = nullptr;
++	_still = QImage();
++	_stillSide = 0;
++	_pattern = nullptr;
++	if (!_gift) {
++		return;
++	}
++	_pattern = _session->data().customEmojiManager().create(
++		_gift->pattern.document,
++		[=] {
++			if (!_backgroundPatterned) {
++				_repaint();
++			}
++		},
++		Data::CustomEmojiSizeTag::Large);
++	[[maybe_unused]] const auto preload = _pattern->ready();
++}
++
++bool GiftTile::paint(
++		QPainter &p,
++		const std::shared_ptr<Data::UniqueGift> &gift,
++		QRect rect,
++		int radius) {
++	setGift(gift);
++	if (!_gift || rect.isEmpty()) {
++		return false;
++	}
++	validateBackground(rect.size(), radius);
++	auto hq = PainterHighQualityEnabler(p);
++	p.drawImage(rect.topLeft(), _background);
++	paintModel(p, rect);
++	return true;
++}
++
++void GiftTile::validateBackground(QSize size, int radius) {
++	const auto ratio = style::DevicePixelRatio();
++	if (_background.size() != size * ratio
++		|| _backgroundRadius != radius) {
++		_background = QImage(
++			size * ratio,
++			QImage::Format_ARGB32_Premultiplied);
++		_background.setDevicePixelRatio(ratio);
++		_background.fill(Qt::transparent);
++		_backgroundRadius = radius;
++		_backgroundPatterned = false;
++
++		auto p = QPainter(&_background);
++		auto hq = PainterHighQualityEnabler(p);
++		const auto inner = QRectF(QPointF(), QSizeF(size));
++		auto gradient = QRadialGradient(inner.center(), inner.width() / 2.);
++		gradient.setStops({
++			{ 0., _gift->backdrop.centerColor },
++			{ 1., _gift->backdrop.edgeColor },
++		});
++		p.setPen(Qt::NoPen);
++		p.setBrush(gradient);
++		p.drawRoundedRect(inner, radius, radius);
++	}
++	if (_backgroundPatterned || !_pattern || !_pattern->ready()) {
++		return;
++	}
++	_backgroundPatterned = true;
++	auto p = QPainter(&_background);
++	auto hq = PainterHighQualityEnabler(p);
++	p.setCompositionMode(QPainter::CompositionMode_SourceAtop);
++	PaintPattern(p, _pattern.get(), _gift->backdrop.patternColor, size);
++}
++
++void GiftTile::validateModel(int side) {
++	if (side <= 0
++		|| _playerSide >= side
++		|| (!_animated && _stillSide >= side)) {
++		return;
++	}
++	_modelLifetime.destroy();
++	_player = nullptr;
++	_playerSide = side;
++	const auto document = _gift->model.document;
++	if (!_media) {
++		_media = document->createMediaView();
++		_media->checkStickerLarge();
++	}
++	const auto media = _media;
++	rpl::single(rpl::empty) | rpl::then(
++		_session->downloaderTaskFinished()
++	) | rpl::filter([=] {
++		return media->loaded();
++	}) | rpl::take(1) | rpl::on_next([=] {
++		auto player = MakeMoneyCardModelPlayer(
++			document,
++			media.get(),
++			QSize(side, side));
++		if (!player) {
++			return;
++		}
++		player->setRepaintCallback(_repaint);
++		_player = std::move(player);
++		_repaint();
++	}, _modelLifetime);
++}
++
++void GiftTile::paintModel(QPainter &p, QRect rect) {
++	const auto side = int(std::round(rect.width() * kModelSide));
++	const auto model = QRect(
++		rect.x() + (rect.width() - side) / 2,
++		rect.y() + (rect.height() - side) / 2,
++		side,
++		side);
++	validateModel(side);
++	if (!_player || !_player->ready()) {
++		if (!_still.isNull()) {
++			p.drawImage(model, _still);
++		}
++		return;
++	}
++	const auto paused = !_animated
++		|| PowerSaving::On(PowerSaving::kStickersChat);
++	const auto info = _player->frame(
++		QSize(_playerSide, _playerSide),
++		QColor(0, 0, 0, 0),
++		false,
++		crl::now(),
++		paused);
++	if (!paused) {
++		_player->markFrameShown();
++	}
++	if (info.image.isNull()) {
++		if (!_still.isNull()) {
++			p.drawImage(model, _still);
++		}
++		return;
++	}
++	p.drawImage(model, info.image);
++	if (!_animated) {
++		_still = info.image.copy();
++		_stillSide = _playerSide;
++		_modelLifetime.destroy();
++		_player = nullptr;
++		_playerSide = 0;
++	}
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_gift_tile.h b/Telegram/SourceFiles/tele/tele_gift_tile.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..2ec9de2051737189eeab51c693b2e34646fcfbab
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_gift_tile.h
+@@ -0,0 +1,59 @@
++#pragma once
++
++namespace Data {
++struct UniqueGift;
++class DocumentMedia;
++} // namespace Data
++
++namespace HistoryView {
++class StickerPlayer;
++} // namespace HistoryView
++
++namespace Main {
++class Session;
++} // namespace Main
++
++namespace Ui::Text {
++class CustomEmoji;
++} // namespace Ui::Text
++
++namespace Tele {
++
++class GiftTile final {
++public:
++	GiftTile(
++		not_null<Main::Session*> session,
++		bool animated,
++		Fn<void()> repaint);
++	~GiftTile();
++
++	bool paint(
++		QPainter &p,
++		const std::shared_ptr<Data::UniqueGift> &gift,
++		QRect rect,
++		int radius);
++
++private:
++	void setGift(const std::shared_ptr<Data::UniqueGift> &gift);
++	void validateBackground(QSize size, int radius);
++	void validateModel(int side);
++	void paintModel(QPainter &p, QRect rect);
++
++	const not_null<Main::Session*> _session;
++	const bool _animated = false;
++	const Fn<void()> _repaint;
++	std::shared_ptr<Data::UniqueGift> _gift;
++	std::unique_ptr<Ui::Text::CustomEmoji> _pattern;
++	QImage _background;
++	int _backgroundRadius = -1;
++	bool _backgroundPatterned = false;
++	std::shared_ptr<Data::DocumentMedia> _media;
++	std::unique_ptr<HistoryView::StickerPlayer> _player;
++	int _playerSide = 0;
++	QImage _still;
++	int _stillSide = 0;
++	rpl::lifetime _modelLifetime;
++
++};
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/wallet/wallet_collectible_media.cpp b/Telegram/SourceFiles/wallet/wallet_collectible_media.cpp
+index 051fe2e8251c88b4352e9a2cf3dbbccd9856f353..64a589c35ebcc309e2465c50517f2ac79c109294 100644
+--- a/Telegram/SourceFiles/wallet/wallet_collectible_media.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_collectible_media.cpp
+@@ -9,7 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ 
+ #include "api/api_premium.h"
+ #include "apiwrap.h"
+-#include "boxes/peers/replace_boost_box.h"
+ #include "data/data_file_origin.h"
+ #include "data/data_session.h"
+ #include "data/data_star_gift.h"
+@@ -17,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "lang/lang_tag.h"
+ #include "main/main_session.h"
+ #include "storage/file_download.h"
++#include "tele/tele_gift_tile.h"
+ #include "ui/image/image_location.h"
+ #include "ui/image/image_prepare.h"
+ #include "ui/text/text_utilities.h"
+@@ -194,7 +194,7 @@ struct CollectibleMedia::Entry {
+ 	QByteArray imageBytes;
+ 	int artworkGeneration = 0;
+ 	base::flat_map<int, QImage> prepared;
+-	PaintRoundImageCallback giftPaint;
++	std::unique_ptr<Tele::GiftTile> giftTile;
+ 	std::shared_ptr<Data::UniqueGift> unique;
+ 	std::unique_ptr<FileLoader> loader;
+ 	crl::time deadline = 0;
+@@ -493,7 +493,7 @@ void CollectibleMedia::clearArtwork(not_null<Entry*> entry) {
+ 	entry->model.clear();
+ 	entry->backdrop.clear();
+ 	entry->authenticGift = false;
+-	entry->giftPaint = nullptr;
++	entry->giftTile = nullptr;
+ 	entry->unique = nullptr;
+ 	entry->imageBytes.clear();
+ 	entry->prepared.clear();
+@@ -505,9 +505,9 @@ void CollectibleMedia::requestGift(
+ 		int generation) {
+ 	const auto session = _session;
+ 	const auto apply = [=](const std::shared_ptr<Data::UniqueGift> &unique) {
+-		entry->giftPaint = GenerateGiftUniqueUserpicCallback(
++		entry->giftTile = std::make_unique<Tele::GiftTile>(
+ 			session,
+-			unique,
++			false,
+ 			[=] { _repaint.fire_copy(entry->address); });
+ 		entry->unique = unique;
+ 		entry->name = unique->title;
+@@ -679,13 +679,8 @@ bool CollectibleMedia::paintArtwork(
+ 		return false;
+ 	}
+ 	auto hq = PainterHighQualityEnabler(p);
+-	if (entry->giftPaint) {
+-		auto path = QPainterPath();
+-		path.addRoundedRect(rect, radius, radius);
+-		p.save();
+-		p.setClipPath(path);
+-		entry->giftPaint(p, rect.x(), rect.y(), outerWidth, rect.width());
+-		p.restore();
++	if (entry->giftTile
++		&& entry->giftTile->paint(p, entry->unique, rect, radius)) {
+ 		return true;
+ 	}
+ 	const auto &image = preparedFor(entry, rect.width(), radius);
+diff --git a/Telegram/SourceFiles/wallet/wallet_collectibles.cpp b/Telegram/SourceFiles/wallet/wallet_collectibles.cpp
+index 9e77ea9d4d8f98a2e7e88d1fa38904d7206019d0..d53c3722725e99a32edd49fd5801f8a628ca3c3d 100644
+--- a/Telegram/SourceFiles/wallet/wallet_collectibles.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_collectibles.cpp
+@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "main/session/session_show.h"
+ #include "main/main_session.h"
+ #include "settings/settings_credits_graphics.h"
++#include "tele/tele_gift_tile.h"
+ #include "tele/tele_money_stickers.h"
+ #include "ui/effects/ripple_animation.h"
+ #include "ui/layers/generic_box.h"
+@@ -336,14 +337,26 @@ void CollectiblePreviewBox(
+ 			0,
+ 			st::walletDetailsCollectibleNameSkip));
+ 	artwork->setAttribute(Qt::WA_TransparentForMouseEvents);
++	const auto tile = artwork->lifetime().make_state<Tele::GiftTile>(
++		&show->session(),
++		true,
++		[=] { artwork->update(); });
+ 	artwork->paintRequest(
+ 	) | rpl::on_next([=] {
+ 		const auto side = st::walletDetailsCollectibleSize;
++		const auto rect = QRect((artwork->width() - side) / 2, 0, side, side);
+ 		auto p = Painter(artwork);
++		if (tile->paint(
++				p,
++				media->uniqueGift(address),
++				rect,
++				st::walletDetailsCollectibleRadius)) {
++			return;
++		}
+ 		media->paint(
+ 			p,
+ 			address,
+-			QRect((artwork->width() - side) / 2, 0, side, side),
++			rect,
+ 			artwork->width(),
+ 			st::walletDetailsCollectibleRadius);
+ 	}, artwork->lifetime());
+diff --git a/Telegram/SourceFiles/wallet/wallet_content.cpp b/Telegram/SourceFiles/wallet/wallet_content.cpp
+index 755fe319b663b57b2bd8e0ee9143b08031828742..3641fea1f432dd631892936dacb1b1fa82fa8fb2 100644
+--- a/Telegram/SourceFiles/wallet/wallet_content.cpp
++++ b/Telegram/SourceFiles/wallet/wallet_content.cpp
+@@ -57,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "settings/settings_common.h"
+ #include "storage/storage_account.h"
+ #include "storage/storage_domain.h"
++#include "tele/tele_gift_tile.h"
+ #include "tele/tele_lowercase.h"
+ #include "tele/tele_money_card.h"
+ #include "tele/tele_money_card_box.h"
+@@ -3582,9 +3583,20 @@ void AddDetailsCollectibleHeader(
+ 		st::walletDetailsCollectibleSize,
+ 		st::walletDetailsCollectibleSize);
+ 	artwork->setAttribute(Qt::WA_TransparentForMouseEvents);
++	const auto tile = artwork->lifetime().make_state<Tele::GiftTile>(
++		session,
++		true,
++		[=] { artwork->update(); });
+ 	artwork->paintRequest(
+ 	) | rpl::on_next([=] {
+ 		auto p = Painter(artwork);
++		if (tile->paint(
++				p,
++				media->uniqueGift(address),
++				artwork->rect(),
++				st::walletDetailsCollectibleRadius)) {
++			return;
++		}
+ 		media->paint(
+ 			p,
+ 			address,
