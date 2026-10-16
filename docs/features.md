@@ -310,6 +310,7 @@ settings → tele → debug.
 | [314](../patches/tdesktop/0314-build-fetch-litehtml-for-html-bubbles.patch) | tele downloads litehtml, the html engine of html bubbles, while it builds | with 315 |
 | [315](../patches/tdesktop/0315-feat-render-html-cards-with-litehtml-and-run-their-s.patch) | html bubbles β: .tgw files show as html cards that can run their own scripts, for everyone using tele with the option on; other apps see a file | tele → debug, off |
 | [316](../patches/tdesktop/0316-feat-show-html-bubbles-in-a-playground-chat-and-for-.patch) | an html playground chat shows what you type there as an html card, and .tgw files you get open as cards in the chat | with 315 |
+| [326](../patches/tdesktop/0326-fix-html-cards-no-longer-crash-when-their-message-go.patch) | an html card no longer crashes tele when its message is rebuilt or removed while the mouse is over a link or button in it | with 316 |
 | [1003](../patches/Telegram/lib_ui/0003-feat-let-picked-fonts-use-their-real-metrics-on-wind.patch) | the part of the picked font fix that lives in the ui library | with 273 |
 
 ## server

@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Fri, 16 Oct 2026 12:01:39 +0300
+Subject: [PATCH] fix: html cards no longer crash when their message goes away
+ under the mouse
+
+---
+ Telegram/SourceFiles/tele/tele_html_card.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Telegram/SourceFiles/tele/tele_html_card.cpp b/Telegram/SourceFiles/tele/tele_html_card.cpp
+index 3cc9c7a516693f15076e2bc24f5c0ce6bdbf3c9c..243aefbe3249a4f723a30a975802b928b822c8e2 100644
+--- a/Telegram/SourceFiles/tele/tele_html_card.cpp
++++ b/Telegram/SourceFiles/tele/tele_html_card.cpp
+@@ -943,7 +943,7 @@ void CardMedia::clickHandlerActiveChanged(
+ 		bool active) {
+ 	if (!active && _layout && _layout->leave()) {
+ 		_cacheDirty = true;
+-		repaintCard();
++		_parent->repaint();
+ 	}
+ }
+ 
