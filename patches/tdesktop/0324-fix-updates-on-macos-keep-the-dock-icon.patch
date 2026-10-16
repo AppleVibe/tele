@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Fri, 16 Oct 2026 04:46:24 +0300
+Subject: [PATCH] fix: updates on macos keep the dock icon
+
+---
+ Telegram/SourceFiles/tele/tele_updater.cpp | 57 +++++++++++++++-------
+ 1 file changed, 40 insertions(+), 17 deletions(-)
+
+diff --git a/Telegram/SourceFiles/tele/tele_updater.cpp b/Telegram/SourceFiles/tele/tele_updater.cpp
+index 54faf248d1764b1853d0d1d1455b8075652010e0..07938b286ea0990a62bf3de58c5c9228fafc6504 100644
+--- a/Telegram/SourceFiles/tele/tele_updater.cpp
++++ b/Telegram/SourceFiles/tele/tele_updater.cpp
+@@ -27,6 +27,8 @@
+ #include <QtNetwork/QNetworkRequest>
+ 
+ #if defined Q_OS_MAC
++#define __ASSERT_MACROS_DEFINE_VERSIONS_WITHOUT_UNDERSCORES 0
++#include <CoreServices/CoreServices.h>
+ #include <cerrno>
+ #include <cstdio>
+ #include <cstring>
+@@ -197,6 +199,19 @@ void RemoveParts(const QString &keep) {
+ 	return QString::fromLocal8Bit(std::strerror(errno));
+ }
+ 
++void RegisterBundle(const QString &path) {
++	const auto bytes = QFile::encodeName(path);
++	const auto url = CFURLCreateFromFileSystemRepresentation(
++		kCFAllocatorDefault,
++		reinterpret_cast<const UInt8*>(bytes.constData()),
++		bytes.size(),
++		true);
++	if (url) {
++		LSRegisterURL(url, true);
++		CFRelease(url);
++	}
++}
++
+ void RemoveQuarantine(const QString &root) {
+ 	const auto strip = [](const QString &path) {
+ 		removexattr(
+@@ -703,27 +718,35 @@ void Updater::install(const Release &release) {
+ 	const auto newPath = path + u".new"_q;
+ 	const auto oldPath = path + u".old"_q;
+ #if defined Q_OS_MAC
+-	const auto from = QFile::encodeName(newPath);
+-	const auto to = QFile::encodeName(path);
+-	const auto old = QFile::encodeName(oldPath);
++	const auto contents = u"/Contents"_q;
++	const auto asidePath = newPath + u"/Contents.old"_q;
++	const auto staged = QFile::encodeName(newPath + contents);
++	const auto current = QFile::encodeName(path + contents);
++	const auto aside = QFile::encodeName(asidePath);
+ 	base::Platform::DeleteDirectory(oldPath);
+-	if (!renamex_np(from.constData(), to.constData(), RENAME_SWAP)) {
+-		::rename(from.constData(), old.constData());
+-	} else if (::rename(to.constData(), old.constData())) {
+-		const auto error = ErrnoText();
+-		base::Platform::DeleteDirectory(newPath);
+-		fail(u"can't move the running app aside: %1"_q.arg(error));
+-		return;
+-	} else if (::rename(from.constData(), to.constData())) {
+-		const auto error = ErrnoText();
+-		if (::rename(old.constData(), to.constData())) {
+-			fail(u"%1 is missing, rename %2 back to it"_q.arg(path, oldPath));
++	if (renamex_np(staged.constData(), current.constData(), RENAME_SWAP)) {
++		if (::rename(current.constData(), aside.constData())) {
++			const auto error = ErrnoText();
++			base::Platform::DeleteDirectory(newPath);
++			fail(u"can't move the running app aside: %1"_q.arg(error));
++			return;
++		} else if (::rename(staged.constData(), current.constData())) {
++			const auto error = ErrnoText();
++			if (::rename(aside.constData(), current.constData())) {
++				fail(u"%1 is missing, rename %2 back to it"_q.arg(
++					path + contents,
++					asidePath));
++				return;
++			}
++			base::Platform::DeleteDirectory(newPath);
++			fail(u"can't put the new app in place: %1"_q.arg(error));
+ 			return;
+ 		}
+-		base::Platform::DeleteDirectory(newPath);
+-		fail(u"can't put the new app in place: %1"_q.arg(error));
+-		return;
+ 	}
++	::rename(
++		QFile::encodeName(newPath).constData(),
++		QFile::encodeName(oldPath).constData());
++	RegisterBundle(path);
+ #elif defined Q_OS_WIN
+ 	QFile::remove(oldPath);
+ 	if (!RenameWithRetries(path, oldPath)) {
