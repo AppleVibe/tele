@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Fri, 16 Oct 2026 17:11:51 +0300
+Subject: [PATCH] fix: passkey prompts no longer count as freezes
+
+---
+ .../SourceFiles/platform/win/webauthn_win.cpp | 37 ++++++++++++-------
+ .../SourceFiles/tele/tele_freeze_watchdog.cpp | 12 +++++-
+ .../SourceFiles/tele/tele_freeze_watchdog.h   |  9 +++++
+ 3 files changed, 43 insertions(+), 15 deletions(-)
+
+diff --git a/Telegram/SourceFiles/platform/win/webauthn_win.cpp b/Telegram/SourceFiles/platform/win/webauthn_win.cpp
+index 4c9bdd4ba247ca351cba1c5c9bca3b937eb2f71a..3a728a77e0b004ac5de1096f023750b9e9a53275 100644
+--- a/Telegram/SourceFiles/platform/win/webauthn_win.cpp
++++ b/Telegram/SourceFiles/platform/win/webauthn_win.cpp
+@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "core/application.h"
+ #include "data/data_passkey_deserialize.h"
+ #include "lang/lang_keys.h"
++#include "tele/tele_freeze_watchdog.h"
+ #include "webauthn/webauthn_common.h"
+ #include "window/window_controller.h"
+ 
+@@ -196,14 +197,18 @@ void RegisterViaNative(
+ 	const auto hwnd = NativeParentWindow();
+ 
+ 	auto attestation = (PWEBAUTHN_CREDENTIAL_ATTESTATION)(nullptr);
+-	auto hr = (HRESULT)(WebAuthNAuthenticatorMakeCredential)(
+-		hwnd,
+-		&rpInfo,
+-		&userInfo,
+-		&credParamsList,
+-		&clientData,
+-		&options,
+-		&attestation);
++	auto hr = HRESULT();
++	{
++		const auto pause = Tele::FreezeWatchdogPause();
++		hr = (WebAuthNAuthenticatorMakeCredential)(
++			hwnd,
++			&rpInfo,
++			&userInfo,
++			&credParamsList,
++			&clientData,
++			&options,
++			&attestation);
++	}
+ 
+ 	if (SUCCEEDED(hr) && attestation) {
+ 		auto result = RegisterResult();
+@@ -290,12 +295,16 @@ void LoginViaNative(
+ 	const auto hwnd = NativeParentWindow();
+ 
+ 	auto assertion = (PWEBAUTHN_ASSERTION)(nullptr);
+-	auto hr = (HRESULT)(WebAuthNAuthenticatorGetAssertion)(
+-		hwnd,
+-		rpId.c_str(),
+-		&clientData,
+-		&options,
+-		&assertion);
++	auto hr = HRESULT();
++	{
++		const auto pause = Tele::FreezeWatchdogPause();
++		hr = (WebAuthNAuthenticatorGetAssertion)(
++			hwnd,
++			rpId.c_str(),
++			&clientData,
++			&options,
++			&assertion);
++	}
+ 
+ 	if (SUCCEEDED(hr) && assertion) {
+ 		auto result = LoginResult();
+diff --git a/Telegram/SourceFiles/tele/tele_freeze_watchdog.cpp b/Telegram/SourceFiles/tele/tele_freeze_watchdog.cpp
+index 1f89b1eb17f29e24fe037396b33fabb622ef207e..abf9901827dcce889a25e636bf99bd90c74cfe30 100644
+--- a/Telegram/SourceFiles/tele/tele_freeze_watchdog.cpp
++++ b/Telegram/SourceFiles/tele/tele_freeze_watchdog.cpp
+@@ -33,6 +33,8 @@ constexpr char kFreezeNote[] = "Tele-Note: freeze ";
+ 	return cWorkingDir() + u"tdata/freeze"_q;
+ }
+ 
++std::atomic<int> Paused = 0;
++
+ #ifndef Q_OS_MAC
+ 
+ using Clock = std::chrono::steady_clock;
+@@ -262,7 +264,7 @@ void Watch(const std::shared_ptr<State> &state) {
+ 			}
+ 			changed = mono;
+ 			continue;
+-		} else if (slept) {
++		} else if (slept || Paused.load()) {
+ 			if (!episode) {
+ 				changed = mono;
+ 			}
+@@ -300,6 +302,14 @@ void Stop(const std::shared_ptr<State> &state) {
+ 
+ } // namespace
+ 
++FreezeWatchdogPause::FreezeWatchdogPause() {
++	++Paused;
++}
++
++FreezeWatchdogPause::~FreezeWatchdogPause() {
++	--Paused;
++}
++
+ void StartFreezeWatchdog() {
+ #ifndef Q_OS_MAC
+ 	static auto started = false;
+diff --git a/Telegram/SourceFiles/tele/tele_freeze_watchdog.h b/Telegram/SourceFiles/tele/tele_freeze_watchdog.h
+index 341c89daeda9c15ac786a016057c3c39989670c7..d5713e6dff9c3e476ba5dec517df3cc230d0cc40 100644
+--- a/Telegram/SourceFiles/tele/tele_freeze_watchdog.h
++++ b/Telegram/SourceFiles/tele/tele_freeze_watchdog.h
+@@ -10,4 +10,13 @@ void StartFreezeWatchdog();
+ [[nodiscard]] int FreezeReportSeconds(const QByteArray &report);
+ void ForgetFreezeReport();
+ 
++class FreezeWatchdogPause final {
++public:
++	FreezeWatchdogPause();
++	FreezeWatchdogPause(const FreezeWatchdogPause &) = delete;
++	FreezeWatchdogPause &operator=(const FreezeWatchdogPause &) = delete;
++	~FreezeWatchdogPause();
++
++};
++
+ } // namespace Tele
