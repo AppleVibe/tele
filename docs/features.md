@@ -125,6 +125,7 @@ settings → tele → messages.
 | [272](../patches/tdesktop/0272-feat-classic-text-padding-in-bubbles.patch) | bubbles without tails can use the text padding of older telegram desktop: 13 px on the sides and 7 on top | with 267 |
 | [283](../patches/tdesktop/0283-feat-keep-deleted-chats-and-topics.patch) | chats and topics that get deleted, or that you leave or get removed from, stay in the list with their loaded messages until you delete them again | with 19 |
 | [321](../patches/tdesktop/0321-feat-recover-deleted-channel-posts-from-forwards.patch) | open a deleted channel post from a forward of it and tele shows it again: it rebuilds the post from the forward in its place in the channel, marked like other kept deleted messages, and the time's tooltip says which forward it came from | with 19 |
+| [329](../patches/tdesktop/0329-fix-loading-older-messages-no-longer-crashes-on-a-me.patch) | tele no longer crashes while loading older messages when one of them is deleted just as it loads | with 19 |
 
 ## sending
 

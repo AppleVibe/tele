@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Sat, 17 Oct 2026 06:28:54 +0300
+Subject: [PATCH] fix: loading older messages no longer crashes on a message
+ deleted mid-load
+
+---
+ Telegram/SourceFiles/tele/tele_deleted.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/Telegram/SourceFiles/tele/tele_deleted.cpp b/Telegram/SourceFiles/tele/tele_deleted.cpp
+index 820fe13a9d17278c7ea8fc9562dd003027e240e0..434962998299fda620df902bb100de54acffbe12 100644
+--- a/Telegram/SourceFiles/tele/tele_deleted.cpp
++++ b/Telegram/SourceFiles/tele/tele_deleted.cpp
+@@ -491,9 +491,17 @@ std::vector<not_null<HistoryItem*>> WithKeptDeleted(
+ 			? ServerMaxMsgId
+ 			: MsgId(hi.bare + 1);
+ 	}
++	auto present = base::flat_set<MsgId>();
++	present.reserve(items.size());
++	for (const auto &item : items) {
++		present.emplace(item->id);
++	}
+ 	auto add = std::vector<not_null<HistoryItem*>>();
+ 	for (const auto &[id, item] : *kept) {
+-		if (id > from && id < till && !item->mainView()) {
++		if (id > from
++			&& id < till
++			&& !item->mainView()
++			&& !present.contains(id)) {
+ 			add.push_back(item);
+ 		}
+ 	}

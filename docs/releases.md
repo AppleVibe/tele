@@ -14,6 +14,7 @@ all 334 patches, newest release first.
 | [326](../patches/tdesktop/0326-fix-html-cards-no-longer-crash-when-their-message-go.patch) | an html card no longer crashes tele when its message is rebuilt or removed while the mouse is over a link or button in it | with 316 |
 | [327](../patches/tdesktop/0327-fix-gifts-in-money-look-like-gift-cards-instead-of-a.patch) | telegram gifts in money are drawn sharp at their real size, with the full backdrop pattern around the model. the model plays in the transaction and collectible windows | always on |
 | [328](../patches/tdesktop/0328-fix-passkey-prompts-no-longer-count-as-freezes.patch) | waiting in the windows passkey prompt, when logging in or adding a passkey, no longer produces a freeze report | with 203 |
+| [329](../patches/tdesktop/0329-fix-loading-older-messages-no-longer-crashes-on-a-me.patch) | tele no longer crashes while loading older messages when one of them is deleted just as it loads | with 19 |
 
 ### [tele 21](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.21)
 
