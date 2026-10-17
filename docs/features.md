@@ -45,6 +45,7 @@ settings → tele → interface.
 | [305](../patches/tdesktop/0305-feat-scroll-to-zoom-in-the-media-viewer.patch) | scroll to zoom in the media viewer. hold ctrl or cmd while scrolling to switch photos | tele → interface, off |
 | [308](../patches/tdesktop/0308-feat-smoother-wheel-glides-in-chats.patch) | wheel glides step at your monitor's refresh rate, chats move a cached image while they glide, animated stickers, emoji and gifs pause until the glide ends, and the chat list only repaints rows that changed. tele → debug → log scroll frame rate writes each glide's timings to log.txt | with 275 |
 | [323](../patches/tdesktop/0323-fix-glides-in-boxes-no-longer-blank-the-chats-under-.patch) | gliding in a box, settings or another panel no longer turns the chat list and the chat behind it black | with 308 |
+| [330](../patches/tdesktop/0330-feat-close-the-media-viewer-with-mouse-back.patch) | the mouse back button (mouse 4) closes the media viewer: photos, videos, the windowed viewer and stories | tele → interface, off |
 | [1005](../patches/Telegram/lib_ui/0005-feat-ease-mouse-wheel-steps-in-scroll-areas.patch) | the part of smooth wheel scrolling that lives in the ui library's scroll areas | with 275 |
 | [1008](../patches/Telegram/lib_ui/0008-feat-glide-at-the-screen-refresh-rate.patch) | the part of smoother glides that lives in the ui library: a glide ticks at the monitor's refresh rate while other animations keep their pace | with 275 |
 

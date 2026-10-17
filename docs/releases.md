@@ -15,6 +15,7 @@ all 334 patches, newest release first.
 | [327](../patches/tdesktop/0327-fix-gifts-in-money-look-like-gift-cards-instead-of-a.patch) | telegram gifts in money are drawn sharp at their real size, with the full backdrop pattern around the model. the model plays in the transaction and collectible windows | always on |
 | [328](../patches/tdesktop/0328-fix-passkey-prompts-no-longer-count-as-freezes.patch) | waiting in the windows passkey prompt, when logging in or adding a passkey, no longer produces a freeze report | with 203 |
 | [329](../patches/tdesktop/0329-fix-loading-older-messages-no-longer-crashes-on-a-me.patch) | tele no longer crashes while loading older messages when one of them is deleted just as it loads | with 19 |
+| [330](../patches/tdesktop/0330-feat-close-the-media-viewer-with-mouse-back.patch) | the mouse back button (mouse 4) closes the media viewer: photos, videos, the windowed viewer and stories | tele → interface, off |
 
 ### [tele 21](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.21)
 

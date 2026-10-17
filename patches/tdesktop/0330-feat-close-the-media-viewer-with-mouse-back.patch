@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Sat, 17 Oct 2026 14:54:23 +0300
+Subject: [PATCH] feat: close the media viewer with mouse back
+
+---
+ .../media/view/media_view_overlay_widget.cpp           |  5 +++++
+ Telegram/SourceFiles/settings/settings_tele.cpp        |  6 ++++++
+ Telegram/SourceFiles/tele/tele_options.cpp             | 10 ++++++++++
+ Telegram/SourceFiles/tele/tele_options.h               |  2 ++
+ Telegram/SourceFiles/tele/tele_settings_io.cpp         |  1 +
+ 5 files changed, 24 insertions(+)
+
+diff --git a/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp b/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp
+index 18d89922ca581958c5186ffe6c496a5c447554c0..b3b9c40c8d98f33856e6cce2e9b8b1cf76655d2e 100644
+--- a/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp
++++ b/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp
+@@ -8049,6 +8049,11 @@ void OverlayWidget::handleMousePress(
+ 		return;
+ 	}
+ 
++	if (button == Qt::BackButton && Tele::ViewerMouseBack()) {
++		close();
++		return;
++	}
++
+ 	ClickHandler::pressed();
+ 
+ 	if (button == Qt::LeftButton) {
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index ac63eb866d3e21f622741fa16ee7861ecb3515a2..d2dc4c3dcbd110a9cfd413a227a8020b9d5c3e9c 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -2793,10 +2793,16 @@ void FillInterface(SectionBuilder &builder) {
+ 		builder,
+ 		::Tele::kOptionSmoothScroll,
+ 		{ u"wheel"_q, u"mouse"_q, u"animation"_q, u"scroll"_q });
++	AddGroupDivider(builder);
++	AddGroupTitle(builder, u"Media viewer"_q);
+ 	AddOptionToggle(
+ 		builder,
+ 		::Tele::kOptionScrollZoom,
+ 		{ u"trackpad"_q, u"touchpad"_q, u"wheel"_q, u"photo"_q });
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionViewerMouseBack,
++		{ u"mouse 4"_q, u"side button"_q, u"photo"_q, u"video"_q });
+ 	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Chat list"_q);
+ 	AddOptionToggle(builder, ::Tele::kOptionHideAllChats);
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index ca087a59d42c129d8247de02759938ac69ca2f21..7a671a421481500498335acd007dec1997b54755 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -68,6 +68,7 @@ const char kOptionListKeys[] = "tele-list-keys";
+ const char kOptionSmoothScroll[] = "tele-smooth-scroll";
+ const char kOptionScrollStats[] = "tele-scroll-stats";
+ const char kOptionScrollZoom[] = "tele-scroll-zoom";
++const char kOptionViewerMouseBack[] = "tele-viewer-mouse-back";
+ const char kOptionStaticUserpicsChats[] = "tele-static-userpics-chats";
+ const char kOptionHideMentionsButton[] = "tele-hide-mentions-button";
+ const char kOptionHideReactionsButton[] = "tele-hide-reactions-button";
+@@ -659,6 +660,11 @@ base::options::toggle ScrollZoomOption({
+ 	.description = "Hold Ctrl or Cmd while scrolling to switch photos.",
+ });
+ 
++base::options::toggle ViewerMouseBackOption({
++	.id = kOptionViewerMouseBack,
++	.name = "Close the media viewer with mouse back",
++});
++
+ base::options::toggle StaticUserpicsChatsOption({
+ 	.id = kOptionStaticUserpicsChats,
+ 	.name = "Static userpics in chats and profiles",
+@@ -3636,6 +3642,10 @@ bool ScrollZoom() {
+ 	return ScrollZoomOption.value();
+ }
+ 
++bool ViewerMouseBack() {
++	return ViewerMouseBackOption.value();
++}
++
+ void SetViewerLoop(bool enabled) {
+ 	ViewerLoopOption.set(enabled);
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index a6938ec6aff723ccc2da54a1c36da63618cf7f24..62b83e41c31b651990c39a198395d64db8b3e47a 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -62,6 +62,7 @@ extern const char kOptionListKeys[];
+ extern const char kOptionSmoothScroll[];
+ extern const char kOptionScrollStats[];
+ extern const char kOptionScrollZoom[];
++extern const char kOptionViewerMouseBack[];
+ extern const char kOptionGhostInMenu[];
+ extern const char kOptionStaticUserpicsChats[];
+ extern const char kOptionHideMentionsButton[];
+@@ -351,6 +352,7 @@ void SetReduceMotionSaved(const QString &value);
+ [[nodiscard]] rpl::producer<bool> SmoothScrollValue();
+ [[nodiscard]] bool ScrollStats();
+ [[nodiscard]] bool ScrollZoom();
++[[nodiscard]] bool ViewerMouseBack();
+ [[nodiscard]] bool StaticUserpicsChats();
+ [[nodiscard]] rpl::producer<> StaticUserpicsChatsChanges();
+ [[nodiscard]] bool HideMentionsButton();
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index e578c2bf4a42cfd87ba2f9959ffef8585b1cfeec..cccb1449b52b2bfbe4002237fe9fb8de01959140 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -152,6 +152,7 @@ struct Spec {
+ 		Toggle(kOptionSmoothScroll),
+ 		Toggle(kOptionScrollStats),
+ 		Toggle(kOptionScrollZoom),
++		Toggle(kOptionViewerMouseBack),
+ 		Toggle(kOptionLocalFolders),
+ 		Toggle(kOptionUnsortedFolder),
+ 		Toggle(kOptionCompactFolders),
