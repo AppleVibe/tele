@@ -17,6 +17,8 @@ all 334 patches, newest release first.
 | [329](../patches/tdesktop/0329-fix-loading-older-messages-no-longer-crashes-on-a-me.patch) | tele no longer crashes while loading older messages when one of them is deleted just as it loads | with 19 |
 | [330](../patches/tdesktop/0330-feat-close-the-media-viewer-with-mouse-back.patch) | the mouse back button (mouse 4) closes the media viewer: photos, videos, the windowed viewer and stories | tele → interface, off |
 | [331](../patches/tdesktop/0331-fix-me-and-other-peer-shortcuts-work-everywhere-in-t.patch) | in the mtproto console, `me` no longer fails with INPUT_FETCH_ERROR, and peers can be written as `me`, `@user` or an id where a method wants a notify or dialog peer too | with 195 |
+| [332](../patches/tdesktop/0332-feat-show-skipped-messages-in-shots.patch) | a shot of messages that aren't next to each other can show how many were skipped between them, as a "2 messages skipped" badge | with 87 |
+| [333](../patches/tdesktop/0333-feat-restrict-members-from-message-menus-and-find-th.patch) | group admins can restrict someone from their message or userpic menu without deleting the message, and the add exception, add admin and remove user pickers find people tele already knows by their numeric id, members or not | tele → menus, on |
 
 ### [tele 21](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.21)
 

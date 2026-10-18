@@ -1,0 +1,473 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Sun, 18 Oct 2026 18:52:43 +0300
+Subject: [PATCH] feat: restrict members from message menus and find them by id
+
+---
+ Telegram/CMakeLists.txt                       |   2 +
+ .../boxes/peers/add_participants_box.cpp      |   8 +
+ .../history/history_inner_widget.cpp          |   7 +
+ .../view/history_view_context_menu.cpp        |   4 +
+ .../SourceFiles/settings/settings_tele.cpp    |   4 +
+ .../SourceFiles/tele/tele_menu_registry.cpp   |  10 +-
+ Telegram/SourceFiles/tele/tele_options.cpp    |  12 ++
+ Telegram/SourceFiles/tele/tele_options.h      |   2 +
+ Telegram/SourceFiles/tele/tele_restrict.cpp   | 163 ++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_restrict.h     |  37 ++++
+ .../SourceFiles/tele/tele_settings_io.cpp     |   1 +
+ .../SourceFiles/window/window_peer_menu.cpp   |   2 +
+ 12 files changed, 249 insertions(+), 3 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_restrict.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_restrict.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 37d913aed472aeb9ee7fc99d89302c2894154997..3b0427ab582de5fcaed123162289f319917811ab 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2818,6 +2818,8 @@ PRIVATE
+     tele/tele_regex_search.h
+     tele/tele_remove_mine.cpp
+     tele/tele_remove_mine.h
++    tele/tele_restrict.cpp
++    tele/tele_restrict.h
+     tele/tele_rich_quote.cpp
+     tele/tele_rich_quote.h
+     tele/tele_rich_timestamps.cpp
+diff --git a/Telegram/SourceFiles/boxes/peers/add_participants_box.cpp b/Telegram/SourceFiles/boxes/peers/add_participants_box.cpp
+index 7ab48a7fc7a42faaff200d7049045e9734954b8d..0c1e7d082523055eac085b94514ec8c9328f5eb4 100644
+--- a/Telegram/SourceFiles/boxes/peers/add_participants_box.cpp
++++ b/Telegram/SourceFiles/boxes/peers/add_participants_box.cpp
+@@ -40,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "main/main_session.h"
+ #include "mtproto/mtproto_config.h"
+ #include "settings/sections/settings_premium.h"
++#include "tele/tele_restrict.h"
+ #include "window/window_session_controller.h"
+ #include "info/profile/info_profile_icon.h"
+ #include "apiwrap.h"
+@@ -1764,6 +1765,13 @@ void AddSpecialBoxSearchController::searchQuery(const QString &query) {
+ 		_chatsContactsAdded = false;
+ 		_chatMembersAdded = false;
+ 		_globalLoaded = false;
++		if (const auto user = Tele::LoadedUserById(
++				&_peer->session(),
++				_query)) {
++			_additional->checkForLoaded(user);
++			delegate()->peerListSearchAddRow(user);
++			delegate()->peerListSearchRefreshRows();
++		}
+ 		if (!_query.isEmpty() && !searchParticipantsInCache()) {
+ 			_timer.callOnce(AutoSearchTimeout);
+ 		} else {
+diff --git a/Telegram/SourceFiles/history/history_inner_widget.cpp b/Telegram/SourceFiles/history/history_inner_widget.cpp
+index 826c750056555abc4bdcbf69eae318b922666d86..5cb3642dc513ecd411a2e62a35f502eb31650421 100644
+--- a/Telegram/SourceFiles/history/history_inner_widget.cpp
++++ b/Telegram/SourceFiles/history/history_inner_widget.cpp
+@@ -130,6 +130,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "data/data_changes.h"
+ #include "dialogs/ui/dialogs_video_userpic.h"
+ #include "tele/scripting/tele_script_local.h"
++#include "tele/tele_restrict.h"
+ #include "tele/tele_bookmarks.h"
+ #include "tele/tele_button_payload.h"
+ #include "tele/tele_copy_markdown.h"
+@@ -3681,6 +3682,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
+ 					blockSenderItem(itemId);
+ 				}, &st::menuIconBlock);
+ 			}
++			if (isUponSelected != -2 && item) {
++				Tele::AddRestrictAction(_menu, _controller, item);
++			}
+ 		}
+ 	} else { // maybe cursor on some text history item?
+ 		const auto albumPartItem = _dragStateItem;
+@@ -4005,6 +4009,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
+ 					blockSenderAsGroup(itemId);
+ 				}, &st::menuIconBlock);
+ 			}
++			if (isUponSelected != -2 && item) {
++				Tele::AddRestrictAction(_menu, _controller, item);
++			}
+ 		} else if (Element::Moused()) {
+ 			addSelectMessageAction(Element::Moused()->data());
+ 		}
+diff --git a/Telegram/SourceFiles/history/view/history_view_context_menu.cpp b/Telegram/SourceFiles/history/view/history_view_context_menu.cpp
+index 879ac9c8db258ff39ce229fa6a09b82170bfd6b9..0ea1fd9cbd95b53cb4d2430365e44076f0667e31 100644
+--- a/Telegram/SourceFiles/history/view/history_view_context_menu.cpp
++++ b/Telegram/SourceFiles/history/view/history_view_context_menu.cpp
+@@ -114,6 +114,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "spellcheck/spellcheck_types.h"
+ #include "apiwrap.h"
+ #include "tele/secret/secret_chats.h"
++#include "tele/tele_restrict.h"
+ #include "tele/tele_bookmarks.h"
+ #include "tele/tele_button_payload.h"
+ #include "tele/tele_copy_markdown.h"
+@@ -1443,6 +1444,9 @@ void AddMessageActions(
+ 	AddSaveRichHtmlAction(menu, request, list);
+ 	AddReportAction(menu, request, list);
+ 	AddBlockSenderAction(menu, request, list);
++	if (request.item && request.selectedItems.empty()) {
++		Tele::AddRestrictAction(menu, list->controller(), request.item);
++	}
+ 	if (request.item && request.selectedItems.empty()) {
+ 		AddEphemeralMessageActions(
+ 			menu,
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index d2dc4c3dcbd110a9cfd413a227a8020b9d5c3e9c..243c585af31c61ffdad48d66fcef305cb5025c12 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -3492,6 +3492,10 @@ void FillMenus(SectionBuilder &builder) {
+ 		::Tele::kOptionCopyFilePath,
+ 		{ u"path"_q, u"folder"_q, u"download"_q });
+ 	AddOptionToggle(builder, ::Tele::kOptionCopyMarkdown);
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionRestrictMenu,
++		{ u"mute"_q, u"ban"_q, u"permissions"_q, u"admin"_q });
+ 	AddOptionToggle(
+ 		builder,
+ 		::Tele::kOptionRmbBesideBubble,
+diff --git a/Telegram/SourceFiles/tele/tele_menu_registry.cpp b/Telegram/SourceFiles/tele/tele_menu_registry.cpp
+index 7106d645e4a8e881349779810e6286b241622fe6..92419affa2562d677c775c1814d2b3f7967d166f 100644
+--- a/Telegram/SourceFiles/tele/tele_menu_registry.cpp
++++ b/Telegram/SourceFiles/tele/tele_menu_registry.cpp
+@@ -721,6 +721,10 @@ constexpr auto kFieldText = uint32(1 << 0);
+ 			P([](int) { return tr::lng_profile_block_user(tr::now); },
+ 				st::menuIconBlock),
+ 		}, .contexts = kOthers },
++		{ .key = u"restrict"_q, .phrases = {
++			P([](int) { return tr::lng_context_restrict_user(tr::now); },
++				st::menuIconPermissions),
++		}, .contexts = kOthers, .gate = kOptionRestrictMenu },
+ 		{ .key = u"select"_q, .phrases = {
+ 			P([](int) { return tr::lng_context_select_msg(tr::now); },
+ 				st::menuIconSelect),
+@@ -815,7 +819,7 @@ constexpr auto kFieldText = uint32(1 << 0);
+ 		"[tele#tele:[Bookmark#bookmark:bookmark,rename_bookmark],mark_read,"
+ 		"edit_history,shot,mark_viewed,html_send_tgw,html_script_log],|,"
+ 		"select,select_up_to,clear_selection,|,"
+-		"delete,report,block_user,|,"
++		"delete,report,block_user,restrict,|,"
+ 		"[Tools#tools:view_as_tl,mtp_inspector],|,"
+ 		"info.packs,info.restriction,info.read,info.forwarded,info.edited,"
+ 		"info.author,info.id"_q;
+@@ -834,7 +838,7 @@ constexpr auto kFieldText = uint32(1 << 0);
+ 		"copy_button_data,copy_message_link,"
+ 		"forward,add_offer,send_now,ghost_cancel,edit_caption,cancel_upload,"
+ 		"delete,"
+-		"download_selected,save_html,report,block_user,select,"
++		"download_selected,save_html,report,block_user,restrict,select,"
+ 		"select_up_to,clear_selection,reschedule,|,"
+ 		"info.packs,info.restriction,info.read,info.forwarded,info.edited,"
+ 		"info.author,shot,send_as_gif,html_send_tgw,html_script_log,|,"
+@@ -866,7 +870,7 @@ constexpr auto kFieldText = uint32(1 << 0);
+ 		"bookmark,rename_bookmark,mark_read,edit_history,shot,mark_viewed,"
+ 		"html_send_tgw,html_script_log,|,"
+ 		"select,select_up_to,clear_selection,|,"
+-		"delete,report,block_user,|,"
++		"delete,report,block_user,restrict,|,"
+ 		"view_as_tl,mtp_inspector,|,"
+ 		"info.packs,info.restriction,info.read,info.forwarded,info.edited,"
+ 		"info.author,info.id"_q;
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index 7a671a421481500498335acd007dec1997b54755..cbca82411200f626225226fbf6be352bc5a29932 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -144,6 +144,7 @@ const char kOptionCalcmulaInline[] = "tele-calcmula-inline";
+ const char kOptionTranslateOut[] = "tele-translate-out";
+ const char kOptionCopyEmojiId[] = "tele-copy-emoji-id";
+ const char kOptionCopyFilePath[] = "tele-copy-file-path";
++const char kOptionRestrictMenu[] = "tele-restrict-menu";
+ const char kOptionCopyMarkdown[] = "tele-copy-markdown";
+ const char kOptionRmbBesideBubble[] = "tele-rmb-beside-bubble";
+ const char kOptionShot[] = "tele-shot";
+@@ -1118,6 +1119,13 @@ base::options::toggle CopyFilePathOption({
+ 	.description = "For files saved on this computer.",
+ });
+ 
++base::options::toggle RestrictMenuOption({
++	.id = kOptionRestrictMenu,
++	.name = "Restrict in message and userpic menus",
++	.description = "For group admins, without deleting the message.",
++	.defaultValue = true,
++});
++
+ base::options::toggle CopyMarkdownOption({
+ 	.id = kOptionCopyMarkdown,
+ 	.name = "Copy as Markdown and HTML",
+@@ -2945,6 +2953,10 @@ bool CopyFilePath() {
+ 	return CopyFilePathOption.value();
+ }
+ 
++bool RestrictMenu() {
++	return RestrictMenuOption.value();
++}
++
+ bool CopyMarkdown() {
+ 	return CopyMarkdownOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index 62b83e41c31b651990c39a198395d64db8b3e47a..cae067ce23f15dd58b8370efb2a412d1f11747a1 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -139,6 +139,7 @@ extern const char kOptionCalcmulaInline[];
+ extern const char kOptionTranslateOut[];
+ extern const char kOptionCopyEmojiId[];
+ extern const char kOptionCopyFilePath[];
++extern const char kOptionRestrictMenu[];
+ extern const char kOptionCopyMarkdown[];
+ extern const char kOptionRmbBesideBubble[];
+ extern const char kOptionShot[];
+@@ -467,6 +468,7 @@ void SetStreamerMode(bool enabled);
+ [[nodiscard]] bool TranslateOut();
+ [[nodiscard]] bool CopyEmojiId();
+ [[nodiscard]] bool CopyFilePath();
++[[nodiscard]] bool RestrictMenu();
+ [[nodiscard]] bool CopyMarkdown();
+ [[nodiscard]] bool RmbBesideBubble();
+ [[nodiscard]] bool ShotInMenu();
+diff --git a/Telegram/SourceFiles/tele/tele_restrict.cpp b/Telegram/SourceFiles/tele/tele_restrict.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..10a7328e321f1314efd54773da8eaf25bff4aaad
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_restrict.cpp
+@@ -0,0 +1,163 @@
++#include "tele/tele_restrict.h"
++
++#include "api/api_chat_participants.h"
++#include "apiwrap.h"
++#include "boxes/peers/edit_participant_box.h"
++#include "boxes/peers/edit_participants_box.h"
++#include "data/data_channel.h"
++#include "data/data_session.h"
++#include "data/data_user.h"
++#include "history/history.h"
++#include "history/history_item.h"
++#include "lang/lang_keys.h"
++#include "main/main_session.h"
++#include "tele/tele_menu_apply.h"
++#include "tele/tele_options.h"
++#include "ui/layers/generic_box.h"
++#include "ui/widgets/popup_menu.h"
++#include "window/window_session_controller.h"
++#include "styles/style_menu_icons.h"
++
++namespace Tele {
++namespace {
++
++[[nodiscard]] ChannelData *RestrictChannel(
++		PeerData *group,
++		not_null<PeerData*> participant) {
++	const auto channel = group ? group->asMegagroup() : nullptr;
++	const auto user = participant->asUser();
++	if (!RestrictMenu()
++		|| !channel
++		|| !user
++		|| user->isSelf()
++		|| !channel->canBanMembers()) {
++		return nullptr;
++	}
++	const auto info = channel->mgInfo.get();
++	if (info && info->creator == user) {
++		return nullptr;
++	} else if (info
++		&& info->lastAdmins.contains(user)
++		&& !channel->canEditAdmin(user)) {
++		return nullptr;
++	}
++	return channel;
++}
++
++void ShowRestrictBox(
++		not_null<Window::SessionController*> controller,
++		not_null<ChannelData*> channel,
++		not_null<UserData*> user) {
++	const auto weak = base::make_weak(controller);
++	const auto show = [=](
++			bool hasAdminRights,
++			ChatRestrictionsInfo currentRights,
++			UserData *by,
++			TimeId since) {
++		const auto strong = weak.get();
++		if (!strong) {
++			return;
++		}
++		auto box = Box<EditRestrictedBox>(
++			channel,
++			user,
++			hasAdminRights,
++			currentRights,
++			QString(),
++			by,
++			since);
++		const auto weakBox = std::make_shared<
++			base::weak_qptr<Ui::BoxContent>>();
++		const auto close = [=] {
++			if (const auto box = weakBox->get()) {
++				box->closeBox();
++			}
++		};
++		if (!hasAdminRights) {
++			box->setSaveCallback(SaveRestrictedCallback(
++				strong->uiShow(),
++				channel,
++				user,
++				[=](ChatRestrictionsInfo) { close(); },
++				close));
++		}
++		*weakBox = strong->show(std::move(box));
++	};
++	channel->session().api().request(MTPchannels_GetParticipant(
++		channel->inputChannel(),
++		user->input()
++	)).done([=](const MTPchannels_ChannelParticipant &result) {
++		channel->owner().processUsers(result.data().vusers());
++		const auto participant = Api::ChatParticipant(
++			result.data().vparticipant(),
++			user);
++		using Type = Api::ChatParticipant::Type;
++		if (participant.type() == Type::Creator
++			|| participant.type() == Type::Admin) {
++			show(true, {}, nullptr, 0);
++		} else {
++			show(
++				false,
++				participant.restrictions(),
++				channel->owner().userLoaded(participant.by()),
++				participant.restrictedSince());
++		}
++	}).fail([=] {
++		show(false, {}, nullptr, 0);
++	}).send();
++}
++
++} // namespace
++
++UserData *LoadedUserById(
++		not_null<Main::Session*> session,
++		const QString &query) {
++	auto digits = query.trimmed();
++	digits.remove(' ');
++	if (digits.isEmpty() || digits.size() > 20) {
++		return nullptr;
++	}
++	for (const auto ch : digits) {
++		if (!ch.isDigit()) {
++			return nullptr;
++		}
++	}
++	auto ok = false;
++	const auto id = digits.toULongLong(&ok);
++	return (ok && id) ? session->data().userLoaded(UserId(id)) : nullptr;
++}
++
++void AddRestrictAction(
++		not_null<Window::SessionController*> controller,
++		PeerData *group,
++		not_null<PeerData*> participant,
++		const Window::PeerMenuCallback &addAction) {
++	const auto channel = RestrictChannel(group, participant);
++	if (!channel) {
++		return;
++	}
++	const auto user = participant->asUser();
++	addAction(tr::lng_context_restrict_user(tr::now), [=] {
++		ShowRestrictBox(controller, channel, user);
++	}, &st::menuIconPermissions);
++}
++
++void AddRestrictAction(
++		not_null<Ui::PopupMenu*> menu,
++		not_null<Window::SessionController*> controller,
++		not_null<HistoryItem*> item) {
++	const auto from = item->from();
++	const auto channel = item->isRegular()
++		? RestrictChannel(item->history()->peer, from)
++		: nullptr;
++	if (!channel) {
++		return;
++	}
++	const auto user = from->asUser();
++	menu->addAction(tr::lng_context_restrict_user(tr::now), [=] {
++		ShowRestrictBox(controller, channel, user);
++	}, &st::menuIconPermissions);
++	TagLastMenuAction(menu, u"restrict"_q);
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_restrict.h b/Telegram/SourceFiles/tele/tele_restrict.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..df42ffda4963b81064dd752fe51bf8b2a180b2f1
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_restrict.h
+@@ -0,0 +1,37 @@
++#pragma once
++
++#include "window/window_peer_menu.h"
++
++class HistoryItem;
++class PeerData;
++class UserData;
++
++namespace Main {
++class Session;
++} // namespace Main
++
++namespace Ui {
++class PopupMenu;
++} // namespace Ui
++
++namespace Window {
++class SessionController;
++} // namespace Window
++
++namespace Tele {
++
++void AddRestrictAction(
++	not_null<Window::SessionController*> controller,
++	PeerData *group,
++	not_null<PeerData*> participant,
++	const Window::PeerMenuCallback &addAction);
++[[nodiscard]] UserData *LoadedUserById(
++	not_null<Main::Session*> session,
++	const QString &query);
++
++void AddRestrictAction(
++	not_null<Ui::PopupMenu*> menu,
++	not_null<Window::SessionController*> controller,
++	not_null<HistoryItem*> item);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index cccb1449b52b2bfbe4002237fe9fb8de01959140..46135419b94540453ee62c1eb36d93a343420d47 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -233,6 +233,7 @@ struct Spec {
+ 		Toggle(kOptionTranslateOut),
+ 		Toggle(kOptionCopyEmojiId),
+ 		Toggle(kOptionCopyFilePath),
++		Toggle(kOptionRestrictMenu),
+ 		Toggle(kOptionCopyMarkdown),
+ 		Toggle(kOptionRmbBesideBubble),
+ 		Toggle(kOptionShot),
+diff --git a/Telegram/SourceFiles/window/window_peer_menu.cpp b/Telegram/SourceFiles/window/window_peer_menu.cpp
+index b0f562fdb5649ea9e22d169d2a760c3d286bbe56..3364869772509a1dd510e59efb83017b7b5b877e 100644
+--- a/Telegram/SourceFiles/window/window_peer_menu.cpp
++++ b/Telegram/SourceFiles/window/window_peer_menu.cpp
+@@ -128,6 +128,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "boxes/peers/manage_community_box.h"
+ #include "boxes/premium_preview_box.h"
+ #include "tele/secret/secret_chats.h"
++#include "tele/tele_restrict.h"
+ #include "tele/tele_bookmarks.h"
+ #include "tele/tele_changelog_chat.h"
+ #include "tele/tele_chat_backgrounds.h"
+@@ -4590,6 +4591,7 @@ void FillSenderUserpicMenu(
+ 		}
+ 	}
+ 	Tele::AddIgnoreAction(peer, addAction);
++	Tele::AddRestrictAction(controller, groupPeer, peer, addAction);
+ 	Tele::AddViewTlAction(addAction, controller->uiShow(), peer);
+ 	Tele::AddMtpInspectorAction(addAction, controller->uiShow(), peer);
+ }

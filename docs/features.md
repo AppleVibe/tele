@@ -205,6 +205,8 @@ settings → tele → menus.
 | [255](../patches/tdesktop/0255-feat-copy-file-paths-from-the-message-menu.patch) | copy the full path of a downloaded file from its message menu | tele → menus, off |
 | [274](../patches/tdesktop/0274-fix-sharp-boost-icons-and-button-emoji-in-scaled-sho.patch) | shots scaled up keep boost icons and custom emoji in bot buttons sharp | with 105 |
 | [301](../patches/tdesktop/0301-feat-remove-all-your-messages-from-a-chat.patch) | remove my messages in the chat menu deletes all your messages in a chat, group or topic for everyone, newest first, after saying how many. the same item stops it | tele → menus, off |
+| [332](../patches/tdesktop/0332-feat-show-skipped-messages-in-shots.patch) | a shot of messages that aren't next to each other can show how many were skipped between them, as a "2 messages skipped" badge | with 87 |
+| [333](../patches/tdesktop/0333-feat-restrict-members-from-message-menus-and-find-th.patch) | group admins can restrict someone from their message or userpic menu without deleting the message, and the add exception, add admin and remove user pickers find people tele already knows by their numeric id, members or not | tele → menus, on |
 | [1004](../patches/Telegram/lib_ui/0004-fix-icon-emoji-stay-sharp-in-renders-at-a-higher-rat.patch) | icons drawn inside text, like the boost mark next to names, stay sharp in shots scaled up | with 105 |
 
 ## privacy

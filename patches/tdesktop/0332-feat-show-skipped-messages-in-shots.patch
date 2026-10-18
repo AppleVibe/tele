@@ -1,0 +1,377 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Sun, 18 Oct 2026 18:52:38 +0300
+Subject: [PATCH] feat: show skipped messages in shots
+
+---
+ Telegram/SourceFiles/tele/tele_shot.cpp | 168 +++++++++++++++++++++++-
+ 1 file changed, 163 insertions(+), 5 deletions(-)
+
+diff --git a/Telegram/SourceFiles/tele/tele_shot.cpp b/Telegram/SourceFiles/tele/tele_shot.cpp
+index de7f20d21013a8a6ff03ae4db2ccea93fcbc434e..0a4200b65d3c74e3aea997912b0ed04489228295 100644
+--- a/Telegram/SourceFiles/tele/tele_shot.cpp
++++ b/Telegram/SourceFiles/tele/tele_shot.cpp
+@@ -87,9 +87,12 @@ constexpr auto kMaxScale = 4;
+ constexpr auto kScanStrip = 512;
+ constexpr auto kScanAlpha = 16;
+ 
++constexpr auto kMaxSkippedScan = uint64(1'000'000);
++
+ struct ShotOptions {
+ 	bool background = true;
+ 	bool dates = false;
++	bool skipped = false;
+ 	bool transparent = false;
+ 	bool incoming = false;
+ 	uint16 hidden = uint16(ShotPart::Info);
+@@ -132,6 +135,7 @@ constexpr auto kPartKeys = std::array{
+ 	};
+ 	flag("background", result.background);
+ 	flag("dates", result.dates);
++	flag("skipped", result.skipped);
+ 	flag("transparent", result.transparent);
+ 	for (const auto &[part, key] : kPartKeys) {
+ 		auto shown = !(result.hidden & uint16(part));
+@@ -151,6 +155,7 @@ void SaveOptions(const ShotOptions &options) {
+ 	auto object = QJsonObject();
+ 	object.insert(u"background"_q, options.background);
+ 	object.insert(u"dates"_q, options.dates);
++	object.insert(u"skipped"_q, options.skipped);
+ 	object.insert(u"transparent"_q, options.transparent);
+ 	for (const auto &[part, key] : kPartKeys) {
+ 		object.insert(QLatin1String(key), !(options.hidden & uint16(part)));
+@@ -296,6 +301,52 @@ private:
+ 	return result;
+ }
+ 
++using SkippedCounts = base::flat_map<FullMsgId, int>;
++
++[[nodiscard]] SkippedCounts CountSkipped(
++		const std::vector<not_null<HistoryItem*>> &items,
++		Fn<bool(not_null<HistoryItem*>)> displayed) {
++	auto result = SkippedCounts();
++	if (!displayed) {
++		return result;
++	}
++	for (auto i = 1; i < int(items.size()); ++i) {
++		const auto from = items[i - 1];
++		const auto till = items[i];
++		if (from->history() != till->history()) {
++			continue;
++		}
++		const auto owner = &till->history()->owner();
++		const auto peer = till->history()->peer->id;
++		const auto last = std::min(
++			uint64(till->id.bare),
++			uint64(from->id.bare) + kMaxSkippedScan);
++		auto count = 0;
++		auto groups = base::flat_set<not_null<const Data::Group*>>();
++		for (auto id = uint64(from->id.bare) + 1; id < last; ++id) {
++			const auto item = owner->message(peer, MsgId(int64(id)));
++			if (!item || !displayed(item)) {
++				continue;
++			} else if (const auto group = owner->groups().find(item)) {
++				if (!groups.emplace(group).second) {
++					continue;
++				}
++			}
++			++count;
++		}
++		if (count > 0) {
++			result.emplace(till->fullId(), count);
++		}
++	}
++	return result;
++}
++
++[[nodiscard]] QString SkippedText(int count) {
++	return Lower((count == 1)
++		? u"1 message skipped"_q
++		: (QString::number(count) + u" messages skipped"_q));
++}
++
+ [[nodiscard]] QByteArray PngBytes(const QImage &image) {
+ 	auto result = QByteArray();
+ 	auto buffer = QBuffer(&result);
+@@ -460,6 +511,7 @@ public:
+ 	ShotRenderer(
+ 		not_null<Window::SessionController*> controller,
+ 		std::vector<not_null<HistoryItem*>> items,
++		SkippedCounts skipped,
+ 		Context context,
+ 		int chatWidth);
+ 	~ShotRenderer();
+@@ -477,6 +529,7 @@ public:
+ 	[[nodiscard]] int totalCount() const;
+ 	[[nodiscard]] HistoryItem *firstItem() const;
+ 	[[nodiscard]] bool hasOutgoing() const;
++	[[nodiscard]] bool hasSkipped() const;
+ 
+ 	void paint(Painter &p, QRect clip, int ratio);
+ 	[[nodiscard]] QImage render();
+@@ -511,6 +564,9 @@ private:
+ 	void paintContent(Painter &p, QRect clip, int ratio);
+ 	void paintUserpic(Painter &p, not_null<Element*> view, int top);
+ 	void paintDates(Painter &p, QRect clip);
++	void paintSkipped(Painter &p, QRect clip);
++	[[nodiscard]] int skippedBefore(int index) const;
++	[[nodiscard]] int skippedHeight() const;
+ 	void paintBackground(Painter &p, QRect clip, int ratio);
+ 	void validateBackground(
+ 		not_null<Ui::ChatTheme*> theme,
+@@ -519,6 +575,7 @@ private:
+ 
+ 	const not_null<Window::SessionController*> _controller;
+ 	std::vector<not_null<HistoryItem*>> _items;
++	const SkippedCounts _skipped;
+ 	Keyboards _keyboards;
+ 	const int _chatWidth = 0;
+ 	const int _liveHeight = 0;
+@@ -529,6 +586,7 @@ private:
+ 	base::flat_set<const Element*> _viewSet;
+ 	base::flat_set<not_null<Element*>> _dirty;
+ 	std::vector<int> _tops;
++	std::vector<std::pair<int, QString>> _skippedPills;
+ 	base::flat_map<not_null<PeerData*>, Ui::PeerUserpicView> _userpics;
+ 	base::flat_map<FullMsgId, Ui::PeerUserpicView> _hiddenUserpics;
+ 	std::optional<Background> _background;
+@@ -557,10 +615,12 @@ private:
+ ShotRenderer::ShotRenderer(
+ 	not_null<Window::SessionController*> controller,
+ 	std::vector<not_null<HistoryItem*>> items,
++	SkippedCounts skipped,
+ 	Context context,
+ 	int chatWidth)
+ : _controller(controller)
+ , _items(std::move(items))
++, _skipped(std::move(skipped))
+ , _chatWidth(chatWidth)
+ , _liveHeight(controller->content()->height())
+ , _style(std::make_unique<Ui::ChatStyle>(
+@@ -589,6 +649,26 @@ bool ShotRenderer::hasOutgoing() const {
+ 	return _hasOutgoing;
+ }
+ 
++bool ShotRenderer::hasSkipped() const {
++	return !_skipped.empty();
++}
++
++int ShotRenderer::skippedBefore(int index) const {
++	if (!_options.skipped || index <= 0 || index >= int(_views.size())) {
++		return 0;
++	}
++	const auto i = _skipped.find(_views[index]->data()->fullId());
++	return (i != end(_skipped)) ? i->second : 0;
++}
++
++int ShotRenderer::skippedHeight() const {
++	return st::msgServiceMargin.top()
++		+ st::msgServicePadding.top()
++		+ st::msgServiceFont->height
++		+ st::msgServicePadding.bottom()
++		+ st::msgServiceMargin.bottom();
++}
++
+ not_null<const Ui::ChatStyle*> ShotRenderer::style() {
+ 	const auto theme = _controller->currentChatTheme();
+ 	if (_styleTheme.get() != theme.get()) {
+@@ -697,6 +777,7 @@ const ShotOptions &ShotRenderer::options() const {
+ 
+ void ShotRenderer::setOptions(ShotOptions options) {
+ 	const auto rebuildNeeded = (_options.dates != options.dates)
++		|| (_options.skipped != options.skipped)
+ 		|| (_options.incoming != options.incoming)
+ 		|| (_options.hidden != options.hidden);
+ 	const auto scaleChanged = (_options.scale != options.scale);
+@@ -840,6 +921,7 @@ void ShotRenderer::clear() {
+ 	_dirty.clear();
+ 	_viewSet.clear();
+ 	_tops.clear();
++	_skippedPills.clear();
+ 	_shown = 0;
+ 	base::take(_views);
+ }
+@@ -893,7 +975,8 @@ void ShotRenderer::refreshAttachments(int till) {
+ 				&& ((view->dateTime().date()
+ 					!= previous->dateTime().date())
+ 					|| previous->data()->hideDisplayDate()));
+-			const auto attached = view->computeIsAttachToPrevious(previous);
++			const auto attached = !skippedBefore(i)
++				&& view->computeIsAttachToPrevious(previous);
+ 			view->setAttachToPrevious(attached, previous);
+ 			previous->setAttachToNext(attached, view);
+ 		}
+@@ -923,7 +1006,8 @@ void ShotRenderer::relayout() {
+ 	auto top = TopPadding();
+ 	auto shown = 0;
+ 	for (; shown != count; ++shown) {
+-		const auto height = _views[shown]->resizeGetHeight(_width);
++		const auto height = _views[shown]->resizeGetHeight(_width)
++			+ (skippedBefore(shown) ? skippedHeight() : 0);
+ 		if (shown > 0 && top + height + BottomPadding() > limit) {
+ 			break;
+ 		}
+@@ -933,8 +1017,13 @@ void ShotRenderer::relayout() {
+ 		refreshAttachments(shown);
+ 	}
+ 	_tops.clear();
++	_skippedPills.clear();
+ 	top = TopPadding();
+ 	for (auto i = 0; i != shown; ++i) {
++		if (const auto count = skippedBefore(i)) {
++			_skippedPills.emplace_back(top, SkippedText(count));
++			top += skippedHeight();
++		}
+ 		_tops.push_back(top);
+ 		top += _views[i]->resizeGetHeight(_width);
+ 	}
+@@ -973,6 +1062,13 @@ void ShotRenderer::computeBounds() {
+ 					+ st::msgServicePadding.right());
+ 		}
+ 	}
++	for (const auto &[pillTop, text] : _skippedPills) {
++		badge = std::max(
++			badge,
++			st::msgServiceFont->width(text)
++				+ st::msgServicePadding.left()
++				+ st::msgServicePadding.right());
++	}
+ 	scanBounds(left, right);
+ 	if (left >= right) {
+ 		left = 0;
+@@ -1043,6 +1139,7 @@ void ShotRenderer::paint(Painter &p, QRect clip, int ratio) {
+ 	paintContent(p, clip.translated(_cropLeft, 0), ratio);
+ 	p.translate(_cropLeft, 0);
+ 	paintDates(p, clip);
++	paintSkipped(p, clip);
+ }
+ 
+ QImage ShotRenderer::render() {
+@@ -1211,6 +1308,42 @@ void ShotRenderer::paintDates(Painter &p, QRect clip) {
+ 	}
+ }
+ 
++void ShotRenderer::paintSkipped(Painter &p, QRect clip) {
++	const auto st = style();
++	const auto till = clip.y() + clip.height();
++	const auto &margin = st::msgServiceMargin;
++	const auto &padding = st::msgServicePadding;
++	const auto &font = st::msgServiceFont;
++	const auto height = padding.top() + font->height + padding.bottom();
++	const auto radius = Ui::HistoryServiceMsgRadius();
++	for (const auto &[top, text] : _skippedPills) {
++		if (top >= till || top + skippedHeight() <= clip.y()) {
++			continue;
++		}
++		const auto width = font->width(text);
++		const auto available = _cropWidth - 2 * margin.left();
++		const auto left = margin.left()
++			+ (available - width - padding.left() - padding.right()) / 2;
++		const auto rect = QRect(
++			left,
++			top + margin.top(),
++			width + padding.left() + padding.right(),
++			height);
++		{
++			auto hq = PainterHighQualityEnabler(p);
++			p.setPen(Qt::NoPen);
++			p.setBrush(st->msgServiceBg());
++			p.drawRoundedRect(rect, radius, radius);
++		}
++		p.setFont(font);
++		p.setPen(st->msgServiceFg());
++		p.drawText(
++			left + padding.left(),
++			top + margin.top() + padding.top() + font->ascent,
++			text);
++	}
++}
++
+ void ShotRenderer::paintBackground(Painter &p, QRect clip, int ratio) {
+ 	const auto theme = _controller->currentChatTheme();
+ 	if (const auto color = theme->background().colorForFill) {
+@@ -1426,11 +1559,13 @@ void ShotBox(
+ 		not_null<Ui::GenericBox*> box,
+ 		not_null<Window::SessionController*> controller,
+ 		std::vector<not_null<HistoryItem*>> items,
++		SkippedCounts skipped,
+ 		Context context,
+ 		int chatWidth) {
+ 	const auto shot = box->lifetime().make_state<ShotRenderer>(
+ 		controller,
+ 		std::move(items),
++		std::move(skipped),
+ 		context,
+ 		chatWidth);
+ 	const auto show = controller->uiShow();
+@@ -1618,6 +1753,15 @@ void ShotBox(
+ 	)->toggledChanges() | rpl::on_next([=](bool value) {
+ 		change([&](ShotOptions &options) { options.dates = value; });
+ 	}, panel->lifetime());
++	if (shot->hasSkipped()) {
++		addToggle(
++			messagesGroup,
++			u"Skipped messages"_q,
++			shot->options().skipped
++		)->toggledChanges() | rpl::on_next([=](bool value) {
++			change([&](ShotOptions &options) { options.skipped = value; });
++		}, panel->lifetime());
++	}
+ 	addDivider();
+ 
+ 	const auto showGroup = addGroup(u"Show"_q);
+@@ -1772,7 +1916,8 @@ void AddShot(
+ 		std::vector<FullMsgId> ids,
+ 		Context context,
+ 		int chatWidth,
+-		Fn<void()> clearSelection) {
++		Fn<void()> clearSelection,
++		Fn<bool(not_null<HistoryItem*>)> displayed) {
+ 	const auto session = &controller->session();
+ 	const auto items = CollectItems(session, ids);
+ 	if (items.empty() || ranges::any_of(items, Restricted)) {
+@@ -1780,6 +1925,7 @@ void AddShot(
+ 	}
+ 	InsertShotAction(menu, [=] {
+ 		auto items = CollectItems(session, ids);
++		auto skipped = CountSkipped(items, displayed);
+ 		if (clearSelection) {
+ 			clearSelection();
+ 		}
+@@ -1788,6 +1934,7 @@ void AddShot(
+ 				ShotBox,
+ 				controller,
+ 				std::move(items),
++				std::move(skipped),
+ 				context,
+ 				chatWidth));
+ 		}
+@@ -1833,7 +1980,11 @@ void AddShotAction(
+ 			std::move(selected),
+ 			Context::History,
+ 			chatWidth,
+-			std::move(clearSelection));
++			std::move(clearSelection),
++			[](not_null<HistoryItem*> item) {
++				const auto view = item->mainView();
++				return view && !view->isHidden();
++			});
+ 	}
+ }
+ 
+@@ -1859,7 +2010,14 @@ void AddShotAction(
+ 			std::move(ids),
+ 			list->delegate()->listContext(),
+ 			list->width(),
+-			std::move(clearSelection));
++			std::move(clearSelection),
++			[weak = QPointer<HistoryView::ListWidget>(list.get())](
++					not_null<HistoryItem*> item) {
++				const auto view = weak
++					? weak->viewByPosition(item->position())
++					: nullptr;
++				return view && !view->isHidden();
++			});
+ 	}
+ }
+ 
