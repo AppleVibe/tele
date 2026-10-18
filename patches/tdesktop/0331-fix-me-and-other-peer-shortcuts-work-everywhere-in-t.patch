@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Sun, 18 Oct 2026 17:54:43 +0300
+Subject: [PATCH] fix: me and other peer shortcuts work everywhere in the
+ mtproto console
+
+---
+ Telegram/Resources/tele_html/mtp_console.js   |  4 ++--
+ .../tele/tele_mtp_console_requests.cpp        | 23 +++++++++++++++++--
+ 2 files changed, 23 insertions(+), 4 deletions(-)
+
+diff --git a/Telegram/Resources/tele_html/mtp_console.js b/Telegram/Resources/tele_html/mtp_console.js
+index 2219ee92d1b1054d181203d3f857f18d686b3864..88d1bf8bdb93eee9466b42265a0e8f0dff9c9e94 100644
+--- a/Telegram/Resources/tele_html/mtp_console.js
++++ b/Telegram/Resources/tele_html/mtp_console.js
+@@ -8,7 +8,7 @@ const kExpandDepth = 3;
+ const kVectorOpenLimit = 40;
+ const kPopupLimit = 12;
+ const kJsonWidth = 80;
+-const kPeerTypes = new Set(['InputPeer', 'InputUser', 'InputChannel']);
++const kPeerTypes = new Set(['InputPeer', 'InputUser', 'InputChannel', 'InputNotifyPeer', 'InputDialogPeer']);
+ const kNumericTypes = new Set(['int', 'long', 'double', 'int128', 'int256']);
+ const kNumber = /^[+-]?(?:0[xX][0-9a-fA-F]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)$/;
+ const kIdentStart = /[A-Za-z_]/;
+@@ -3293,7 +3293,7 @@ const kHelp = [
+ 		['0x + 32 or 64 hex digits', 'int128 and int256'],
+ 	]],
+ 	['Peers', [
+-		['me  @me  @durov  durov  t.me/durov  https://t.me/c/1234567890', 'InputPeer, InputUser and InputChannel', true],
++		['me  @me  @durov  durov  t.me/durov  https://t.me/c/1234567890', 'InputPeer, InputUser, InputChannel, InputNotifyPeer and InputDialogPeer', true],
+ 		['123456789  -1001234567890  -123456', 'user, channel and chat ids from loaded chats'],
+ 	]],
+ 	['Wrappers', [
+diff --git a/Telegram/SourceFiles/tele/tele_mtp_console_requests.cpp b/Telegram/SourceFiles/tele/tele_mtp_console_requests.cpp
+index 72e3f78a8bfd36af37c564e2ad22dadf52f35bb2..10ca47439ef363a4adbcbe4ec91392ca25494ebf 100644
+--- a/Telegram/SourceFiles/tele/tele_mtp_console_requests.cpp
++++ b/Telegram/SourceFiles/tele/tele_mtp_console_requests.cpp
+@@ -496,6 +496,23 @@ TlRuntime::Resolution MtpConsoleRequests::resolve(
+ 	const auto fail = [](QString error) {
+ 		return TlRuntime::Resolution{ .error = error.toStdString() };
+ 	};
++	const auto wrapper = (type == "InputNotifyPeer")
++		? "inputNotifyPeer"
++		: (type == "InputDialogPeer")
++		? "inputDialogPeer"
++		: nullptr;
++	if (wrapper) {
++		auto result = resolve(value, "InputPeer");
++		if (!result.bytes.empty()) {
++			const auto id = ConsoleSchema().constructor(wrapper)->id;
++			auto prefix = std::string(4, '\0');
++			for (auto i = 0; i != 4; ++i) {
++				prefix[i] = char((id >> (8 * i)) & 0xFF);
++			}
++			result.bytes = prefix + result.bytes;
++		}
++		return result;
++	}
+ 	const auto name = FromStd(type);
+ 	const auto user = (type == "InputUser");
+ 	const auto channel = (type == "InputChannel");
+@@ -530,9 +547,11 @@ TlRuntime::Resolution MtpConsoleRequests::resolve(
+ 	const auto lower = text.toLower();
+ 	if (lower == u"me"_q || lower == u"@me"_q || lower == u"self"_q) {
+ 		if (user) {
+-			return { .bytes = ToStd(SerializeTl(MTP_inputUserSelf())) };
++			return { .bytes = ToStd(
++				SerializeTl(MTPInputUser(MTP_inputUserSelf()))) };
+ 		} else if (!channel) {
+-			return { .bytes = ToStd(SerializeTl(MTP_inputPeerSelf())) };
++			return { .bytes = ToStd(
++				SerializeTl(MTPInputPeer(MTP_inputPeerSelf()))) };
+ 		}
+ 		return input(_session->user());
+ 	}
