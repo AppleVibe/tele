@@ -10659,12 +10659,13 @@ adds an item to the ⋮ menu of the story viewer, for every story of this accoun
 
 - **grant:** none.
 - **parameters:**
-  - `options` (`StoryActionOptions`): `text`, an optional `emoji` shown before it, and `onClick(ctx)` with the story's `peer` and `storyId`, see `type StoryActionOptions`.
+  - `options` (`StoryActionOptions`): `text`, an optional `emoji` shown before it, an optional `icon`, and `onClick(ctx)` with the story's `peer` and `storyId`, see `type StoryActionOptions`.
 - **returns:** `Disposer` that removes the item.
 - **throws:**
   - `TypeError: tg.stories.registerStoryAction needs an options object`.
   - `TypeError: tg.stories.registerStoryAction needs a text` for an empty or whitespace-only `text`.
   - `TypeError: tg.stories.registerStoryAction: emoji must be a string`, `TypeError: tg.stories.registerStoryAction: onClick must be a function`.
+  - `TypeError: tg.stories.registerStoryAction: <problem>` for a bad `icon`, see `type MenuIcon`.
 - **notes:** items appear below tele's own ones, in registration order, script by script. `onClick` runs on the next event-loop turn after the click; reading the story needs `account.read(stories)`.
 
 Example:
@@ -10686,6 +10687,7 @@ tg.stories.registerStoryAction({
 export interface StoryActionOptions {
   text: string
   emoji?: string
+  icon?: MenuIcon
   onClick(context: StoryActionContext): unknown
 }
 
@@ -10700,6 +10702,7 @@ a story viewer menu item.
 - **fields:**
   - `text` (`string`): the item's text.
   - `emoji` (`string`, optional): shown before the text.
+  - `icon` (`MenuIcon`, optional): the item's icon, see `type MenuIcon`. without it the item gets tele's experimental icon.
   - `onClick` (`(context: StoryActionContext) => unknown`): runs on click, may be async; `context.peer` is the story's marked peer id, `context.storyId` its id.
 
 Example:
@@ -13619,8 +13622,8 @@ export interface Ui {
   }): UiElement
   settingsPage(options: { title?: string, items(): UiElement[] }): Page
   readonly widgets: Widgets
-  registerMenuItem(options: { place: 'main' | 'tray', text: string, emoji?: string, onClick(): unknown }): Disposer
-  registerSettingsEntry(options: { title: string, emoji?: string, page: Page, onClick?(): unknown }): Disposer
+  registerMenuItem(options: { place: 'main' | 'tray', text: string, emoji?: string, icon?: MenuIcon, onClick(): unknown }): Disposer
+  registerSettingsEntry(options: { title: string, emoji?: string, icon?: MenuIcon, page: Page, onClick?(): unknown }): Disposer
   openSection(page: Page): boolean
   openPage(page: Page): void
   dialog(options: AlertOptions): Promise<AlertAnswer>
@@ -14903,7 +14906,7 @@ tg.ui.registerMenuItem({ place: 'main', emoji: '🧭', text: 'my script', onClic
 ### tg.ui.registerSettingsEntry(options)
 
 ```ts
-registerSettingsEntry(options: { title: string, emoji?: string, page: Page, onClick?(): unknown }): Disposer
+registerSettingsEntry(options: { title: string, emoji?: string, icon?: MenuIcon, page: Page, onClick?(): unknown }): Disposer
 ```
 
 adds a button to tele's main settings page, after tele's own entries and a divider. clicking it opens `page` as a settings section (like `tg.ui.openSection`).
@@ -14912,6 +14915,7 @@ adds a button to tele's main settings page, after tele's own entries and a divid
 - **parameters:**
   - `options.title` (`string`): the button's label.
   - `options.emoji` (`string`, optional): drawn before the label.
+  - `options.icon` (`MenuIcon`, optional): drawn in the button's icon column like tele's own settings entries, see `type MenuIcon`; with an icon the label lines up with theirs.
   - `options.page` (`Page`): the page to open.
   - `options.onClick` (`() => unknown`, optional): runs after the section opened, for example to refresh data and `page.invalidate()`.
 - **returns:** `Disposer` that removes the button.
@@ -14919,6 +14923,7 @@ adds a button to tele's main settings page, after tele's own entries and a divid
   - `TypeError: expected a page from tg.ui.settingsPage` for something that isn't a page.
   - `TypeError: tg.ui.registerSettingsEntry needs a page from tg.ui.settingsPage` for a disposed page.
   - `TypeError: tg.ui.registerSettingsEntry({ ..., onClick })` when `onClick` is given but isn't a function.
+  - `TypeError: tg.ui.registerSettingsEntry: <problem>` for a bad `icon`, see `type MenuIcon`.
 - **notes:** entries of all scripts (of every account) are listed in the order they were registered. they disappear when the script stops.
 
 Example:
@@ -15167,7 +15172,7 @@ tele has a menu editor: Alt + right-click on a context menu lets the user move a
 - **grant:** none.
 - **notes:**
   - each action has a stable key `script.<script id>.<id>`, where the script id is the file or folder name with every character outside `a-z 0-9 _` turned into `_`, and `id` is the action's `id`. the layout is saved by that key, so keep ids stable between versions.
-  - a new action appears at the bottom of its menu, with tele's experimental icon. once the user moves or hides it in the editor, it stays where they put it.
+  - a new action appears at the bottom of its menu, with its `icon` (see `type MenuIcon`) or tele's experimental icon. once the user moves or hides it in the editor, it stays where they put it.
   - when the script stops (or the disposer runs) the item becomes inactive: it disappears from the menu and from the editor, but its saved placement is kept, so it comes back to the same place when the script starts again. the placement is only forgotten if the user saves the editor while the script is off.
   - the same action registered by the script in several accounts is one menu item.
 
@@ -15176,6 +15181,48 @@ Example:
 ```ts
 // keep the id stable: renaming 'translate' to 'tr' would lose the user's placement
 tg.registerMessageAction({ id: 'translate', text: 'translate', onClick: translate })
+```
+
+### type MenuIcon
+
+```ts
+export type MenuIconName =
+  | 'reactions'
+  | 'reply'
+  | 'copy'
+  // … every icon of tele's own menus: tele.d.ts lists all 222
+export type MenuIcon = MenuIconName | (string & {}) | bigint | Uint8Array
+```
+
+the icon of a menu item, a drawer item or a settings entry: `icon` in `ActionOptions`, `MediaActionOptions` and `StoryActionOptions`, and in `tg.ui.registerMenuItem`, `tg.ui.registerSettingsEntry` and `widget.addMenuItem`.
+
+- **forms:**
+  - a tele icon name (`'copy'`, `'delete'`, `'link'`, `'pin'`, `'settings'`…): the icon tele's own items use, in their color. `MenuIconName` in `tele.d.ts` lists every name.
+  - one emoji (`'🧪'`): drawn in color, at emoji size.
+  - an SVG: a string that starts with `<svg` (or `<?xml`), a `.svg` file or SVG bytes. drawn as a mask in the menu's icon color, so it follows the theme like tele's icons; its own colors are ignored.
+  - an image: a `.png`, `.jpg` / `.jpeg` or `.webp` file, or its bytes as a `Uint8Array`. drawn as it is, scaled down to the icon size.
+  - a custom emoji: its document id as a `bigint` (the `documentId` of a `messageEntityCustomEmoji` or an `emojiStatus`). drawn like in messages: animated (power saving stops it), and in the icon color when it's a text-colored emoji.
+- **notes:**
+  - file paths are relative to the script's folder (the scripts folder for a single-file script); absolute paths work too. the file is read once, when the item is registered. files and bytes are limited to 1 MB.
+  - the icon sits in the menu's icon column, at the same size as tele's icons. menus without an icon column, like the tray menu, show the item without it.
+  - in the media viewer's and the story viewer's dark menus, tele icons and SVGs take the menu's light text color.
+  - the menu editor shows tele icons on script items; other icons show as the experimental icon in the editor, and the real menu keeps them however the items are moved.
+- **throws:** `TypeError` with the registering method's name in front, e.g. `TypeError: tg.registerMessageAction: icon can't be empty`:
+  - `icon must be a string, a bigint or a Uint8Array`.
+  - `icon can't be empty` for a blank string.
+  - `icon '<text>' isn't a tele icon name, one emoji, an <svg> or an image file`.
+  - `the icon isn't a valid SVG`.
+  - `can't read the icon file <path>`, `the icon file is over 1 MB`, `the icon is over 1 MB` (bytes).
+  - `the icon file isn't a valid SVG, PNG, JPEG or WebP image`, `the icon bytes aren't a valid SVG, PNG, JPEG or WebP image`.
+  - `icon must be a custom emoji document id` for a `bigint` that isn't positive.
+
+Example:
+
+```ts
+tg.registerMessageAction({ id: 'copy_md', text: 'copy as markdown', icon: 'copy', onClick: copyAsMarkdown })
+tg.registerChatAction({ id: 'stats', text: 'chat stats', icon: '📊', onClick: showStats })
+tg.registerProfileAction({ id: 'card', text: 'contact card', icon: 'icons/card.svg', onClick: showCard })
+tg.ui.registerMenuItem({ place: 'main', text: 'my bot', icon: 5368324170671202286n, onClick: openBot })
 ```
 
 ### tg.registerMessageAction(options)
@@ -15196,6 +15243,7 @@ adds an item to the message context menu (right-click on a message in a chat and
   - `TypeError: tg.registerMessageAction needs a text` for an empty or whitespace-only `text`.
   - `TypeError: tg.registerMessageAction: onClick must be a function, visible a function if given`.
   - `TypeError: tg.registerMessageAction: the id '<id>' is already registered` for a second action with the same id in this script.
+  - `TypeError: tg.registerMessageAction: <problem>` for a bad `icon`, see `type MenuIcon`.
 - **notes:** see "the menu editor" for placement. `visible` runs synchronously while the menu is built; `onClick` runs on the next event-loop turn after the menu closed.
 
 Example:
@@ -15282,6 +15330,7 @@ tg.registerProfileAction({
 export interface ActionOptions<C> {
   id: string
   text: string
+  icon?: MenuIcon
   onClick(context: C): unknown
   visible?(context: C): boolean
 }
@@ -15292,6 +15341,7 @@ options shared by the three menu actions; `C` is `MessageActionContext` for mess
 - **fields:**
   - `id` (`string`): 1 to 64 characters of `a-z`, `0-9` and `_`, unique per menu within the script. it's part of the menu editor key, so keep it stable.
   - `text` (`string`): the item's label, not empty.
+  - `icon` (`MenuIcon`, optional): the item's icon, see `type MenuIcon`. without it the item gets tele's experimental icon.
   - `onClick` (`(context: C) => unknown`): runs when the item is chosen, on the next event-loop turn, with the 200 ms budget for its synchronous part. may be async. a throw is a fault.
   - `visible` (`(context: C) => boolean`, optional): runs synchronously every time the menu is built (200 ms budget). a falsy result or a throw hides the item for that menu. without it the item always shows. keep it cheap: no network, no awaits (a returned promise counts as truthy).
 
@@ -15653,7 +15703,7 @@ tg.registerQuickAction({
 ### tg.ui.registerMenuItem(options)
 
 ```ts
-registerMenuItem(options: { place: 'main' | 'tray', text: string, emoji?: string, onClick(): unknown }): Disposer
+registerMenuItem(options: { place: 'main' | 'tray', text: string, emoji?: string, icon?: MenuIcon, onClick(): unknown }): Disposer
 ```
 
 adds an item to the left drawer (the main menu behind the ☰ button) or to the tray icon's menu.
@@ -15663,11 +15713,13 @@ adds an item to the left drawer (the main menu behind the ☰ button) or to the 
   - `options.place` (`'main' | 'tray'`): `'main'` adds it at the end of the left drawer, after a separator; `'tray'` adds it to the tray menu before Quit.
   - `options.text` (`string`): the item's label.
   - `options.emoji` (`string`, optional): drawn before the label.
+  - `options.icon` (`MenuIcon`, optional): drawn in the drawer row's icon column like tele's own items, see `type MenuIcon`. the tray menu has no icon column and ignores it.
   - `options.onClick` (`() => unknown`): runs when the item is clicked (the drawer closes first).
 - **returns:** `Disposer` that removes the item.
 - **throws:**
   - `TypeError: tg.ui.registerMenuItem({ ..., onClick })` when `onClick` isn't a function.
   - `TypeError: tg.ui.registerMenuItem: place is 'main' or 'tray'`.
+  - `TypeError: tg.ui.registerMenuItem: <problem>` for a bad `icon`, see `type MenuIcon`.
 - **notes:**
   - the drawer and the tray belong to the whole app, so items of every account's scripts show there, in registration order.
   - tray items are hidden while tele is locked with a passcode.
@@ -17157,6 +17209,7 @@ tg.ui.onMediaOpened((event: MediaViewerEvent) => {
 export interface MediaActionOptions {
   text: string
   emoji?: string
+  icon?: MenuIcon
   filter?(context: MediaViewerItem): boolean | Promise<boolean>
   onClick(context: MediaViewerItem): unknown
 }
@@ -17167,6 +17220,7 @@ the options of `tg.ui.registerMediaAction`.
 - **fields:**
   - `text` (`string`): the menu item's label, not empty.
   - `emoji` (`string`, optional): shown before the text.
+  - `icon` (`MenuIcon`, optional): the item's icon, see `type MenuIcon`. without it the item gets tele's experimental icon.
   - `filter` (`(context) => boolean | Promise<boolean>`, optional): whether the item shows for this media. without it the item shows on every message media.
   - `onClick` (`(context) => unknown`): runs when the user picks the item.
 
@@ -17247,9 +17301,9 @@ adds an item to the media viewer's ⋮ menu (and its right-click menu) on messag
 
 - **grant:** none.
 - **parameters:**
-  - `options` (`MediaActionOptions`): `text`, optional `emoji`, optional `filter(context)` and `onClick(context)`. both functions get the item shown as a `MediaViewerItem`.
+  - `options` (`MediaActionOptions`): `text`, optional `emoji` and `icon`, optional `filter(context)` and `onClick(context)`. both functions get the item shown as a `MediaViewerItem`.
 - **returns:** `Disposer` that removes the item. stopping the script removes it too.
-- **throws:** `TypeError` (`tg.ui.registerMediaAction needs a text`, `onClick must be a function`, `filter must be a function`, `emoji must be a string`).
+- **throws:** `TypeError` (`tg.ui.registerMediaAction needs a text`, `onClick must be a function`, `filter must be a function`, `emoji must be a string`, or an `icon` problem, see `type MenuIcon`).
 - **notes:**
   - `filter` runs when the viewer moves to an item, not when the menu opens, so the menu never waits on a script. until it answers `true` the item stays hidden; a filter that throws or rejects hides it.
   - the item isn't there on stories, profile photos or sponsored media.
@@ -17897,7 +17951,7 @@ export interface Widget {
   setText(text: string): boolean
   insert(where: 'before' | 'after', page: Page): Disposer
   insertRow(row: { label: string, value: string, index?: number, onClick?(): unknown }): Disposer
-  addMenuItem(item: { text: string, onClick(): unknown }): Disposer
+  addMenuItem(item: { text: string, icon?: MenuIcon, onClick(): unknown }): Disposer
   click(): boolean
 }
 ```
@@ -18287,7 +18341,7 @@ row = table.insertRow({ label: 'price', value: `${price} TON`, onClick: () => tg
 ### widget.addMenuItem(item)
 
 ```ts
-addMenuItem(item: { text: string, onClick(): unknown }): Disposer
+addMenuItem(item: { text: string, icon?: MenuIcon, onClick(): unknown }): Disposer
 ```
 
 adds an item at the bottom of a popup menu (a context menu or a ⋮ menu). the widget may be the menu (`Ui::PopupMenu`) or anything inside it.
@@ -18295,10 +18349,12 @@ adds an item at the bottom of a popup menu (a context menu or a ⋮ menu). the w
 - **grant:** `ui.write`.
 - **parameters:**
   - `item.text` (`string`): the item's label.
+  - `item.icon` (`MenuIcon`, optional): the item's icon, see `type MenuIcon`; drawn only in menus with an icon column.
   - `item.onClick` (`() => unknown`): runs when the item is chosen, on the next event-loop turn, with the 200 ms budget.
 - **returns:** `Disposer` that removes the item from the menu (if it's still open).
 - **throws:**
   - `TypeError: widget.addMenuItem({ text, onClick })` when `onClick` isn't a function.
+  - `TypeError: widget.addMenuItem: <problem>` for a bad `icon`, see `type MenuIcon`.
   - `TeleError` `not-found` (`this widget isn't inside a popup menu`) when neither the widget nor an ancestor is a `Ui::PopupMenu`.
   - `TeleError` `not-granted` without the grant.
 - **notes:** menus are built anew every time they open, so add items from `tg.ui.widgets.observe({ type: /PopupMenu/ }, ...)`. for message, chat and profile menus prefer `registerMessageAction` and friends: their items work with the menu editor.

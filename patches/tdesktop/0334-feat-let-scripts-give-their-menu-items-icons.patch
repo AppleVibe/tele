@@ -1,0 +1,1894 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Mon, 19 Oct 2026 01:00:02 +0300
+Subject: [PATCH] feat: let scripts give their menu items icons
+
+---
+ Telegram/CMakeLists.txt                       |   4 +
+ .../Resources/tele/scripting/mediaviewer.js   |   1 +
+ Telegram/Resources/tele/scripting/runtime.js  |   2 +-
+ Telegram/Resources/tele/scripting/stories.js  |   2 +-
+ .../tele/scripting/tele_script_hooks.cpp      |  21 +-
+ .../tele/scripting/tele_script_icons.cpp      | 603 ++++++++++++++++++
+ .../tele/scripting/tele_script_icons.h        |  28 +
+ .../tele/scripting/tele_script_instance.cpp   |  45 +-
+ .../tele/scripting/tele_script_instance.h     |   4 +
+ .../scripting/tele_script_mediaviewer.cpp     |  23 +-
+ .../tele/scripting/tele_script_menus.cpp      |  17 +-
+ .../tele/scripting/tele_script_menus.h        |   3 +
+ .../tele/scripting/tele_script_section.cpp    |  17 +-
+ .../tele/scripting/tele_script_section.h      |   3 +
+ .../tele/scripting/tele_script_stories.cpp    |  21 +-
+ .../tele/scripting/tele_script_typings.cpp    |   9 +-
+ .../tele/scripting/tele_script_widgets.cpp    |   6 +-
+ .../tele/scripting/tele_script_widgets.h      |   5 +
+ Telegram/SourceFiles/tele/tele_menu_apply.cpp |  29 +-
+ Telegram/SourceFiles/tele/tele_menu_apply.h   |   6 +
+ Telegram/SourceFiles/tele/tele_menu_icon.cpp  | 373 +++++++++++
+ Telegram/SourceFiles/tele/tele_menu_icon.h    |  77 +++
+ .../SourceFiles/tele/tele_menu_registry.cpp   |  12 +-
+ .../SourceFiles/tele/tele_menu_registry.h     |   3 +-
+ 24 files changed, 1288 insertions(+), 26 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/scripting/tele_script_icons.cpp
+ create mode 100644 Telegram/SourceFiles/tele/scripting/tele_script_icons.h
+ create mode 100644 Telegram/SourceFiles/tele/tele_menu_icon.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_menu_icon.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 3b0427ab582de5fcaed123162289f319917811ab..26eb14ce2cdb042b1c746034256859dfcf8654ad 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2438,6 +2438,8 @@ PRIVATE
+     tele/scripting/tele_script_fs.h
+     tele/scripting/tele_script_data.cpp
+     tele/scripting/tele_script_data.h
++    tele/scripting/tele_script_icons.cpp
++    tele/scripting/tele_script_icons.h
+     tele/scripting/tele_script_sound.cpp
+     tele/scripting/tele_script_sound.h
+     tele/scripting/tele_script_miniapps.cpp
+@@ -2716,6 +2718,8 @@ PRIVATE
+     tele/tele_menu_apply.h
+     tele/tele_menu_editor.cpp
+     tele/tele_menu_editor.h
++    tele/tele_menu_icon.cpp
++    tele/tele_menu_icon.h
+     tele/tele_menu_layout.cpp
+     tele/tele_menu_layout.h
+     tele/tele_menu_registry.cpp
+diff --git a/Telegram/Resources/tele/scripting/mediaviewer.js b/Telegram/Resources/tele/scripting/mediaviewer.js
+index b17fa451166895935f42412130e2925614787e14..13be2220c269ba720dbdedef02200a89208c297c 100644
+--- a/Telegram/Resources/tele/scripting/mediaviewer.js
++++ b/Telegram/Resources/tele/scripting/mediaviewer.js
+@@ -43,6 +43,7 @@
+ 				const id = natives.mediaviewerAction({
+ 					text: options.text,
+ 					emoji: options.emoji ?? '',
++					icon: options.icon,
+ 					onClick: options.onClick,
+ 					filter: filter && (async ({ callId, context }) => {
+ 						let shown = false;
+diff --git a/Telegram/Resources/tele/scripting/runtime.js b/Telegram/Resources/tele/scripting/runtime.js
+index 11e9e17cafa1f8b38f881d6a7c6682843b3b2957..2dc22439248cacde6a31ddfb28b90a6de6064255 100644
+--- a/Telegram/Resources/tele/scripting/runtime.js
++++ b/Telegram/Resources/tele/scripting/runtime.js
+@@ -1752,7 +1752,7 @@
+ 					if (typeof item?.onClick !== 'function') {
+ 						throw new TypeError('widget.addMenuItem({ text, onClick })');
+ 					}
+-					const result = given.widgetAddMenuItem(id, String(item.text ?? ''), item.onClick);
++					const result = given.widgetAddMenuItem(id, String(item.text ?? ''), item.onClick, item.icon);
+ 					if (!result) {
+ 						throw new TeleError('not-found', "this widget isn't inside a popup menu");
+ 					}
+diff --git a/Telegram/Resources/tele/scripting/stories.js b/Telegram/Resources/tele/scripting/stories.js
+index b82afaec3718d2e7d8b30ef3cf3a0988a6cec4dd..a32bacffa624ca8674c302ebfd818c78dde24863 100644
+--- a/Telegram/Resources/tele/scripting/stories.js
++++ b/Telegram/Resources/tele/scripting/stories.js
+@@ -370,7 +370,7 @@
+ 						throw new TypeError('tg.stories.registerStoryAction: onClick must be a function');
+ 					}
+ 					const onClick = options.onClick;
+-					const id = natives.storiesAction(options.text, options.emoji ?? '', (context) => onClick(context));
++					const id = natives.storiesAction(options.text, options.emoji ?? '', (context) => onClick(context), options.icon);
+ 					return __teleDisposer(() => natives.storiesUnregister(id));
+ 				},
+ 
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_hooks.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_hooks.cpp
+index d6c775edac763a19bb853e866c2153222f0877a1..2b6298bd9cb1f9b77485297541991ea4ce9a5f82 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_hooks.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_hooks.cpp
+@@ -3,6 +3,7 @@
+ #include "tele/tele_launch_flags.h"
+ #include "tele/tele_notices.h"
+ #include "tele/tele_options.h"
++#include "tele/scripting/tele_script_icons.h"
+ #include "ui/text/text_utilities.h"
+ #include "data/data_user.h"
+ #include "history/history_item.h"
+@@ -2168,7 +2169,7 @@ void Host::appendActions(
+ 				continue;
+ 			}
+ 			const auto id = action.id;
+-			TagMenuAction(menu->addAction(action.text, [=] {
++			const auto run = [=] {
+ 				crl::on_main(weak, [=] {
+ 					if (const auto strong = weak.get()) {
+ 						if (const auto target = strong->instanceOf(script)) {
+@@ -2176,7 +2177,23 @@ void Host::appendActions(
+ 						}
+ 					}
+ 				});
+-			}, &st::menuIconExperimental), action.key);
++			};
++			const auto icon = action.icon;
++			if (icon && icon->custom) {
++				TagMenuAction(
++					AddIconMenuAction(menu, action.text, run, icon->custom),
++					action.key,
++					icon->custom);
++			} else {
++				const auto builtin = icon ? icon->builtin : nullptr;
++				TagMenuAction(
++					menu->addAction(
++						action.text,
++						run,
++						builtin ? builtin : &st::menuIconExperimental),
++					action.key,
++					builtin);
++			}
+ 		}
+ 	}
+ }
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_icons.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_icons.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..98ce884d912cf1e636766fee32a884dc330f22f1
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_icons.cpp
+@@ -0,0 +1,603 @@
++#include "tele/scripting/tele_script_icons.h"
++
++#include "tele/scripting/tele_script_instance.h"
++#include "tele/scripting/tele_script_native.h"
++#include "styles/style_menu_icons.h"
++
++#include <QtCore/QBuffer>
++#include <QtCore/QDir>
++#include <QtCore/QFile>
++#include <QtGui/QImageReader>
++
++namespace Tele::Scripting {
++namespace {
++
++constexpr auto kMaxIconBytes = 1024 * 1024;
++constexpr auto kMaxIconPixels = int64(4096) * 4096;
++constexpr auto kIconSide = 128;
++
++[[nodiscard]] const style::icon *BuiltinIcon(const QString &name) {
++	static const auto map = base::flat_map<QString, const style::icon*>{
++		{ u"reactions"_q, &st::menuIconReactions },
++		{ u"reply"_q, &st::menuIconReply },
++		{ u"viewReplies"_q, &st::menuIconViewReplies },
++		{ u"edit"_q, &st::menuIconEdit },
++		{ u"draw"_q, &st::menuIconDraw },
++		{ u"pin"_q, &st::menuIconPin },
++		{ u"unpin"_q, &st::menuIconUnpin },
++		{ u"copy"_q, &st::menuIconCopy },
++		{ u"forward"_q, &st::menuIconForward },
++		{ u"delete"_q, &st::menuIconDelete },
++		{ u"select"_q, &st::menuIconSelect },
++		{ u"saveImage"_q, &st::menuIconSaveImage },
++		{ u"stickers"_q, &st::menuIconStickers },
++		{ u"emoji"_q, &st::menuIconEmoji },
++		{ u"cancel"_q, &st::menuIconCancel },
++		{ u"showInChat"_q, &st::menuIconShowInChat },
++		{ u"stealth"_q, &st::menuIconStealth },
++		{ u"stealthLocked"_q, &st::menuIconStealthLocked },
++		{ u"gif"_q, &st::menuIconGif },
++		{ u"showInFolder"_q, &st::menuIconShowInFolder },
++		{ u"download"_q, &st::menuIconDownload },
++		{ u"link"_q, &st::menuIconLink },
++		{ u"block"_q, &st::menuIconBlock },
++		{ u"unblock"_q, &st::menuIconUnblock },
++		{ u"restartBot"_q, &st::menuIconRestartBot },
++		{ u"report"_q, &st::menuIconReport },
++		{ u"fave"_q, &st::menuIconFave },
++		{ u"unfave"_q, &st::menuIconUnfave },
++		{ u"profile"_q, &st::menuIconProfile },
++		{ u"info"_q, &st::menuIconInfo },
++		{ u"invite"_q, &st::menuIconInvite },
++		{ u"promote"_q, &st::menuIconPromote },
++		{ u"admin"_q, &st::menuIconAdmin },
++		{ u"remove"_q, &st::menuIconRemove },
++		{ u"retractVote"_q, &st::menuIconRetractVote },
++		{ u"permissions"_q, &st::menuIconPermissions },
++		{ u"2SV"_q, &st::menuIcon2SV },
++		{ u"share"_q, &st::menuIconShare },
++		{ u"sharing"_q, &st::menuIconSharing },
++		{ u"archive"_q, &st::menuIconArchive },
++		{ u"unarchive"_q, &st::menuIconUnarchive },
++		{ u"markRead"_q, &st::menuIconMarkRead },
++		{ u"markUnread"_q, &st::menuIconMarkUnread },
++		{ u"changeColors"_q, &st::menuIconChangeColors },
++		{ u"export"_q, &st::menuIconExport },
++		{ u"clear"_q, &st::menuIconClear },
++		{ u"manage"_q, &st::menuIconManage },
++		{ u"discussion"_q, &st::menuIconDiscussion },
++		{ u"stats"_q, &st::menuIconStats },
++		{ u"boosts"_q, &st::menuIconBoosts },
++		{ u"earn"_q, &st::menuIconEarn },
++		{ u"cancelFee"_q, &st::menuIconCancelFee },
++		{ u"createPoll"_q, &st::menuIconCreatePoll },
++		{ u"createTodoList"_q, &st::menuIconCreateTodoList },
++		{ u"article"_q, &st::menuIconArticle },
++		{ u"qrCode"_q, &st::menuIconQrCode },
++		{ u"expand"_q, &st::menuIconExpand },
++		{ u"collapse"_q, &st::menuIconCollapse },
++		{ u"zoomIn"_q, &st::menuIconZoomIn },
++		{ u"zoomOut"_q, &st::menuIconZoomOut },
++		{ u"toMainMenu"_q, &st::menuIconToMainMenu },
++		{ u"fromMainMenu"_q, &st::menuIconFromMainMenu },
++		{ u"addAccount"_q, &st::menuIconAddAccount },
++		{ u"mute"_q, &st::menuIconMute },
++		{ u"unmute"_q, &st::menuIconUnmute },
++		{ u"schedule"_q, &st::menuIconSchedule },
++		{ u"reschedule"_q, &st::menuIconReschedule },
++		{ u"send"_q, &st::menuIconSend },
++		{ u"whenOnline"_q, &st::menuIconWhenOnline },
++		{ u"palette"_q, &st::menuIconPalette },
++		{ u"importTheme"_q, &st::menuIconImportTheme },
++		{ u"exportTheme"_q, &st::menuIconExportTheme },
++		{ u"restore"_q, &st::menuIconRestore },
++		{ u"settings"_q, &st::menuIconSettings },
++		{ u"copyright"_q, &st::menuIconCopyright },
++		{ u"drugs"_q, &st::menuIconDrugs },
++		{ u"fake"_q, &st::menuIconFake },
++		{ u"personal"_q, &st::menuIconPersonal },
++		{ u"porn"_q, &st::menuIconPorn },
++		{ u"violence"_q, &st::menuIconViolence },
++		{ u"muteFor"_q, &st::menuIconMuteFor },
++		{ u"silent"_q, &st::menuIconSilent },
++		{ u"customize"_q, &st::menuIconCustomize },
++		{ u"soundOn"_q, &st::menuIconSoundOn },
++		{ u"soundOff"_q, &st::menuIconSoundOff },
++		{ u"soundSelect"_q, &st::menuIconSoundSelect },
++		{ u"soundAdd"_q, &st::menuIconSoundAdd },
++		{ u"file"_q, &st::menuIconFile },
++		{ u"photo"_q, &st::menuIconPhoto },
++		{ u"addToFolder"_q, &st::menuIconAddToFolder },
++		{ u"leave"_q, &st::menuIconLeave },
++		{ u"giftPremium"_q, &st::menuIconGiftPremium },
++		{ u"search"_q, &st::menuIconSearch },
++		{ u"startStream"_q, &st::menuIconStartStream },
++		{ u"startStreamWith"_q, &st::menuIconStartStreamWith },
++		{ u"videoChat"_q, &st::menuIconVideoChat },
++		{ u"translate"_q, &st::menuIconTranslate },
++		{ u"reportAntiSpam"_q, &st::menuIconReportAntiSpam },
++		{ u"spoiler"_q, &st::menuIconSpoiler },
++		{ u"qualityHigh"_q, &st::menuIconQualityHigh },
++		{ u"photoSet"_q, &st::menuIconPhotoSet },
++		{ u"photoSuggest"_q, &st::menuIconPhotoSuggest },
++		{ u"newWindow"_q, &st::menuIconNewWindow },
++		{ u"chatBubble"_q, &st::menuIconChatBubble },
++		{ u"phone"_q, &st::menuIconPhone },
++		{ u"channel"_q, &st::menuIconChannel },
++		{ u"storiesSavedSection"_q, &st::menuIconStoriesSavedSection },
++		{ u"storiesArchiveSection"_q, &st::menuIconStoriesArchiveSection },
++		{ u"storiesSave"_q, &st::menuIconStoriesSave },
++		{ u"storiesArchive"_q, &st::menuIconStoriesArchive },
++		{ u"archiveOpen"_q, &st::menuIconArchiveOpen },
++		{ u"groups"_q, &st::menuIconGroups },
++		{ u"savedMessages"_q, &st::menuIconSavedMessages },
++		{ u"nightMode"_q, &st::menuIconNightMode },
++		{ u"notifications"_q, &st::menuIconNotifications },
++		{ u"lock"_q, &st::menuIconLock },
++		{ u"powerUsage"_q, &st::menuIconPowerUsage },
++		{ u"faq"_q, &st::menuIconFaq },
++		{ u"emojiObjects"_q, &st::menuIconEmojiObjects },
++		{ u"username"_q, &st::menuIconUsername },
++		{ u"devices"_q, &st::menuIconDevices },
++		{ u"network"_q, &st::menuIconNetwork },
++		{ u"storage"_q, &st::menuIconStorage },
++		{ u"experimental"_q, &st::menuIconExperimental },
++		{ u"callsReceive"_q, &st::menuIconCallsReceive },
++		{ u"dockBounce"_q, &st::menuIconDockBounce },
++		{ u"recoveryEmail"_q, &st::menuIconRecoveryEmail },
++		{ u"timer"_q, &st::menuIconTimer },
++		{ u"topics"_q, &st::menuIconTopics },
++		{ u"groupReactions"_q, &st::menuIconGroupReactions },
++		{ u"links"_q, &st::menuIconLinks },
++		{ u"groupLog"_q, &st::menuIconGroupLog },
++		{ u"signed"_q, &st::menuIconSigned },
++		{ u"antispam"_q, &st::menuIconAntispam },
++		{ u"chatDiscuss"_q, &st::menuIconChatDiscuss },
++		{ u"chats"_q, &st::menuIconChats },
++		{ u"bot"_q, &st::menuIconBot },
++		{ u"botCommands"_q, &st::menuIconBotCommands },
++		{ u"premium"_q, &st::menuIconPremium },
++		{ u"shop"_q, &st::menuIconShop },
++		{ u"ipAddress"_q, &st::menuIconIpAddress },
++		{ u"address"_q, &st::menuIconAddress },
++		{ u"showAll"_q, &st::menuIconShowAll },
++		{ u"replace"_q, &st::menuIconReplace },
++		{ u"above"_q, &st::menuIconAbove },
++		{ u"below"_q, &st::menuIconBelow },
++		{ u"enlarge"_q, &st::menuIconEnlarge },
++		{ u"shrink"_q, &st::menuIconShrink },
++		{ u"userShow"_q, &st::menuIconUserShow },
++		{ u"userHide"_q, &st::menuIconUserHide },
++		{ u"userHideDisabled"_q, &st::menuIconUserHideDisabled },
++		{ u"captionShow"_q, &st::menuIconCaptionShow },
++		{ u"captionHide"_q, &st::menuIconCaptionHide },
++		{ u"asTopics"_q, &st::menuIconAsTopics },
++		{ u"asMessages"_q, &st::menuIconAsMessages },
++		{ u"tagFilter"_q, &st::menuIconTagFilter },
++		{ u"tagRename"_q, &st::menuIconTagRename },
++		{ u"tagRemove"_q, &st::menuIconTagRemove },
++		{ u"tagSell"_q, &st::menuIconTagSell },
++		{ u"groupsHide"_q, &st::menuIconGroupsHide },
++		{ u"font"_q, &st::menuIconFont },
++		{ u"factcheck"_q, &st::menuIconFactcheck },
++		{ u"winHello"_q, &st::menuIconWinHello },
++		{ u"touchID"_q, &st::menuIconTouchID },
++		{ u"appleWatch"_q, &st::menuIconAppleWatch },
++		{ u"starRefShare"_q, &st::menuIconStarRefShare },
++		{ u"starRefLink"_q, &st::menuIconStarRefLink },
++		{ u"transparent"_q, &st::menuIconTransparent },
++		{ u"like"_q, &st::menuIconLike },
++		{ u"tradable"_q, &st::menuIconTradable },
++		{ u"unique"_q, &st::menuIconUnique },
++		{ u"uniqueProfile"_q, &st::menuIconUniqueProfile },
++		{ u"nftWear"_q, &st::menuIconNftWear },
++		{ u"nftTakeOff"_q, &st::menuIconNftTakeOff },
++		{ u"shortcut"_q, &st::menuIconShortcut },
++		{ u"hourglass"_q, &st::menuIconHourglass },
++		{ u"payment"_q, &st::menuIconPayment },
++		{ u"orderPrice"_q, &st::menuIconOrderPrice },
++		{ u"orderDate"_q, &st::menuIconOrderDate },
++		{ u"orderNumber"_q, &st::menuIconOrderNumber },
++		{ u"add"_q, &st::menuIconAdd },
++		{ u"stickerCreate"_q, &st::menuIconStickerCreate },
++		{ u"stickerAdd"_q, &st::menuIconStickerAdd },
++		{ u"ratingGifts"_q, &st::menuIconRatingGifts },
++		{ u"ratingUsers"_q, &st::menuIconRatingUsers },
++		{ u"ratingRefund"_q, &st::menuIconRatingRefund },
++		{ u"auctionDrop"_q, &st::menuIconAuctionDrop },
++		{ u"starsRefund"_q, &st::menuIconStarsRefund },
++		{ u"starsCarryover"_q, &st::menuIconStarsCarryover },
++		{ u"ton"_q, &st::menuIconTon },
++		{ u"reorder"_q, &st::menuIconReorder },
++		{ u"craftTraits"_q, &st::menuIconCraftTraits },
++		{ u"craftChance"_q, &st::menuIconCraftChance },
++		{ u"craft"_q, &st::menuIconCraft },
++		{ u"tagAdd"_q, &st::menuIconTagAdd },
++		{ u"tagEdit"_q, &st::menuIconTagEdit },
++		{ u"downloadOff"_q, &st::menuIconDownloadOff },
++		{ u"shareOff"_q, &st::menuIconShareOff },
++		{ u"shareOn"_q, &st::menuIconShareOn },
++		{ u"community"_q, &st::menuIconCommunity },
++		{ u"pendingRequests"_q, &st::menuIconPendingRequests },
++		{ u"removedUsers"_q, &st::menuIconRemovedUsers },
++		{ u"welcomeMessage"_q, &st::menuIconWelcomeMessage },
++		{ u"star"_q, &st::menuIconStar },
++		{ u"tTLAny"_q, &st::menuIconTTLAny },
++		{ u"tTL"_q, &st::menuIconTTL },
++		{ u"muteForAny"_q, &st::menuIconMuteForAny },
++		{ u"deleteAttention"_q, &st::menuIconDeleteAttention },
++		{ u"leaveAttention"_q, &st::menuIconLeaveAttention },
++		{ u"communityRemoveAttention"_q, &st::menuIconCommunityRemoveAttention },
++		{ u"disableAttention"_q, &st::menuIconDisableAttention },
++		{ u"reportAttention"_q, &st::menuIconReportAttention },
++		{ u"restoreAttention"_q, &st::menuIconRestoreAttention },
++		{ u"tagRemoveAttention"_q, &st::menuIconTagRemoveAttention },
++		{ u"cancelAttention"_q, &st::menuIconCancelAttention },
++		{ u"blockAttention"_q, &st::menuIconBlockAttention },
++		{ u"removeAttention"_q, &st::menuIconRemoveAttention },
++		{ u"blockSettings"_q, &st::menuIconBlockSettings },
++		{ u"inviteSettings"_q, &st::menuIconInviteSettings },
++		{ u"makeBig"_q, &st::menuIconMakeBig },
++		{ u"makeSmall"_q, &st::menuIconMakeSmall },
++		{ u"changeOrder"_q, &st::menuIconChangeOrder },
++	};
++	const auto i = map.find(name);
++	return (i != end(map)) ? i->second : nullptr;
++}
++
++[[nodiscard]] bool LooksLikeSvg(const QByteArray &bytes) {
++	const auto trimmed = bytes.trimmed();
++	return trimmed.startsWith('<');
++}
++
++[[nodiscard]] std::shared_ptr<const MenuIcon> IconFromBytes(
++		const QByteArray &bytes) {
++	if (LooksLikeSvg(bytes)) {
++		return MakeSvgMenuIcon(bytes);
++	}
++	auto copy = bytes;
++	auto buffer = QBuffer(&copy);
++	if (!buffer.open(QIODevice::ReadOnly)) {
++		return nullptr;
++	}
++	auto reader = QImageReader(&buffer);
++	reader.setAutoTransform(true);
++	const auto size = reader.size();
++	if (!size.isValid()
++		|| size.isEmpty()
++		|| int64(size.width()) * size.height() > kMaxIconPixels) {
++		return nullptr;
++	} else if (std::max(size.width(), size.height()) > kIconSide) {
++		reader.setScaledSize(
++			size.scaled(kIconSide, kIconSide, Qt::KeepAspectRatio));
++	}
++	return MakeImageMenuIcon(reader.read());
++}
++
++[[nodiscard]] bool IsImagePath(const QString &text) {
++	const auto lower = text.toLower();
++	return lower.endsWith(u".svg"_q)
++		|| lower.endsWith(u".png"_q)
++		|| lower.endsWith(u".jpg"_q)
++		|| lower.endsWith(u".jpeg"_q)
++		|| lower.endsWith(u".webp"_q);
++}
++
++[[nodiscard]] QString Preview(const QString &text) {
++	return (text.size() > 32) ? (text.left(32) + QChar(0x2026)) : text;
++}
++
++} // namespace
++
++std::shared_ptr<const MenuIcon> ScriptIcon::painter() const {
++	return custom
++		? custom
++		: builtin
++		? MakeStyleMenuIcon(builtin)
++		: nullptr;
++}
++
++std::optional<ScriptIcon> ReadScriptIcon(
++		JSContext *ctx,
++		JSValueConst value,
++		not_null<Instance*> instance,
++		const char *api) {
++	const auto fail = [&](const QString &text) -> std::optional<ScriptIcon> {
++		JS_ThrowTypeError(
++			ctx,
++			"%s: %s",
++			api,
++			text.toUtf8().constData());
++		return std::nullopt;
++	};
++	if (JS_IsUndefined(value) || JS_IsNull(value)) {
++		return ScriptIcon();
++	} else if (JS_IsBigInt(value)) {
++		auto id = int64();
++		if (JS_ToBigInt64(ctx, &id, value) < 0 || id <= 0) {
++			JS_FreeValue(ctx, JS_GetException(ctx));
++			return fail(u"icon must be a custom emoji document id"_q);
++		}
++		return ScriptIcon{
++			.custom = MakeCustomEmojiMenuIcon(
++				ScriptSession(instance),
++				uint64(id)),
++		};
++	} else if (JS_IsString(value)) {
++		const auto text = FromStd(ToStd(ctx, value)).trimmed();
++		if (text.isEmpty()) {
++			return fail(u"icon can't be empty"_q);
++		} else if (const auto builtin = BuiltinIcon(text)) {
++			return ScriptIcon{ .builtin = builtin };
++		} else if (text.startsWith(u"<svg"_q, Qt::CaseInsensitive)
++			|| text.startsWith(u"<?xml"_q, Qt::CaseInsensitive)) {
++			if (const auto icon = MakeSvgMenuIcon(text.toUtf8())) {
++				return ScriptIcon{ .custom = icon };
++			}
++			return fail(u"the icon isn't a valid SVG"_q);
++		} else if (IsImagePath(text)) {
++			const auto path = QDir(instance->file().root).absoluteFilePath(
++				text);
++			auto file = QFile(path);
++			if (!file.open(QIODevice::ReadOnly)) {
++				return fail(u"can't read the icon file "_q + path);
++			} else if (file.size() > kMaxIconBytes) {
++				return fail(u"the icon file is over 1 MB"_q);
++			}
++			if (const auto icon = IconFromBytes(file.readAll())) {
++				return ScriptIcon{ .custom = icon };
++			}
++			return fail(u"the icon file isn't a valid SVG, PNG, JPEG "
++				"or WebP image"_q);
++		} else if (const auto icon = MakeEmojiMenuIcon(text)) {
++			return ScriptIcon{ .custom = icon };
++		}
++		return fail(u"icon '"_q
++			+ Preview(text)
++			+ u"' isn't a tele icon name, one emoji, an <svg> or an image "
++			"file"_q);
++	} else if (const auto bytes = BytesFrom(ctx, value)) {
++		if (bytes->size() > kMaxIconBytes) {
++			return fail(u"the icon is over 1 MB"_q);
++		} else if (const auto icon = IconFromBytes(*bytes)) {
++			return ScriptIcon{ .custom = icon };
++		}
++		return fail(u"the icon bytes aren't a valid SVG, PNG, JPEG or WebP "
++			"image"_q);
++	}
++	return fail(u"icon must be a string, a bigint or a Uint8Array"_q);
++}
++
++std::string MenuIconTypings() {
++	return R"ts(
++declare module 'tele' {
++  export type MenuIconName =
++    | 'reactions'
++    | 'reply'
++    | 'viewReplies'
++    | 'edit'
++    | 'draw'
++    | 'pin'
++    | 'unpin'
++    | 'copy'
++    | 'forward'
++    | 'delete'
++    | 'select'
++    | 'saveImage'
++    | 'stickers'
++    | 'emoji'
++    | 'cancel'
++    | 'showInChat'
++    | 'stealth'
++    | 'stealthLocked'
++    | 'gif'
++    | 'showInFolder'
++    | 'download'
++    | 'link'
++    | 'block'
++    | 'unblock'
++    | 'restartBot'
++    | 'report'
++    | 'fave'
++    | 'unfave'
++    | 'profile'
++    | 'info'
++    | 'invite'
++    | 'promote'
++    | 'admin'
++    | 'remove'
++    | 'retractVote'
++    | 'permissions'
++    | '2SV'
++    | 'share'
++    | 'sharing'
++    | 'archive'
++    | 'unarchive'
++    | 'markRead'
++    | 'markUnread'
++    | 'changeColors'
++    | 'export'
++    | 'clear'
++    | 'manage'
++    | 'discussion'
++    | 'stats'
++    | 'boosts'
++    | 'earn'
++    | 'cancelFee'
++    | 'createPoll'
++    | 'createTodoList'
++    | 'article'
++    | 'qrCode'
++    | 'expand'
++    | 'collapse'
++    | 'zoomIn'
++    | 'zoomOut'
++    | 'toMainMenu'
++    | 'fromMainMenu'
++    | 'addAccount'
++    | 'mute'
++    | 'unmute'
++    | 'schedule'
++    | 'reschedule'
++    | 'send'
++    | 'whenOnline'
++    | 'palette'
++    | 'importTheme'
++    | 'exportTheme'
++    | 'restore'
++    | 'settings'
++    | 'copyright'
++    | 'drugs'
++    | 'fake'
++    | 'personal'
++    | 'porn'
++    | 'violence'
++    | 'muteFor'
++    | 'silent'
++    | 'customize'
++    | 'soundOn'
++    | 'soundOff'
++    | 'soundSelect'
++    | 'soundAdd'
++    | 'file'
++    | 'photo'
++    | 'addToFolder'
++    | 'leave'
++    | 'giftPremium'
++    | 'search'
++    | 'startStream'
++    | 'startStreamWith'
++    | 'videoChat'
++    | 'translate'
++    | 'reportAntiSpam'
++    | 'spoiler'
++    | 'qualityHigh'
++    | 'photoSet'
++    | 'photoSuggest'
++    | 'newWindow'
++    | 'chatBubble'
++    | 'phone'
++    | 'channel'
++    | 'storiesSavedSection'
++    | 'storiesArchiveSection'
++    | 'storiesSave'
++    | 'storiesArchive'
++    | 'archiveOpen'
++    | 'groups'
++    | 'savedMessages'
++    | 'nightMode'
++    | 'notifications'
++    | 'lock'
++    | 'powerUsage'
++    | 'faq'
++    | 'emojiObjects'
++    | 'username'
++    | 'devices'
++    | 'network'
++    | 'storage'
++    | 'experimental'
++    | 'callsReceive'
++    | 'dockBounce'
++    | 'recoveryEmail'
++    | 'timer'
++    | 'topics'
++    | 'groupReactions'
++    | 'links'
++    | 'groupLog'
++    | 'signed'
++    | 'antispam'
++    | 'chatDiscuss'
++    | 'chats'
++    | 'bot'
++    | 'botCommands'
++    | 'premium'
++    | 'shop'
++    | 'ipAddress'
++    | 'address'
++    | 'showAll'
++    | 'replace'
++    | 'above'
++    | 'below'
++    | 'enlarge'
++    | 'shrink'
++    | 'userShow'
++    | 'userHide'
++    | 'userHideDisabled'
++    | 'captionShow'
++    | 'captionHide'
++    | 'asTopics'
++    | 'asMessages'
++    | 'tagFilter'
++    | 'tagRename'
++    | 'tagRemove'
++    | 'tagSell'
++    | 'groupsHide'
++    | 'font'
++    | 'factcheck'
++    | 'winHello'
++    | 'touchID'
++    | 'appleWatch'
++    | 'starRefShare'
++    | 'starRefLink'
++    | 'transparent'
++    | 'like'
++    | 'tradable'
++    | 'unique'
++    | 'uniqueProfile'
++    | 'nftWear'
++    | 'nftTakeOff'
++    | 'shortcut'
++    | 'hourglass'
++    | 'payment'
++    | 'orderPrice'
++    | 'orderDate'
++    | 'orderNumber'
++    | 'add'
++    | 'stickerCreate'
++    | 'stickerAdd'
++    | 'ratingGifts'
++    | 'ratingUsers'
++    | 'ratingRefund'
++    | 'auctionDrop'
++    | 'starsRefund'
++    | 'starsCarryover'
++    | 'ton'
++    | 'reorder'
++    | 'craftTraits'
++    | 'craftChance'
++    | 'craft'
++    | 'tagAdd'
++    | 'tagEdit'
++    | 'downloadOff'
++    | 'shareOff'
++    | 'shareOn'
++    | 'community'
++    | 'pendingRequests'
++    | 'removedUsers'
++    | 'welcomeMessage'
++    | 'star'
++    | 'tTLAny'
++    | 'tTL'
++    | 'muteForAny'
++    | 'deleteAttention'
++    | 'leaveAttention'
++    | 'communityRemoveAttention'
++    | 'disableAttention'
++    | 'reportAttention'
++    | 'restoreAttention'
++    | 'tagRemoveAttention'
++    | 'cancelAttention'
++    | 'blockAttention'
++    | 'removeAttention'
++    | 'blockSettings'
++    | 'inviteSettings'
++    | 'makeBig'
++    | 'makeSmall'
++    | 'changeOrder'
++
++  export type MenuIcon = MenuIconName | (string & {}) | bigint | Uint8Array
++}
++)ts";
++}
++
++} // namespace Tele::Scripting
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_icons.h b/Telegram/SourceFiles/tele/scripting/tele_script_icons.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..f5de4591ad7e354cb3cbbde2bd1a77aaed64fb8f
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_icons.h
+@@ -0,0 +1,28 @@
++#pragma once
++
++#include "tele/scripting/tele_script_engine.h"
++#include "tele/tele_menu_icon.h"
++
++namespace Tele::Scripting {
++
++class Instance;
++
++struct ScriptIcon {
++	const style::icon *builtin = nullptr;
++	std::shared_ptr<const MenuIcon> custom;
++
++	[[nodiscard]] bool empty() const {
++		return !builtin && !custom;
++	}
++	[[nodiscard]] std::shared_ptr<const MenuIcon> painter() const;
++};
++
++[[nodiscard]] std::optional<ScriptIcon> ReadScriptIcon(
++	JSContext *ctx,
++	JSValueConst value,
++	not_null<Instance*> instance,
++	const char *api);
++
++[[nodiscard]] std::string MenuIconTypings();
++
++} // namespace Tele::Scripting
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_instance.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_instance.cpp
+index 794672bfa772889a46597a261ef86efb08c1f6d9..cb9304b8b0405168fc62e2d97a48bbb56336c22b 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_instance.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_instance.cpp
+@@ -22,6 +22,7 @@
+ #include "media/player/media_player_instance.h"
+ #include "window/themes/window_theme.h"
+ #include "window/window_controller.h"
++#include "tele/scripting/tele_script_icons.h"
+ #include "tele/scripting/tele_script_app.h"
+ #include "tele/scripting/tele_script_menus.h"
+ #include "tele/scripting/tele_script_extensions.h"
+@@ -429,9 +430,13 @@ const auto kActionMenus = std::array<MenuKind, 4>{
+ 	return result;
+ }
+ 
+-void ReferenceAction(int menu, const QString &key, const QString &text) {
++void ReferenceAction(
++		int menu,
++		const QString &key,
++		const QString &text,
++		const style::icon *icon) {
+ 	++ActionReferences()[key];
+-	SetScriptMenuItem(kActionMenus[menu], key, text, true);
++	SetScriptMenuItem(kActionMenus[menu], key, text, true, icon);
+ }
+ 
+ void UnreferenceAction(int menu, const QString &key, const QString &text) {
+@@ -3236,6 +3241,12 @@ JSValue Instance::NativeAction(
+ 	} else if (text.trimmed().isEmpty()) {
+ 		return JS_ThrowTypeError(ctx, "%s needs a text", names[magic]);
+ 	}
++	auto iconValue = JS_GetPropertyStr(ctx, options, "icon");
++	const auto icon = ReadScriptIcon(ctx, iconValue, instance, names[magic]);
++	JS_FreeValue(ctx, iconValue);
++	if (!icon) {
++		return JS_EXCEPTION;
++	}
+ 	auto click = JS_GetPropertyStr(ctx, options, "onClick");
+ 	auto visible = JS_GetPropertyStr(ctx, options, "visible");
+ 	const auto clickable = JS_IsFunction(ctx, click);
+@@ -3277,8 +3288,11 @@ JSValue Instance::NativeAction(
+ 		.menu = magic,
+ 		.key = key,
+ 		.text = text,
++		.icon = (icon->empty()
++			? nullptr
++			: std::make_shared<const ScriptIcon>(*icon)),
+ 	});
+-	ReferenceAction(magic, key, text);
++	ReferenceAction(magic, key, text, icon->builtin);
+ 	return instance->disposer(registration);
+ }
+ 
+@@ -3293,6 +3307,7 @@ std::vector<ScriptAction> Instance::actions(int menu) const {
+ 				.id = id,
+ 				.key = registration.key,
+ 				.text = registration.text,
++				.icon = registration.icon,
+ 			});
+ 		}
+ 	}
+@@ -5587,6 +5602,7 @@ void Instance::syncSurfaces() {
+ 				.key = QString::number(id),
+ 				.text = registration.text,
+ 				.emoji = registration.extra,
++				.icon = registration.icon,
+ 				.callback = [=] {
+ 					if (const auto strong = weak.get()) {
+ 						strong->clickRegistration(id, nullptr, u"menu item"_q);
+@@ -5601,6 +5617,7 @@ void Instance::syncSurfaces() {
+ 				.key = QString::number(id),
+ 				.title = registration.text,
+ 				.emoji = registration.extra,
++				.icon = registration.icon,
+ 				.open = [=](not_null<Window::SessionController*> window) {
+ 					const auto strong = weak.get();
+ 					auto view = strong
+@@ -6149,6 +6166,16 @@ JSValue Instance::NativeSystem(
+ 				"%s({ ..., onClick })",
+ 				names[magic]);
+ 		}
++		auto icon = std::optional<ScriptIcon>(ScriptIcon());
++		if (magic == 26 || magic == 27) {
++			auto iconValue = JS_GetPropertyStr(ctx, options, "icon");
++			icon = ReadScriptIcon(ctx, iconValue, instance, names[magic]);
++			JS_FreeValue(ctx, iconValue);
++			if (!icon) {
++				JS_FreeValue(ctx, click);
++				return JS_EXCEPTION;
++			}
++		}
+ 		auto registration = Registration{
+ 			.kind = (magic == 26)
+ 				? Kind::MenuItem
+@@ -6162,6 +6189,9 @@ JSValue Instance::NativeSystem(
+ 				options,
+ 				(magic == 27) ? "title" : (magic == 29) ? "tooltip" : "text"),
+ 			.extra = StringProperty(ctx, options, "emoji"),
++			.icon = (icon->empty()
++				? nullptr
++				: std::make_shared<const ScriptIcon>(*icon)),
+ 		};
+ 		if (magic == 26
+ 			&& registration.key != u"main"_q
+@@ -6365,6 +6395,14 @@ JSValue Instance::NativeSystem(
+ 				ctx,
+ 				"widget.addMenuItem({ text, onClick })");
+ 		}
++		const auto icon = ReadScriptIcon(
++			ctx,
++			(argc > 3) ? argv[3] : JS_UNDEFINED,
++			instance,
++			"widget.addMenuItem");
++		if (!icon) {
++			return JS_EXCEPTION;
++		}
+ 		const auto key = NextRegistrationId();
+ 		const auto weak = base::make_weak(instance);
+ 		const auto added = AddMenuAction(
+@@ -6372,6 +6410,7 @@ JSValue Instance::NativeSystem(
+ 			key,
+ 			id,
+ 			string(1).value_or(QString()),
++			icon->painter(),
+ 			[=] {
+ 				crl::on_main([=] {
+ 					if (const auto strong = weak.get()) {
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_instance.h b/Telegram/SourceFiles/tele/scripting/tele_script_instance.h
+index 72d5994070ff6967e0dc875f1144e4037ab15a94..12e56eb6a7e73c4ccaadbb1ff716a5adb49ce58d 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_instance.h
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_instance.h
+@@ -72,10 +72,13 @@ struct ActionContext {
+ 	QString text;
+ };
+ 
++struct ScriptIcon;
++
+ struct ScriptAction {
+ 	int id = 0;
+ 	QString key;
+ 	QString text;
++	std::shared_ptr<const ScriptIcon> icon;
+ };
+ 
+ struct ScriptCommand {
+@@ -287,6 +290,7 @@ private:
+ 		QString key;
+ 		QString text;
+ 		QString extra;
++		std::shared_ptr<const ScriptIcon> icon;
+ 	};
+ 	struct Middleware {
+ 		MiddlewareNext next;
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_mediaviewer.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_mediaviewer.cpp
+index 3fb437da19cbceddc0bf089172acc822a6138c04..eb57a7d122e257d71e48ff5e6e22600111560a95 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_mediaviewer.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_mediaviewer.cpp
+@@ -1,4 +1,5 @@
+ #include "tele/scripting/tele_script_mediaviewer.h"
++#include "tele/scripting/tele_script_icons.h"
+ 
+ #include "tele/scripting/tele_script_instance.h"
+ #include "tele/scripting/tele_script_native.h"
+@@ -45,6 +46,7 @@ struct Action {
+ 	Main::Session *session = nullptr;
+ 	QString text;
+ 	QString emoji;
++	std::shared_ptr<const MenuIcon> icon;
+ 	int click = 0;
+ 	int filter = 0;
+ };
+@@ -490,6 +492,16 @@ JSValue NativeMediaViewer(
+ 				ctx,
+ 				"tg.ui.registerMediaAction needs a text");
+ 		}
++		auto iconValue = JS_GetPropertyStr(ctx, options, "icon");
++		const auto icon = ReadScriptIcon(
++			ctx,
++			iconValue,
++			instance,
++			"tg.ui.registerMediaAction");
++		JS_FreeValue(ctx, iconValue);
++		if (!icon) {
++			return JS_EXCEPTION;
++		}
+ 		auto click = JS_GetPropertyStr(ctx, options, "onClick");
+ 		auto filter = JS_GetPropertyStr(ctx, options, "filter");
+ 		const auto valid = JS_IsFunction(ctx, click)
+@@ -515,6 +527,7 @@ JSValue NativeMediaViewer(
+ 			.session = session,
+ 			.text = text,
+ 			.emoji = emoji,
++			.icon = icon->painter(),
+ 			.click = clickKept,
+ 			.filter = filterKept,
+ 		});
+@@ -641,11 +654,16 @@ void AddMediaActions(
+ 			continue;
+ 		}
+ 		const auto id = action.id;
+-		addAction(ItemText(action), [=] {
++		const auto click = [=] {
+ 			crl::on_main([=] {
+ 				Click(id, shown);
+ 			});
+-		}, &st::mediaMenuIconExperimental);
++		};
++		if (action.icon) {
++			addAction(IconMenuArgs(ItemText(action), click, action.icon));
++		} else {
++			addAction(ItemText(action), click, &st::mediaMenuIconExperimental);
++		}
+ 	}
+ }
+ 
+@@ -666,6 +684,7 @@ declare module 'tele' {
+   export interface MediaActionOptions {
+     text: string
+     emoji?: string
++    icon?: MenuIcon
+     filter?(context: MediaViewerItem): boolean | Promise<boolean>
+     onClick(context: MediaViewerItem): unknown
+   }
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_menus.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_menus.cpp
+index 14979d8ea4439351f325558f7c8267b34472bcea..eb01087ca65fdb9e3499baac3531a7e5d7a7f2d2 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_menus.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_menus.cpp
+@@ -1,5 +1,6 @@
+ #include "tele/scripting/tele_script_menus.h"
+ #include "tele/scripting/tele_script_menus_ui.h"
++#include "tele/scripting/tele_script_icons.h"
+ 
+ #include "core/application.h"
+ #include "platform/platform_tray.h"
+@@ -96,11 +97,21 @@ void AddScriptMainMenuItems(
+ 			{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
+ 		for (const auto &item : items) {
+ 			const auto callback = item.callback;
+-			Settings::AddButtonWithIcon(
++			const auto icon = item.icon;
++			const auto button = Settings::AddButtonWithIcon(
+ 				wrap,
+ 				rpl::single(ItemText(item)),
+-				st::mainMenuButton
+-			)->setClickedCallback([=] {
++				st::mainMenuButton,
++				((icon && icon->builtin)
++					? Settings::IconDescriptor{ .icon = icon->builtin }
++					: Settings::IconDescriptor()));
++			if (icon && icon->custom) {
++				AddMenuIconToButton(
++					button,
++					st::mainMenuButton.iconLeft,
++					icon->custom);
++			}
++			button->setClickedCallback([=] {
+ 				const auto hide = close;
+ 				const auto copy = callback;
+ 				hide();
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_menus.h b/Telegram/SourceFiles/tele/scripting/tele_script_menus.h
+index ad7e482726d91c042f130497f3e8f79be33cca49..601253dfb1ef81f4242cf70d6a54cea470906ebf 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_menus.h
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_menus.h
+@@ -2,10 +2,13 @@
+ 
+ namespace Tele::Scripting {
+ 
++struct ScriptIcon;
++
+ struct AppMenuItem {
+ 	QString key;
+ 	QString text;
+ 	QString emoji;
++	std::shared_ptr<const ScriptIcon> icon;
+ 	Fn<void()> callback;
+ };
+ 
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_section.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_section.cpp
+index 682e52d5b98c91f2d045844514b76b0a8ab59d7e..2a86da7c774b8109891060954218070d95831bad 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_section.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_section.cpp
+@@ -1,4 +1,5 @@
+ #include "tele/scripting/tele_script_section.h"
++#include "tele/scripting/tele_script_icons.h"
+ 
+ #include "settings/settings_builder.h"
+ #include "settings/settings_common_session.h"
+@@ -60,11 +61,21 @@ void FillEntries(
+ 				Ui::AddSkip(container);
+ 			}
+ 			const auto open = entry.open;
+-			::Settings::AddButtonWithIcon(
++			const auto icon = entry.icon;
++			const auto &st = icon
++				? st::settingsButton
++				: st::settingsButtonNoIcon;
++			const auto button = ::Settings::AddButtonWithIcon(
+ 				container,
+ 				rpl::single(EntryLabel(entry)),
+-				st::settingsButtonNoIcon
+-			)->setClickedCallback([=] {
++				st,
++				((icon && icon->builtin)
++					? ::Settings::IconDescriptor{ .icon = icon->builtin }
++					: ::Settings::IconDescriptor()));
++			if (icon && icon->custom) {
++				AddMenuIconToButton(button, st.iconLeft, icon->custom);
++			}
++			button->setClickedCallback([=] {
+ 				if (const auto callback = open) {
+ 					callback(controller);
+ 				}
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_section.h b/Telegram/SourceFiles/tele/scripting/tele_script_section.h
+index 4ba08a00dac52d893fbcbc52da37f377c036e745..bf11ec502dc461fb7bb25e7e83f9146afb462c93 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_section.h
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_section.h
+@@ -8,10 +8,13 @@ class SessionController;
+ 
+ namespace Tele::Scripting {
+ 
++struct ScriptIcon;
++
+ struct ScriptSettingsEntry {
+ 	QString key;
+ 	QString title;
+ 	QString emoji;
++	std::shared_ptr<const ScriptIcon> icon;
+ 	Fn<void(not_null<Window::SessionController*>)> open;
+ };
+ 
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_stories.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_stories.cpp
+index 5a81174e32c99d96f480dc4a117380b55ba56015..3057f225b3a8e91d2904a633761c56e6db63ee37 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_stories.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_stories.cpp
+@@ -1,4 +1,5 @@
+ #include "tele/scripting/tele_script_stories.h"
++#include "tele/scripting/tele_script_icons.h"
+ 
+ #include "tele/scripting/tele_script_instance.h"
+ #include "tele/scripting/tele_script_native.h"
+@@ -54,6 +55,7 @@ struct Owned {
+ struct Action {
+ 	Owned owned;
+ 	QString text;
++	std::shared_ptr<const MenuIcon> icon;
+ };
+ 
+ struct Watcher {
+@@ -639,6 +641,14 @@ void Ask(std::shared_ptr<const ViewChain> chain, int index) {
+ 			ctx,
+ 			"tg.stories.registerStoryAction needs a text");
+ 	}
++	const auto icon = ReadScriptIcon(
++		ctx,
++		(argc > 3) ? argv[3] : JS_UNDEFINED,
++		instance,
++		"tg.stories.registerStoryAction");
++	if (!icon) {
++		return JS_EXCEPTION;
++	}
+ 	const auto kept = KeepFunction(instance, argv[2]);
+ 	Track(instance);
+ 	auto &registry = StoriesRegistry();
+@@ -646,6 +656,7 @@ void Ask(std::shared_ptr<const ViewChain> chain, int index) {
+ 	registry.actions.push_back({
+ 		.owned = { instance, base::make_weak(instance), id, kept },
+ 		.text = emoji.isEmpty() ? text : (emoji + QChar(' ') + text),
++		.icon = icon->painter(),
+ 	});
+ 	return JS_NewInt32(ctx, id);
+ }
+@@ -878,6 +889,7 @@ declare module 'tele' {
+   export interface StoryActionOptions {
+     text: string
+     emoji?: string
++    icon?: MenuIcon
+     onClick(context: StoryActionContext): unknown
+   }
+ 
+@@ -959,7 +971,7 @@ void AddStoryActions(
+ 		}
+ 		const auto weak = action.owned.weak;
+ 		const auto kept = action.owned.kept;
+-		addAction(action.text, [=] {
++		const auto click = [=] {
+ 			crl::on_main([=] {
+ 				CallKept(weak, kept, [=](JSContext *ctx) {
+ 					auto result = JS_NewObject(ctx);
+@@ -976,7 +988,12 @@ void AddStoryActions(
+ 					return result;
+ 				}, u"tg.stories.registerStoryAction"_q);
+ 			});
+-		}, &st::mediaMenuIconExperimental);
++		};
++		if (action.icon) {
++			addAction(IconMenuArgs(action.text, click, action.icon));
++		} else {
++			addAction(action.text, click, &st::mediaMenuIconExperimental);
++		}
+ 	}
+ }
+ 
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_typings.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_typings.cpp
+index b1e3518431f8008a1c5499f6b18bd91942a5a1f6..bbad9c116b3e075bae562782d2eaa6c92c798ee2 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_typings.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_typings.cpp
+@@ -1,4 +1,5 @@
+ #include "tele/scripting/tele_script_typings.h"
++#include "tele/scripting/tele_script_icons.h"
+ 
+ #include "tele/scripting/tele_script_extensions.h"
+ 
+@@ -472,7 +473,7 @@ constexpr auto kModuleMore = R"ts(
+     setText(text: string): boolean
+     insert(where: 'before' | 'after', page: Page): Disposer
+     insertRow(row: { label: string, value: string, index?: number, onClick?(): unknown }): Disposer
+-    addMenuItem(item: { text: string, onClick(): unknown }): Disposer
++    addMenuItem(item: { text: string, icon?: MenuIcon, onClick(): unknown }): Disposer
+     click(): boolean
+   }
+ 
+@@ -575,8 +576,8 @@ constexpr auto kModuleMore = R"ts(
+     }): UiElement
+     settingsPage(options: { title?: string, items(): UiElement[] }): Page
+     readonly widgets: Widgets
+-    registerMenuItem(options: { place: 'main' | 'tray', text: string, emoji?: string, onClick(): unknown }): Disposer
+-    registerSettingsEntry(options: { title: string, emoji?: string, page: Page, onClick?(): unknown }): Disposer
++    registerMenuItem(options: { place: 'main' | 'tray', text: string, emoji?: string, icon?: MenuIcon, onClick(): unknown }): Disposer
++    registerSettingsEntry(options: { title: string, emoji?: string, icon?: MenuIcon, page: Page, onClick?(): unknown }): Disposer
+     openSection(page: Page): boolean
+     openPage(page: Page): void
+     dialog(options: AlertOptions): Promise<AlertAnswer>
+@@ -618,6 +619,7 @@ constexpr auto kModuleMore = R"ts(
+   export interface ActionOptions<C> {
+     id: string
+     text: string
++    icon?: MenuIcon
+     onClick(context: C): unknown
+     visible?(context: C): boolean
+   }
+@@ -1429,6 +1431,7 @@ QByteArray Generator::generate() {
+ 	out += kModule;
+ 	out += kModuleMore;
+ 	out += kModuleTg;
++	out += MenuIconTypings();
+ 	out += ExtensionTypings();
+ 	return QByteArray::fromStdString(out);
+ }
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_widgets.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_widgets.cpp
+index cdadd1fa25cbedc4f8792ba44c3ec653ebbde67a..e510f3403d7065d5a90bbae10106025af65b76a5 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_widgets.cpp
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_widgets.cpp
+@@ -1,3 +1,4 @@
++#include "tele/tele_menu_icon.h"
+ #include "tele/scripting/tele_script_widgets.h"
+ 
+ #include "ui/abstract_button.h"
+@@ -593,6 +594,7 @@ bool AddMenuAction(
+ 		int key,
+ 		int id,
+ 		const QString &text,
++		std::shared_ptr<const MenuIcon> icon,
+ 		Fn<void()> click,
+ 		Fn<void()> gone) {
+ 	auto widget = ById(id);
+@@ -604,7 +606,9 @@ bool AddMenuAction(
+ 	if (!menu) {
+ 		return false;
+ 	}
+-	const auto action = menu->addAction(text, std::move(click));
++	const auto action = icon
++		? AddIconMenuAction(menu, text, std::move(click), std::move(icon))
++		: menu->addAction(text, std::move(click));
+ 	Remember({
+ 		.owner = owner,
+ 		.key = key,
+diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_widgets.h b/Telegram/SourceFiles/tele/scripting/tele_script_widgets.h
+index a244cf6b0453a907c8207328204f365398c130d7..33472ab3264744f1795b2768f10aa7e36ea2e68c 100644
+--- a/Telegram/SourceFiles/tele/scripting/tele_script_widgets.h
++++ b/Telegram/SourceFiles/tele/scripting/tele_script_widgets.h
+@@ -4,6 +4,10 @@ namespace Ui {
+ class VerticalLayout;
+ } // namespace Ui
+ 
++namespace Tele {
++class MenuIcon;
++} // namespace Tele
++
+ namespace Tele::Scripting {
+ 
+ struct WidgetInfo {
+@@ -63,6 +67,7 @@ void SetWidgetVisible(const void *owner, int id, bool visible);
+ 	int key,
+ 	int id,
+ 	const QString &text,
++	std::shared_ptr<const MenuIcon> icon,
+ 	Fn<void()> click,
+ 	Fn<void()> gone);
+ void RemoveWidgetChange(const void *owner, int key);
+diff --git a/Telegram/SourceFiles/tele/tele_menu_apply.cpp b/Telegram/SourceFiles/tele/tele_menu_apply.cpp
+index 16a83217b10a0ef49468283e920990c4104bef75..483c5f42a86838e92424e18bfa081bb852fa6bab 100644
+--- a/Telegram/SourceFiles/tele/tele_menu_apply.cpp
++++ b/Telegram/SourceFiles/tele/tele_menu_apply.cpp
+@@ -9,6 +9,7 @@
+ #include "menu/menu_send_details.h"
+ #include "tele/tele_lowercase.h"
+ #include "tele/tele_menu_editor.h"
++#include "tele/tele_menu_icon.h"
+ #include "tele/tele_menu_registry.h"
+ #include "ui/qt_object_factory.h"
+ #include "ui/widgets/fields/input_field.h"
+@@ -32,6 +33,7 @@ public:
+ 
+ 	QString key;
+ 	const style::icon *icon = nullptr;
++	std::shared_ptr<const MenuIcon> custom;
+ 	Fn<void(not_null<Ui::PopupMenu*>)> fill;
+ 	bool hasIcon = false;
+ 
+@@ -75,6 +77,7 @@ struct Element {
+ 	int item = -1;
+ 	ElementKind kind = ElementKind::Fixed;
+ 	const style::icon *icon = nullptr;
++	std::shared_ptr<const MenuIcon> custom;
+ 	const style::Menu *st = nullptr;
+ 	Fn<void(not_null<Ui::PopupMenu*>)> fill;
+ 	QString text;
+@@ -243,12 +246,16 @@ struct Context {
+ 		}
+ 		if (tag) {
+ 			element.fill = tag->fill;
++			element.custom = tag->custom;
+ 		}
+-		const auto known = (element.item >= 0) || (tag && tag->hasIcon);
++		const auto known = (element.item >= 0)
++			|| (tag && (tag->hasIcon || tag->custom));
+ 		const auto fixed = (element.item >= 0)
+ 			&& (info.items[element.item].flags & MenuItemFlag::Fixed);
+ 		const auto &type = typeid(*widget);
+-		if (known && !fixed && type == typeid(Ui::Menu::Action)) {
++		const auto plain = (type == typeid(Ui::Menu::Action))
++			|| (type == typeid(IconMenuAction));
++		if (known && !fixed && plain) {
+ 			element.kind = ElementKind::Plain;
+ 		} else if (known && !fixed && type == typeid(Ui::Menu::Toggle)) {
+ 			element.kind = ElementKind::Toggle;
+@@ -554,6 +561,12 @@ void FitToggleNow(not_null<Ui::Menu::Toggle*> item) {
+ 		});
+ 		FitMenuToggle(result.get());
+ 		return base::unique_qptr<Ui::Menu::ItemBase>(std::move(result));
++	} else if (element.custom) {
++		return base::make_unique_q<IconMenuAction>(
++			parent,
++			st,
++			element.action,
++			element.custom);
+ 	}
+ 	return base::make_unique_q<Ui::Menu::Action>(
+ 		parent,
+@@ -905,6 +918,18 @@ QAction *TagMenuAction(
+ 	return action;
+ }
+ 
++QAction *TagMenuAction(
++		QAction *action,
++		const QString &key,
++		std::shared_ptr<const MenuIcon> custom) {
++	if (action) {
++		const auto tag = EnsureTag(action);
++		tag->key = key;
++		tag->custom = std::move(custom);
++	}
++	return action;
++}
++
+ QAction *TagMenuSubmenu(
+ 		QAction *action,
+ 		const QString &key,
+diff --git a/Telegram/SourceFiles/tele/tele_menu_apply.h b/Telegram/SourceFiles/tele/tele_menu_apply.h
+index 266d048d3e2710a47f561a1960be30195284ae7e..0dd2c70196d401470e4eafbb9ffe82227efc9ff7 100644
+--- a/Telegram/SourceFiles/tele/tele_menu_apply.h
++++ b/Telegram/SourceFiles/tele/tele_menu_apply.h
+@@ -28,6 +28,8 @@ class Toggle;
+ 
+ namespace Tele {
+ 
++class MenuIcon;
++
+ [[nodiscard]] const style::MenuSeparator &MenuSeparatorFor(
+ 	const style::Menu &st,
+ 	MenuSeparatorStyle style,
+@@ -38,6 +40,10 @@ QAction *TagMenuAction(
+ 	QAction *action,
+ 	const QString &key,
+ 	const style::icon *icon = nullptr);
++QAction *TagMenuAction(
++	QAction *action,
++	const QString &key,
++	std::shared_ptr<const MenuIcon> custom);
+ QAction *TagMenuSubmenu(
+ 	QAction *action,
+ 	const QString &key,
+diff --git a/Telegram/SourceFiles/tele/tele_menu_icon.cpp b/Telegram/SourceFiles/tele/tele_menu_icon.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..7f0024439d4059c52badc14ea24a454108cf8f11
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_menu_icon.cpp
+@@ -0,0 +1,373 @@
++#include "tele/tele_menu_icon.h"
++
++#include "data/data_session.h"
++#include "data/stickers/data_custom_emoji.h"
++#include "main/main_session.h"
++#include "ui/emoji_config.h"
++#include "ui/painter.h"
++#include "ui/power_saving.h"
++#include "ui/rp_widget.h"
++#include "ui/text/text_custom_emoji.h"
++#include "ui/ui_utility.h"
++#include "ui/widgets/menu/menu.h"
++#include "ui/widgets/menu/menu_common.h"
++#include "ui/widgets/popup_menu.h"
++#include "styles/style_menu_icons.h"
++#include "styles/style_widgets.h"
++
++#include <QtSvg/QSvgRenderer>
++
++namespace Tele {
++namespace {
++
++[[nodiscard]] QRect ContentRect(QSize box, QSize content) {
++	if (content.isEmpty()) {
++		return QRect();
++	}
++	const auto inset = box.width() / 12;
++	const auto available = QRect(QPoint(), box).marginsRemoved(
++		{ inset, inset, inset, inset });
++	const auto scaled = content.scaled(
++		available.size(),
++		Qt::KeepAspectRatio);
++	return QRect(
++		available.x() + (available.width() - scaled.width()) / 2,
++		available.y() + (available.height() - scaled.height()) / 2,
++		scaled.width(),
++		scaled.height());
++}
++
++class StyleIcon final : public MenuIcon {
++public:
++	explicit StyleIcon(not_null<const style::icon*> icon) : _icon(icon) {
++	}
++
++	PaintFn bind(Fn<void()> repaint) const override {
++		const auto icon = _icon;
++		return [=](QPainter &p, QRect rect, QColor color) {
++			icon->paintInCenter(p, rect, color);
++		};
++	}
++
++private:
++	const not_null<const style::icon*> _icon;
++
++};
++
++class EmojiIcon final : public MenuIcon {
++public:
++	explicit EmojiIcon(EmojiPtr emoji) : _emoji(emoji) {
++	}
++
++	PaintFn bind(Fn<void()> repaint) const override {
++		const auto emoji = _emoji;
++		return [=](QPainter &p, QRect rect, QColor color) {
++			const auto size = Ui::Emoji::GetSizeNormal();
++			const auto side = size / style::DevicePixelRatio();
++			Ui::Emoji::Draw(
++				p,
++				emoji,
++				size,
++				rect.x() + (rect.width() - side) / 2,
++				rect.y() + (rect.height() - side) / 2);
++		};
++	}
++
++private:
++	const EmojiPtr _emoji;
++
++};
++
++class SvgIcon final : public MenuIcon {
++public:
++	SvgIcon(QByteArray svg, QSize size) : _svg(std::move(svg)), _size(size) {
++	}
++
++	PaintFn bind(Fn<void()> repaint) const override {
++		return [=](QPainter &p, QRect rect, QColor color) {
++			p.drawImage(rect.topLeft(), prepare(rect.size(), color));
++		};
++	}
++
++private:
++	[[nodiscard]] const QImage &prepare(QSize size, QColor color) const {
++		const auto ratio = style::DevicePixelRatio();
++		if (_cache.size() != size * ratio || _color != color) {
++			_color = color;
++			_cache = QImage(
++				size * ratio,
++				QImage::Format_ARGB32_Premultiplied);
++			_cache.setDevicePixelRatio(ratio);
++			_cache.fill(Qt::transparent);
++			auto q = QPainter(&_cache);
++			auto hq = PainterHighQualityEnabler(q);
++			auto renderer = QSvgRenderer(_svg);
++			renderer.render(&q, QRectF(ContentRect(size, _size)));
++			q.setCompositionMode(QPainter::CompositionMode_SourceIn);
++			q.fillRect(QRect(QPoint(), size), color);
++		}
++		return _cache;
++	}
++
++	const QByteArray _svg;
++	const QSize _size;
++	mutable QImage _cache;
++	mutable QColor _color;
++
++};
++
++class ImageIcon final : public MenuIcon {
++public:
++	explicit ImageIcon(QImage image) : _image(std::move(image)) {
++	}
++
++	PaintFn bind(Fn<void()> repaint) const override {
++		return [=](QPainter &p, QRect rect, QColor color) {
++			p.drawImage(rect.topLeft(), prepare(rect.size()));
++		};
++	}
++
++private:
++	[[nodiscard]] const QImage &prepare(QSize size) const {
++		const auto ratio = style::DevicePixelRatio();
++		if (_cache.size() != size * ratio) {
++			_cache = QImage(
++				size * ratio,
++				QImage::Format_ARGB32_Premultiplied);
++			_cache.setDevicePixelRatio(ratio);
++			_cache.fill(Qt::transparent);
++			auto q = QPainter(&_cache);
++			auto hq = PainterHighQualityEnabler(q);
++			q.drawImage(ContentRect(size, _image.size()), _image);
++		}
++		return _cache;
++	}
++
++	const QImage _image;
++	mutable QImage _cache;
++
++};
++
++class CustomEmojiIcon final : public MenuIcon {
++public:
++	CustomEmojiIcon(not_null<Main::Session*> session, uint64 documentId)
++	: _session(base::make_weak(session))
++	, _documentId(documentId) {
++	}
++
++	PaintFn bind(Fn<void()> repaint) const override {
++		const auto session = _session.get();
++		if (!session) {
++			return nullptr;
++		}
++		const auto emoji = std::shared_ptr<Ui::Text::CustomEmoji>(
++			session->data().customEmojiManager().create(
++				DocumentId(_documentId),
++				std::move(repaint),
++				Data::CustomEmojiSizeTag::Normal));
++		const auto weak = _session;
++		return [=](QPainter &p, QRect rect, QColor color) {
++			if (!weak.get()) {
++				return;
++			}
++			const auto side = Data::FrameSizeFromTag(
++				Data::CustomEmojiSizeTag::Normal
++			) / style::DevicePixelRatio();
++			emoji->paint(p, {
++				.textColor = color,
++				.now = crl::now(),
++				.position = QPoint(
++					rect.x() + (rect.width() - side) / 2,
++					rect.y() + (rect.height() - side) / 2),
++				.paused = PowerSaving::On(PowerSaving::kEmojiChat),
++			});
++		};
++	}
++
++private:
++	const base::weak_ptr<Main::Session> _session;
++	const uint64 _documentId = 0;
++
++};
++
++} // namespace
++
++std::shared_ptr<const MenuIcon> MakeStyleMenuIcon(
++		not_null<const style::icon*> icon) {
++	return std::make_shared<StyleIcon>(icon);
++}
++
++std::shared_ptr<const MenuIcon> MakeEmojiMenuIcon(const QString &emoji) {
++	auto length = 0;
++	const auto found = Ui::Emoji::Find(emoji, &length);
++	return (found && length == emoji.size())
++		? std::make_shared<EmojiIcon>(found)
++		: nullptr;
++}
++
++std::shared_ptr<const MenuIcon> MakeSvgMenuIcon(const QByteArray &svg) {
++	auto renderer = QSvgRenderer(svg);
++	if (!renderer.isValid()) {
++		return nullptr;
++	}
++	const auto view = renderer.viewBoxF().size();
++	const auto size = view.isEmpty()
++		? renderer.defaultSize()
++		: QSize(
++			std::max(int(std::ceil(view.width())), 1),
++			std::max(int(std::ceil(view.height())), 1));
++	return size.isEmpty()
++		? nullptr
++		: std::make_shared<SvgIcon>(svg, size);
++}
++
++std::shared_ptr<const MenuIcon> MakeImageMenuIcon(const QImage &image) {
++	return image.isNull()
++		? nullptr
++		: std::make_shared<ImageIcon>(
++			image.convertToFormat(QImage::Format_ARGB32_Premultiplied));
++}
++
++std::shared_ptr<const MenuIcon> MakeCustomEmojiMenuIcon(
++		not_null<Main::Session*> session,
++		uint64 documentId) {
++	return documentId
++		? std::make_shared<CustomEmojiIcon>(session, documentId)
++		: nullptr;
++}
++
++QSize MenuIconSize() {
++	return st::menuIconCopy.size();
++}
++
++QColor MenuIconColor(const style::Menu &st, bool selected) {
++	const auto text = (selected ? st.itemFgOver : st.itemFg)->c;
++	const auto icon = st::menuIconColor->c;
++	const auto dark = [](const QColor &color) {
++		return color.lightnessF() < 0.5;
++	};
++	return (dark(text) == dark(icon)) ? icon : text;
++}
++
++bool MenuHasIcons(const style::Menu &st) {
++	const auto &position = st.itemIconPosition;
++	return !position.isNull()
++		&& (st.itemPadding.left() >= position.x() + MenuIconSize().width());
++}
++
++IconMenuAction::IconMenuAction(
++	not_null<Ui::Menu::Menu*> parent,
++	const style::Menu &st,
++	not_null<QAction*> action,
++	std::shared_ptr<const MenuIcon> icon)
++: Action(parent, st, action, nullptr, nullptr)
++, _icon(std::move(icon))
++, _paint(_icon ? _icon->bind([=] { update(); }) : MenuIcon::PaintFn()) {
++}
++
++const std::shared_ptr<const MenuIcon> &IconMenuAction::menuIcon() const {
++	return _icon;
++}
++
++void IconMenuAction::paintEvent(QPaintEvent *e) {
++	Action::paintEvent(e);
++	if (!_paint || !MenuHasIcons(st())) {
++		return;
++	}
++	auto p = QPainter(this);
++	auto hq = PainterHighQualityEnabler(p);
++	const auto size = MenuIconSize();
++	const auto &position = st().itemIconPosition;
++	const auto left = style::RightToLeft()
++		? (width() - position.x() - size.width())
++		: position.x();
++	const auto color = isEnabled()
++		? MenuIconColor(st(), isSelected())
++		: st().itemFgDisabled->c;
++	_paint(p, QRect(QPoint(left, position.y()), size), color);
++}
++
++namespace {
++
++[[nodiscard]] base::unique_qptr<Ui::Menu::ItemBase> MakeIconItem(
++		not_null<Ui::PopupMenu*> menu,
++		const QString &text,
++		Fn<void()> callback,
++		std::shared_ptr<const MenuIcon> icon) {
++	const auto raw = menu->menu();
++	const auto &st = raw->st();
++	const auto action = Ui::Menu::CreateAction(
++		raw.get(),
++		text,
++		std::move(callback));
++	if (!icon || !MenuHasIcons(st)) {
++		return base::make_unique_q<Ui::Menu::Action>(
++			raw,
++			st,
++			action,
++			nullptr,
++			nullptr);
++	}
++	return base::make_unique_q<IconMenuAction>(
++		raw,
++		st,
++		action,
++		std::move(icon));
++}
++
++} // namespace
++
++not_null<QAction*> AddIconMenuAction(
++		not_null<Ui::PopupMenu*> menu,
++		const QString &text,
++		Fn<void()> callback,
++		std::shared_ptr<const MenuIcon> icon) {
++	return menu->addAction(
++		MakeIconItem(menu, text, std::move(callback), std::move(icon)));
++}
++
++Ui::Menu::MenuCallback::Args IconMenuArgs(
++		const QString &text,
++		Fn<void()> callback,
++		std::shared_ptr<const MenuIcon> icon) {
++	return {
++		.text = text,
++		.handler = callback,
++		.icon = nullptr,
++		.make = [=](not_null<Ui::PopupMenu*> menu) {
++			return MakeIconItem(menu, text, callback, icon);
++		},
++	};
++}
++
++void AddMenuIconToButton(
++		not_null<Ui::RpWidget*> button,
++		int left,
++		std::shared_ptr<const MenuIcon> icon) {
++	if (!icon) {
++		return;
++	}
++	const auto widget = Ui::CreateChild<Ui::RpWidget>(button.get());
++	widget->setAttribute(Qt::WA_TransparentForMouseEvents);
++	widget->resize(MenuIconSize());
++	widget->show();
++	const auto paint = widget->lifetime().make_state<MenuIcon::PaintFn>(
++		icon->bind([=] { widget->update(); }));
++	button->sizeValue(
++	) | rpl::on_next([=](QSize size) {
++		widget->moveToLeft(
++			left,
++			(size.height() - widget->height()) / 2,
++			size.width());
++	}, widget->lifetime());
++	widget->paintRequest(
++	) | rpl::on_next([=] {
++		if (*paint) {
++			auto p = QPainter(widget);
++			auto hq = PainterHighQualityEnabler(p);
++			(*paint)(p, widget->rect(), st::menuIconColor->c);
++		}
++	}, widget->lifetime());
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_menu_icon.h b/Telegram/SourceFiles/tele/tele_menu_icon.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..34017698066992a1df954d8d263fb9ee68a8589d
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_menu_icon.h
+@@ -0,0 +1,77 @@
++#pragma once
++
++#include "ui/widgets/menu/menu_action.h"
++#include "ui/widgets/menu/menu_add_action_callback.h"
++
++namespace Main {
++class Session;
++} // namespace Main
++
++namespace Ui {
++class PopupMenu;
++class RpWidget;
++} // namespace Ui
++
++namespace Tele {
++
++class MenuIcon {
++public:
++	using PaintFn = Fn<void(QPainter&, QRect, QColor)>;
++
++	virtual ~MenuIcon() = default;
++
++	[[nodiscard]] virtual PaintFn bind(Fn<void()> repaint) const = 0;
++
++};
++
++[[nodiscard]] std::shared_ptr<const MenuIcon> MakeStyleMenuIcon(
++	not_null<const style::icon*> icon);
++[[nodiscard]] std::shared_ptr<const MenuIcon> MakeEmojiMenuIcon(
++	const QString &emoji);
++[[nodiscard]] std::shared_ptr<const MenuIcon> MakeSvgMenuIcon(
++	const QByteArray &svg);
++[[nodiscard]] std::shared_ptr<const MenuIcon> MakeImageMenuIcon(
++	const QImage &image);
++[[nodiscard]] std::shared_ptr<const MenuIcon> MakeCustomEmojiMenuIcon(
++	not_null<Main::Session*> session,
++	uint64 documentId);
++
++[[nodiscard]] QSize MenuIconSize();
++[[nodiscard]] QColor MenuIconColor(const style::Menu &st, bool selected);
++[[nodiscard]] bool MenuHasIcons(const style::Menu &st);
++
++class IconMenuAction final : public Ui::Menu::Action {
++public:
++	IconMenuAction(
++		not_null<Ui::Menu::Menu*> parent,
++		const style::Menu &st,
++		not_null<QAction*> action,
++		std::shared_ptr<const MenuIcon> icon);
++
++	[[nodiscard]] const std::shared_ptr<const MenuIcon> &menuIcon() const;
++
++protected:
++	void paintEvent(QPaintEvent *e) override;
++
++private:
++	const std::shared_ptr<const MenuIcon> _icon;
++	MenuIcon::PaintFn _paint;
++
++};
++
++not_null<QAction*> AddIconMenuAction(
++	not_null<Ui::PopupMenu*> menu,
++	const QString &text,
++	Fn<void()> callback,
++	std::shared_ptr<const MenuIcon> icon);
++[[nodiscard]] Ui::Menu::MenuCallback::Args IconMenuArgs(
++	const QString &text,
++	Fn<void()> callback,
++	std::shared_ptr<const MenuIcon> icon);
++
++void AddMenuIconToButton(
++	not_null<Ui::RpWidget*> button,
++	int left,
++	std::shared_ptr<const MenuIcon> icon);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_menu_registry.cpp b/Telegram/SourceFiles/tele/tele_menu_registry.cpp
+index 92419affa2562d677c775c1814d2b3f7967d166f..98df0b979200593d89dbaefcf5c249fa47baf70a 100644
+--- a/Telegram/SourceFiles/tele/tele_menu_registry.cpp
++++ b/Telegram/SourceFiles/tele/tele_menu_registry.cpp
+@@ -1648,7 +1648,8 @@ void SetScriptMenuItem(
+ 		MenuKind kind,
+ 		const QString &key,
+ 		const QString &text,
+-		bool active) {
++		bool active,
++		const style::icon *icon) {
+ 	auto &menus = Menus();
+ 	const auto menu = ranges::find(menus, kind, &MenuInfo::kind);
+ 	if (menu == end(menus) || !IsScriptMenuKey(key)) {
+@@ -1659,8 +1660,15 @@ void SetScriptMenuItem(
+ 	if (i != end(items)) {
+ 		i->text = text;
+ 		i->active = active;
++		if (active) {
++			i->icon = icon;
++		}
+ 	} else if (active) {
+-		items.push_back(MenuItemInfo{ .key = key, .text = text });
++		items.push_back(MenuItemInfo{
++			.key = key,
++			.text = text,
++			.icon = icon,
++		});
+ 	}
+ }
+ 
+diff --git a/Telegram/SourceFiles/tele/tele_menu_registry.h b/Telegram/SourceFiles/tele/tele_menu_registry.h
+index 002175421b41caf6b16b7653a509a88d85932522..191dfe59d1f848344597e37d45f0326f012fa945 100644
+--- a/Telegram/SourceFiles/tele/tele_menu_registry.h
++++ b/Telegram/SourceFiles/tele/tele_menu_registry.h
+@@ -69,6 +69,7 @@ void SetScriptMenuItem(
+ 	MenuKind kind,
+ 	const QString &key,
+ 	const QString &text,
+-	bool active);
++	bool active,
++	const style::icon *icon = nullptr);
+ 
+ } // namespace Tele

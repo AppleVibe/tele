@@ -19,6 +19,7 @@ all 334 patches, newest release first.
 | [331](../patches/tdesktop/0331-fix-me-and-other-peer-shortcuts-work-everywhere-in-t.patch) | in the mtproto console, `me` no longer fails with INPUT_FETCH_ERROR, and peers can be written as `me`, `@user` or an id where a method wants a notify or dialog peer too | with 195 |
 | [332](../patches/tdesktop/0332-feat-show-skipped-messages-in-shots.patch) | a shot of messages that aren't next to each other can show how many were skipped between them, as a "2 messages skipped" badge | with 87 |
 | [333](../patches/tdesktop/0333-feat-restrict-members-from-message-menus-and-find-th.patch) | group admins can restrict someone from their message or userpic menu without deleting the message, and the add exception, add admin and remove user pickers find people tele already knows by their numeric id, members or not | tele → menus, on |
+| [334](../patches/tdesktop/0334-feat-let-scripts-give-their-menu-items-icons.patch) | scripts can give their menu items, drawer items and settings entries an icon: one of tele's own, an emoji, a custom emoji, an svg or an image, see [scripting](scripting.md) | with 302 |
 
 ### [tele 21](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.21)
 
