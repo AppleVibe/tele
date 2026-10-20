@@ -22,10 +22,10 @@ Subject: [PATCH] feat: design the money card with a gift
  create mode 100644 Telegram/SourceFiles/tele/tele_money_card_box.h
 
 diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
-index 54874de75cf4a1bf521f135aea87e86714fcfb7b..c8a3cdadae4843f90494727919dc1a4a96a5a8fe 100644
+index a7d3fe75814cccc7c41b2f4db70b9cbddd73658b..78d446841eca7139ea16bcfebbf9c5e03faff032 100644
 --- a/Telegram/CMakeLists.txt
 +++ b/Telegram/CMakeLists.txt
-@@ -2662,6 +2662,10 @@ PRIVATE
+@@ -2706,6 +2706,10 @@ PRIVATE
      tele/tele_menu_registry.h
      tele/tele_message_menu.cpp
      tele/tele_message_menu.h
@@ -1272,7 +1272,7 @@ index 0000000000000000000000000000000000000000..0cc1872bc460bdbc229a82460fab7bd3
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 2af7461426d5a4a93b5dac6a1663c120e1fd3d13..8e8d36cf3214732041d56b79f0d8b658b47ccb59 100644
+index 92a95b83586757bf45304a429276fdb9e53a7b77..4b825c068bd3f5c80f86d5e8aff06754f19f88c0 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -71,6 +71,7 @@ const char kOptionReactionsStripCount[] = "tele-reactions-strip-count";

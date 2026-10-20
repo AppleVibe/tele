@@ -119,7 +119,7 @@ index 11782224ec323846324c93ae83f0d22427110885..c91b5a46205eb077eef2021e1d78c335
  [[nodiscard]] QRect MoneyCardModelRect(const QRect &box);
  
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index d888a477ad39b7e18da89f7bd1f681b6d63f45fb..16b72bfb017bd8af1c86836020f589ceb9574d65 100644
+index ddf4d079cdd4110c78498012a770f875d0dd9304..059422e6b987371839155abfb914f2bd6d10bbfe 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -75,6 +75,7 @@ const char kOptionReactionsOrder[] = "tele-reactions-order";

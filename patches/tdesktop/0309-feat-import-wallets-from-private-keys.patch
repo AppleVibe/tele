@@ -21,10 +21,10 @@ Subject: [PATCH] feat: import wallets from private keys
  create mode 100644 Telegram/SourceFiles/tele/tele_wallet_keys.h
 
 diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
-index af2a77bec6012eeba69f7b172c1d8d03d30d5e1b..3aa1e35a39cfc24d55574799264cd855f8d0b84f 100644
+index 52f366d4cd6ff25a35b6a8e9954e4105b086e25a..38e1538e0a2edc344c954a7f84969a547bb23020 100644
 --- a/Telegram/CMakeLists.txt
 +++ b/Telegram/CMakeLists.txt
-@@ -2851,6 +2851,8 @@ PRIVATE
+@@ -2895,6 +2895,8 @@ PRIVATE
      tele/tele_voice_quality.h
      tele/tele_wallet_address.cpp
      tele/tele_wallet_address.h
@@ -49,7 +49,7 @@ index 57079c8300f637399ede7194588d8651090807a3..e50a92c27f4bc13e98081b64e80b75da
  		builder,
  		::Tele::kOptionWalletKeepOld,
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 70dce73141d689b6ab99203a20ccb8bb3582695c..3efcdc9945dbc4d6873290525aaddb5eed547c52 100644
+index 5197f85be0a4888d9dc217c17436f4a022714a08..7125d9c7edb3b87c844eeb9591767752aac305cd 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -40,6 +40,7 @@ const char kOptionFontFix[] = "tele-font-fix";

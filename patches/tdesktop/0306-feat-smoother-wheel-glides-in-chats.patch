@@ -25,10 +25,10 @@ Subject: [PATCH] feat: smoother wheel glides in chats
  create mode 100644 Telegram/SourceFiles/tele/tele_scroll_stats.h
 
 diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
-index c8a3cdadae4843f90494727919dc1a4a96a5a8fe..af2a77bec6012eeba69f7b172c1d8d03d30d5e1b 100644
+index 78d446841eca7139ea16bcfebbf9c5e03faff032..52f366d4cd6ff25a35b6a8e9954e4105b086e25a 100644
 --- a/Telegram/CMakeLists.txt
 +++ b/Telegram/CMakeLists.txt
-@@ -2762,6 +2762,10 @@ PRIVATE
+@@ -2806,6 +2806,10 @@ PRIVATE
      tele/tele_rmb_beside_bubble.h
      tele/tele_screen_capture.cpp
      tele/tele_screen_capture.h
@@ -443,7 +443,7 @@ index c18ebff152481b2c9e74230d96df8bcdd00a1816..57079c8300f637399ede7194588d8651
  	AddGroupTitle(builder, u"MTProto"_q);
  	AddMtpInspector(builder);
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 8e8d36cf3214732041d56b79f0d8b658b47ccb59..70dce73141d689b6ab99203a20ccb8bb3582695c 100644
+index 4b825c068bd3f5c80f86d5e8aff06754f19f88c0..5197f85be0a4888d9dc217c17436f4a022714a08 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -63,6 +63,7 @@ const char kOptionReduceMotion[] = "tele-reduce-motion";

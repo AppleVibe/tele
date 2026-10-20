@@ -216,7 +216,7 @@ index b061beb1683e4551b7882553ac3c62788f09d509..f7747d49f3a6916a2ff3db1931f53839
  	return result;
  }
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 050adb7d283c07b65e1be5eeac50833c22a3e36d..8078f4a75b6893384237245f8d81df78672951d8 100644
+index 4154a16d46740db9addd2bf5f037ace176b1e967..3bbac10a575886f31b7070379270c39cdf1cd0bf 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -249,6 +249,7 @@ const char kOptionInvisibleNamesPhrase[] = "tele-invisible-names-phrase";
@@ -228,7 +228,7 @@ index 050adb7d283c07b65e1be5eeac50833c22a3e36d..8078f4a75b6893384237245f8d81df78
  namespace {
  
 @@ -1743,6 +1744,12 @@ base::options::toggle ProfilePhotoBgOption({
- 	.name = "Blurred photo as profile background β",
+ 	.name = "Blurred photo as profile background",
  });
  
 +base::options::toggle RemoveMyMessagesOption({

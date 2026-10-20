@@ -613,7 +613,7 @@ index 0000000000000000000000000000000000000000..9b913c8532f7451d757a5a502aa04ebd
 +
 +} // namespace Tele
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 87da799b359686d3471102736dffa07f5f8a34d2..050adb7d283c07b65e1be5eeac50833c22a3e36d 100644
+index af6f4d06c15d5964aabf8a54811fd40b36f3a86d..4154a16d46740db9addd2bf5f037ace176b1e967 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -209,6 +209,7 @@ const char kOptionResizableField[] = "tele-resizable-field";

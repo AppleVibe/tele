@@ -12,10 +12,10 @@ Subject: [PATCH] feat: scroll to zoom in the media viewer
  5 files changed, 22 insertions(+), 2 deletions(-)
 
 diff --git a/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp b/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp
-index 48a0b93e6601212902777be5000a74038c99889b..2499e00dd9951bd48dfada016934c6554912a36f 100644
+index 41fab07be0d0ae696adae43f15f483442f96a40b..18d89922ca581958c5186ffe6c496a5c447554c0 100644
 --- a/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp
 +++ b/Telegram/SourceFiles/media/view/media_view_overlay_widget.cpp
-@@ -7549,18 +7549,20 @@ void OverlayWidget::handleWheelEvent(not_null<QWheelEvent*> e) {
+@@ -7558,18 +7558,20 @@ void OverlayWidget::handleWheelEvent(not_null<QWheelEvent*> e) {
  		&& ((e->source() == Qt::MouseEventNotSynthesized)
  			|| (e->source() == Qt::MouseEventSynthesizedBySystem));
  	const auto anchor = zoomAnchor(e->globalPosition());
@@ -54,7 +54,7 @@ index 3f1c925fcbacd18a2d7761b9c606a7942e75ea3f..425357c8983838fde279ca1224e912b9
  	AddGroupTitle(builder, u"Chat list"_q);
  	AddOptionToggle(builder, ::Tele::kOptionHideAllChats);
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 6a8b76913029a225d4d86ea14fa9cbedb5bdb1c0..2af7461426d5a4a93b5dac6a1663c120e1fd3d13 100644
+index 54092d4f6e361e736e3f5858da987a1bf5afc44d..92a95b83586757bf45304a429276fdb9e53a7b77 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -63,6 +63,7 @@ const char kOptionReduceMotion[] = "tele-reduce-motion";

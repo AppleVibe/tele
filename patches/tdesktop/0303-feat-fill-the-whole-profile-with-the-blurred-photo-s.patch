@@ -117,7 +117,7 @@ index 19009435b5fe0987e5dce406702bddd02e092fa2..3f1c925fcbacd18a2d7761b9c606a794
  	AddGroupTitle(builder, u"Gifts"_q);
  	AddOptionToggle(builder, ::Tele::kOptionShowGiftIds);
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 33fc26741f4959a20fd93120b8b9e364b5a9bf21..6a8b76913029a225d4d86ea14fa9cbedb5bdb1c0 100644
+index bfaae7af93941f8d0ffe77247cdeb4f26653e672..54092d4f6e361e736e3f5858da987a1bf5afc44d 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -250,6 +250,7 @@ const char kOptionInvisibleNamesPhrase[] = "tele-invisible-names-phrase";
@@ -129,7 +129,7 @@ index 33fc26741f4959a20fd93120b8b9e364b5a9bf21..6a8b76913029a225d4d86ea14fa9cbed
  
  namespace {
 @@ -1753,6 +1754,11 @@ base::options::toggle ProfilePhotoBgOption({
- 	.name = "Blurred photo as profile background β",
+ 	.name = "Blurred photo as profile background",
  });
  
 +base::options::toggle ProfilePhotoBgWholeOption({

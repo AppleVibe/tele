@@ -177,7 +177,7 @@ index 37bd702260184aa8b30042109c1fce90b3741479..a63df902d34fee7ab2aba305b1d6f17f
  	AddOptionToggle(builder, ::Tele::kOptionShowGiftIds);
  	AddOptionToggle(builder, ::Tele::kOptionShowRegularGiftIds);
 diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
-index 651b0e314561082a10e023554334a3ce63bce2b4..87da799b359686d3471102736dffa07f5f8a34d2 100644
+index 651b0e314561082a10e023554334a3ce63bce2b4..af6f4d06c15d5964aabf8a54811fd40b36f3a86d 100644
 --- a/Telegram/SourceFiles/tele/tele_options.cpp
 +++ b/Telegram/SourceFiles/tele/tele_options.cpp
 @@ -247,6 +247,7 @@ const char kOptionInvisibleNamesFallback[] = "tele-invisible-names-fallback";
@@ -194,7 +194,7 @@ index 651b0e314561082a10e023554334a3ce63bce2b4..87da799b359686d3471102736dffa07f
  
 +base::options::toggle ProfilePhotoBgOption({
 +	.id = kOptionProfilePhotoBg,
-+	.name = "Blurred photo as profile background β",
++	.name = "Blurred photo as profile background",
 +});
 +
  void MigrateHideCalls() {

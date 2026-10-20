@@ -21,10 +21,10 @@ Subject: [PATCH] feat: put gifts on the money card as stickers
  create mode 100644 Telegram/SourceFiles/tele/tele_money_stickers.h
 
 diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
-index df97c9ec83593f28c96effb5a4b669864c4b4fbf..1b9bcea546b068987f6525280644f6e41a42e740 100644
+index 118cd4c21be1038d3f2961ee6de20276c1579e9e..13ce17d233a5b8c8ba7df223690f602f077929f4 100644
 --- a/Telegram/CMakeLists.txt
 +++ b/Telegram/CMakeLists.txt
-@@ -2680,6 +2680,8 @@ PRIVATE
+@@ -2724,6 +2724,8 @@ PRIVATE
      tele/tele_money_card.h
      tele/tele_money_card_box.cpp
      tele/tele_money_card_box.h

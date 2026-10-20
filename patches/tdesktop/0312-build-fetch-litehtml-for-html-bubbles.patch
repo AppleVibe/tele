@@ -14,7 +14,7 @@ Subject: [PATCH] build: fetch litehtml for html bubbles
  create mode 100644 Telegram/cmake/tele_litehtml_patch.cmake
 
 diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
-index 3aa1e35a39cfc24d55574799264cd855f8d0b84f..ecae7e469c39a83cc87dce256377470f48120631 100644
+index 38e1538e0a2edc344c954a7f84969a547bb23020..8c26a74b171c5823bd3a67134bb21a96c306f839 100644
 --- a/Telegram/CMakeLists.txt
 +++ b/Telegram/CMakeLists.txt
 @@ -30,6 +30,7 @@ include(cmake/lib_stripe.cmake)
