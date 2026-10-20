@@ -70,11 +70,22 @@ def escape(text):
 
 
 def message(args):
+    from notes import CATEGORIES, category, paths_by_subject, release_rows
+
     now = patches(args.repo, 'HEAD')
     before = previous_patches(args.repo, 'HEAD', args.previous) if args.previous else {}
     added = [name for name in now if name not in before]
     changed = [name for name in now if name in before and before[name] != now[name]]
     dropped = [name for name in before if name not in now]
+    paths = paths_by_subject(args.repo, 'HEAD')
+    rows = release_rows(args.repo, 'HEAD')
+    wheres = {number: where for number, _, where in rows.values()}
+    grouped = {}
+    for name in added + changed:
+        path = paths.get(name, '')
+        group = category(rows[path][2], wheres) if path in rows else 'other'
+        mark = ' (changed)' if name in changed else ''
+        grouped.setdefault(group, []).append(f'- {escape(name)}{mark}')
 
     tdesktop = 'https://github.com/telegramdesktop/tdesktop/releases/tag/'
     number = args.tag.rsplit('-tele.', 1)[-1]
@@ -87,10 +98,12 @@ def message(args):
         was = upstream(args.repo, args.previous)
         if was != args.upstream:
             lines += ['', f'moved from tdesktop {escape(was)} to {escape(args.upstream)}.']
-    for title, names in (('new', added), ('changed', changed), ('dropped', dropped)):
-        if names:
-            lines += ['', f'**{title}**', '']
-            lines += [f'- {escape(name)}' for name in names]
+    for title in CATEGORIES:
+        if title in grouped:
+            lines += ['', f'**{title}**', '', *grouped[title]]
+    if dropped:
+        lines += ['', '**dropped**', '']
+        lines += [f'- {escape(name)}' for name in dropped]
     if args.previous and not (added or changed or dropped):
         lines += ['', 'same patches as before.']
     lines += [
