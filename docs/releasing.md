@@ -60,7 +60,7 @@ when a platform fails, the others stay published and its clients keep the previo
 | `tele-update-win64.json`, `tele-update-linux64.json`, `tele-update-macos.json` | the signed update feeds (while a platform is still building, the previous release's) |
 | `tele-changelog.json` | what's new, for the in-app chat |
 
-once every platform is out, the release notes list the new, changed and dropped patches with their rows from `docs/releases.md`, the downloads and the full patch table. when the announcement secrets are set, the release is also announced in the project's telegram channel.
+once every platform is out, the release notes list the new, changed and dropped patches with their rows from `docs/releases.md`, the downloads and the full patch table. when the announcement secrets are set, the release is also announced in the project's telegram channel. the channel also gets tele for android's releases, so the post is titled `tele for desktop <number> · <tdesktop version>` and ends with a `#desktop` footer.
 
 ## signing and attestation
 

@@ -77,8 +77,9 @@ def message(args):
     dropped = [name for name in before if name not in now]
 
     tdesktop = 'https://github.com/telegramdesktop/tdesktop/releases/tag/'
+    number = args.tag.rsplit('-tele.', 1)[-1]
     lines = [
-        f'## tele {escape(args.tag)}',
+        f'## tele for desktop {escape(number)} · {escape(args.upstream.lstrip("v"))}',
         '',
         f'telegram desktop [{escape(args.upstream)}]({tdesktop}{args.upstream}) with {len(now)} patches.',
     ]
@@ -100,6 +101,8 @@ def message(args):
         f'<tg-button type="url" url="{args.url}/releases/tag/{args.tag}">download</tg-button>'
         f'<tg-button type="url" url="{args.url}/blob/main/docs/features.md">all patches</tg-button>'
         '</tg-button-row>',
+        '',
+        '<footer>#desktop</footer>',
     ]
     return '\n'.join(lines)
 
