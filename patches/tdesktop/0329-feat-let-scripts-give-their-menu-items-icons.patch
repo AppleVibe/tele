@@ -142,7 +142,7 @@ index d6c775edac763a19bb853e866c2153222f0877a1..2b6298bd9cb1f9b77485297541991ea4
  }
 diff --git a/Telegram/SourceFiles/tele/scripting/tele_script_icons.cpp b/Telegram/SourceFiles/tele/scripting/tele_script_icons.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..98ce884d912cf1e636766fee32a884dc330f22f1
+index 0000000000000000000000000000000000000000..01cdf7605e885cc301e1ad213157b2330de7a63a
 --- /dev/null
 +++ b/Telegram/SourceFiles/tele/scripting/tele_script_icons.cpp
 @@ -0,0 +1,603 @@
@@ -461,7 +461,7 @@ index 0000000000000000000000000000000000000000..98ce884d912cf1e636766fee32a884dc
 +	if (JS_IsUndefined(value) || JS_IsNull(value)) {
 +		return ScriptIcon();
 +	} else if (JS_IsBigInt(value)) {
-+		auto id = int64();
++		auto id = std::int64_t();
 +		if (JS_ToBigInt64(ctx, &id, value) < 0 || id <= 0) {
 +			JS_FreeValue(ctx, JS_GetException(ctx));
 +			return fail(u"icon must be a custom emoji document id"_q);
