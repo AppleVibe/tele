@@ -88,6 +88,7 @@ settings → tele → chats.
 | [313](../patches/tdesktop/0313-feat-hide-the-other-balances-above-the-money-card.patch) | hide the "you also have …" rows above the money card, here or by right-clicking one of them | tele → chats, off |
 | [317](../patches/tdesktop/0317-feat-put-gifts-on-the-money-card-as-stickers.patch) | put your collectible gifts on the money card as stickers: drag them from the card design box or money's collectibles tab, move them around, and click one to take it off | with 307 |
 | [322](../patches/tdesktop/0322-feat-filter-stickers-and-emoji-by-format.patch) | filter your sticker and emoji sets by format (static, animated, video or mixed), sort them, and archive or remove every shown set at once. the panel's search filters by format too, and custom emoji sets get their own list under stickers you have | tele → chats, off |
+| [337](../patches/tdesktop/0337-feat-open-json-code-text-and-csv-files-in-tele.patch) | json, code, text, log and csv files up to 1 mb open in tele's markdown viewer instead of another app: json is pretty-printed, code is highlighted, csv and tsv show as tables. long files come in parts of about 2,000 lines with continuing line numbers | tele → chats, on |
 
 ## messages
 
@@ -127,6 +128,7 @@ settings → tele → messages.
 | [283](../patches/tdesktop/0283-feat-keep-deleted-chats-and-topics.patch) | chats and topics that get deleted, or that you leave or get removed from, stay in the list with their loaded messages until you delete them again | with 19 |
 | [321](../patches/tdesktop/0321-feat-recover-deleted-channel-posts-from-forwards.patch) | open a deleted channel post from a forward of it and tele shows it again: it rebuilds the post from the forward in its place in the channel, marked like other kept deleted messages, and the time's tooltip says which forward it came from | with 19 |
 | [329](../patches/tdesktop/0329-fix-loading-older-messages-no-longer-crashes-on-a-me.patch) | tele no longer crashes while loading older messages when one of them is deleted just as it loads | with 19 |
+| [335](../patches/tdesktop/0335-fix-line-numbers-no-longer-freeze-long-code-blocks.patch) | long code blocks no longer freeze tele for seconds while their line numbers are counted, in rich messages and the markdown viewer | with 142 |
 
 ## sending
 
@@ -446,6 +448,7 @@ always on, or without a switch of their own.
 | [309](../patches/tdesktop/0309-fix-quote-the-fee-of-a-wallet-key-update-again.patch) | updating a wallet's key in money no longer fails with "the update could not be completed" | always on |
 | [327](../patches/tdesktop/0327-fix-gifts-in-money-look-like-gift-cards-instead-of-a.patch) | telegram gifts in money are drawn sharp at their real size, with the full backdrop pattern around the model. the model plays in the transaction and collectible windows | always on |
 | [328](../patches/tdesktop/0328-fix-passkey-prompts-no-longer-count-as-freezes.patch) | waiting in the windows passkey prompt, when logging in or adding a passkey, no longer produces a freeze report | with 203 |
+| [336](../patches/tdesktop/0336-fix-code-blocks-keep-the-indent-of-their-first-line.patch) | code blocks in rich messages and the markdown viewer keep the indent of their first line, and copying part of such a block copies exactly what you selected | always on |
 | [1001](../patches/Telegram/lib_ui/0001-fix-fullscreen-mini-apps-cover-the-screen-with-their.patch) | a mini app that opens in fullscreen covers the screen from its corner, with its ⋮ and ✕ buttons, instead of hanging off the screen (windows) | always on |
 | [1002](../patches/Telegram/lib_ui/0002-fix-unbreakable-characters-no-longer-scroll-text-fie.patch) | a text field with a long run of characters that can't wrap no longer scrolls sideways and hides everything else | always on |
 | [1006](../patches/Telegram/lib_ui/0006-fix-the-maximize-button-follows-the-real-window-stat.patch) | the maximize button of a window shows and does the right thing after resizing or moving the window drops its maximized or full screen state | always on |

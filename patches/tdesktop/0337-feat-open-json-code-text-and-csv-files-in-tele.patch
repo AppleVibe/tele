@@ -1,0 +1,947 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Tue, 20 Oct 2026 12:28:16 +0300
+Subject: [PATCH] feat: open json, code, text and csv files in tele
+
+---
+ Telegram/CMakeLists.txt                       |   2 +
+ .../iv_markdown_article_layout_blocks.cpp     |   8 +-
+ .../iv_markdown_article_layout_blocks.h       |   2 +
+ .../iv_markdown_article_layout_structure.cpp  |   4 +-
+ .../iv/markdown/iv_markdown_controller.cpp    |  11 +-
+ .../iv/markdown/iv_markdown_prepare.h         |   2 +
+ .../markdown/iv_markdown_prepare_blocks.cpp   |   6 +-
+ .../SourceFiles/settings/settings_tele.cpp    |   6 +
+ Telegram/SourceFiles/tele/tele_code_lines.cpp |  66 ++-
+ Telegram/SourceFiles/tele/tele_code_lines.h   |   8 +-
+ Telegram/SourceFiles/tele/tele_options.cpp    |  12 +
+ Telegram/SourceFiles/tele/tele_options.h      |   2 +
+ Telegram/SourceFiles/tele/tele_quick_view.cpp | 512 ++++++++++++++++++
+ Telegram/SourceFiles/tele/tele_quick_view.h   |  10 +
+ .../SourceFiles/tele/tele_settings_io.cpp     |   1 +
+ 15 files changed, 632 insertions(+), 20 deletions(-)
+ create mode 100644 Telegram/SourceFiles/tele/tele_quick_view.cpp
+ create mode 100644 Telegram/SourceFiles/tele/tele_quick_view.h
+
+diff --git a/Telegram/CMakeLists.txt b/Telegram/CMakeLists.txt
+index 26eb14ce2cdb042b1c746034256859dfcf8654ad..97aa2d25f57f2dd33b24f4c637bc6f6ab4fd7c4f 100644
+--- a/Telegram/CMakeLists.txt
++++ b/Telegram/CMakeLists.txt
+@@ -2800,6 +2800,8 @@ PRIVATE
+     tele/tele_protected.h
+     tele/tele_punctual_scheduled.cpp
+     tele/tele_punctual_scheduled.h
++    tele/tele_quick_view.cpp
++    tele/tele_quick_view.h
+     tele/tele_rate_limits.cpp
+     tele/tele_rate_limits.h
+     tele/tele_raw_request.cpp
+diff --git a/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.cpp b/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.cpp
+index 2ea1a79b0bcb91623a3bc05bb6546cdc417644c7..0da4f6e7e0c306fc4ff3161ed4722d5b380f450f 100644
+--- a/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.cpp
++++ b/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.cpp
+@@ -2150,7 +2150,7 @@ int CodeBlockPreferredWidth(
+ 		const style::Markdown &st,
+ 		LayoutContext context) {
+ 	const auto padding = BlockquotePadding(st.code.pre)
+-		+ Tele::RichCodeLinesPadding(prepared.text.text, st.code);
++		+ Tele::RichCodeLinesPadding(prepared, st.code);
+ 	const auto usePlaceholder = prepared.text.text.isEmpty()
+ 		&& !prepared.editPlaceholderText.isEmpty();
+ 	if (usePlaceholder) {
+@@ -2863,6 +2863,8 @@ void UpdateLaidOutLeafContent(
+ 		block->codeLinks = prepared.links;
+ 		block->copyText = prepared.text.text;
+ 		block->codeLanguage = prepared.codeLanguage;
++		block->codeLineStart = prepared.codeLineStart;
++		block->codeLineTotal = prepared.codeLineTotal;
+ 		RepopulateCodeBlockLeaf(
+ 			*block,
+ 			formulas,
+@@ -3316,6 +3318,8 @@ LaidOutBlock LayoutCodeBlock(
+ 	block.codeLinks = prepared.links;
+ 	block.copyText = block.codeText.text;
+ 	block.codeLanguage = prepared.codeLanguage;
++	block.codeLineStart = prepared.codeLineStart;
++	block.codeLineTotal = prepared.codeLineTotal;
+ 	BuildOrReuseCachedTextLeaf(
+ 		&block.leaf,
+ 		&block.syntaxHighlightProcessId,
+@@ -4122,7 +4126,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
+ 	ClearBlockGeometry(block);
+ 	const auto &pre = st.code.pre;
+ 	const auto padding = BlockquotePadding(pre)
+-		+ Tele::RichCodeLinesPadding(prepared.text.text, st.code);
++		+ Tele::RichCodeLinesPadding(prepared, st.code);
+ 	const auto outerWidth = std::max(
+ 		width,
+ 		padding.left() + padding.right() + 1);
+diff --git a/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.h b/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.h
+index 747324bde9b2879040832ca5ce1b932be30ee775..3ef23e163368c4d0423d44a7931dc6e043e70a70 100644
+--- a/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.h
++++ b/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.h
+@@ -111,6 +111,8 @@ struct LaidOutBlock {
+ 	std::vector<PreparedLink> codeLinks;
+ 	QString labelText;
+ 	QString codeLanguage;
++	int codeLineStart = 0;
++	int codeLineTotal = 0;
+ 	std::optional<PreparedLink> preparedLink;
+ 	ClickHandlerPtr preparedLinkHandler;
+ 	PreparedPlaceholderBlockId placeholderId;
+diff --git a/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_structure.cpp b/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_structure.cpp
+index 7de784e85285ad5cf916a28714935ab1837c3524..85dab134f291478137bb562193d4dddbb80ef639 100644
+--- a/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_structure.cpp
++++ b/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_structure.cpp
+@@ -838,7 +838,7 @@ void FinalizeOwnerSelection(
+ 		break;
+ 	case PreparedBlockKind::CodeBlock: {
+ 		const auto padding = BlockquotePadding(st.code.pre)
+-			+ Tele::RichCodeLinesPadding(prepared.text.text, st.code);
++			+ Tele::RichCodeLinesPadding(prepared, st.code);
+ 		visibleScrollViewportWidth = availableWidth
+ 			- HorizontalMarginsWidth(padding);
+ 		analysis.contentMinimumWidth = CodeBlockMinimumWidth(st);
+@@ -1476,7 +1476,7 @@ void FinalizeOwnerSelection(
+ 	} break;
+ 	case PreparedBlockKind::CodeBlock: {
+ 		const auto padding = BlockquotePadding(st.code.pre)
+-			+ Tele::RichCodeLinesPadding(block.codeText.text, st.code);
++			+ Tele::RichCodeLinesPadding(block, st.code);
+ 		visibleScrollViewportWidth = availableWidth
+ 			- HorizontalMarginsWidth(padding);
+ 		analysis.contentMinimumWidth = CodeBlockMinimumWidth(st);
+diff --git a/Telegram/SourceFiles/iv/markdown/iv_markdown_controller.cpp b/Telegram/SourceFiles/iv/markdown/iv_markdown_controller.cpp
+index 1c081ca89a89bdcb1a2d9ff72ea56d54b711cb78..59c3c645dc956d8a1d7ecb754b58f7ffc8f96039 100644
+--- a/Telegram/SourceFiles/iv/markdown/iv_markdown_controller.cpp
++++ b/Telegram/SourceFiles/iv/markdown/iv_markdown_controller.cpp
+@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "ui/ui_utility.h"
+ #include "logs.h"
+ 
++#include "tele/tele_quick_view.h"
+ #include "styles/palette.h"
+ #include "styles/style_iv.h"
+ #include "styles/style_menu_icons.h"
+@@ -162,7 +163,9 @@ struct ReadSource {
+ 		const MarkdownParseLimits &limits) {
+ 	const auto info = QFileInfo(path);
+ 	auto name = info.fileName();
+-	if (!IsReadableLocalFile(info) || !LooksLikeMarkdownFile(name)) {
++	const auto markdown = LooksLikeMarkdownFile(name);
++	if (!IsReadableLocalFile(info)
++		|| (!markdown && !Tele::QuickViewSupports(name))) {
+ 		return {};
+ 	} else if (info.size() > limits.maxSourceBytes) {
+ 		DEBUG_LOG(("Native Markdown IV: rejected local file too large: %1"
+@@ -178,6 +181,12 @@ struct ReadSource {
+ 		DEBUG_LOG(("Native Markdown IV: could not read local file: %1"
+ 			).arg(path));
+ 		return {};
++	} else if (!markdown) {
++		auto converted = Tele::QuickViewMarkdown(name, data);
++		if (!converted) {
++			return {};
++		}
++		data = std::move(*converted);
+ 	}
+ 	return {
+ 		.path = info.absoluteFilePath(),
+diff --git a/Telegram/SourceFiles/iv/markdown/iv_markdown_prepare.h b/Telegram/SourceFiles/iv/markdown/iv_markdown_prepare.h
+index 35478ee3a9024109334b375c1345c1bb9bd25e9d..45a54731c074fe0df564762e275a06b0963baf89 100644
+--- a/Telegram/SourceFiles/iv/markdown/iv_markdown_prepare.h
++++ b/Telegram/SourceFiles/iv/markdown/iv_markdown_prepare.h
+@@ -713,6 +713,8 @@ struct PreparedBlock {
+ 	std::vector<TableAlignment> tableAlignments;
+ 	TableAlignment flowAlignment = TableAlignment::Left;
+ 	QString codeLanguage;
++	int codeLineStart = 0;
++	int codeLineTotal = 0;
+ 	QString formulaTex;
+ 	QString anchorId;
+ 	QString collapseToggleId;
+diff --git a/Telegram/SourceFiles/iv/markdown/iv_markdown_prepare_blocks.cpp b/Telegram/SourceFiles/iv/markdown/iv_markdown_prepare_blocks.cpp
+index 63749cb1fc147894694c2ab65bf46b675381d98b..9a97e403198b11566cb08566aa81e9d692129f48 100644
+--- a/Telegram/SourceFiles/iv/markdown/iv_markdown_prepare_blocks.cpp
++++ b/Telegram/SourceFiles/iv/markdown/iv_markdown_prepare_blocks.cpp
+@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+ #include "iv/markdown/iv_markdown_prepare_blocks.h"
+ #include "iv/markdown/iv_markdown_prepare_inline.h"
+ #include "iv/markdown/iv_markdown_prepare_links.h"
++#include "tele/tele_code_lines.h"
+ 
+ #include <QtCore/QString>
+ 
+@@ -320,7 +321,10 @@ void AppendRichBlock(
+ 	auto block = PreparedBlock();
+ 	block.kind = PreparedBlockKind::CodeBlock;
+ 	block.text.text = StripOneTrailingNewline(node.text);
+-	block.codeLanguage = FirstInfoToken(node.info);
++	block.codeLanguage = FirstInfoToken(Tele::TakeCodeLines(
++		node.info,
++		&block.codeLineStart,
++		&block.codeLineTotal));
+ 	return block;
+ }
+ 
+diff --git a/Telegram/SourceFiles/settings/settings_tele.cpp b/Telegram/SourceFiles/settings/settings_tele.cpp
+index 243c585af31c61ffdad48d66fcef305cb5025c12..5402d7b278c10a809cd2580cf3a1688d2e50274f 100644
+--- a/Telegram/SourceFiles/settings/settings_tele.cpp
++++ b/Telegram/SourceFiles/settings/settings_tele.cpp
+@@ -2974,6 +2974,12 @@ void FillChats(SectionBuilder &builder) {
+ 		::Tele::kOptionSelectMany,
+ 		{ u"selection"_q, u"limit"_q, u"bulk"_q });
+ 	AddGroupDivider(builder);
++	AddGroupTitle(builder, u"Files"_q);
++	AddOptionToggle(
++		builder,
++		::Tele::kOptionQuickView,
++		{ u"json"_q, u"csv"_q, u"log"_q, u"code"_q, u"preview"_q, u"markdown"_q });
++	AddGroupDivider(builder);
+ 	AddGroupTitle(builder, u"Sponsored"_q);
+ 	AddOptionToggle(builder, ::Tele::kOptionHideSponsored);
+ 	AddOptionToggle(builder, ::Tele::kOptionHideProxySponsor);
+diff --git a/Telegram/SourceFiles/tele/tele_code_lines.cpp b/Telegram/SourceFiles/tele/tele_code_lines.cpp
+index 8d6ab7f488b8a47727b8346d13d6e665d77a3596..c205d289749fd2226fea0cb0ba3ba2ecdac127ec 100644
+--- a/Telegram/SourceFiles/tele/tele_code_lines.cpp
++++ b/Telegram/SourceFiles/tele/tele_code_lines.cpp
+@@ -6,6 +6,7 @@
+ #include "history/history_item.h"
+ #include "history/view/history_view_element.h"
+ #include "iv/markdown/iv_markdown_article_layout_blocks.h"
++#include "iv/markdown/iv_markdown_prepare.h"
+ #include "tele/tele_options.h"
+ #include "ui/text/text.h"
+ #include "ui/text/text_entity.h"
+@@ -13,6 +14,8 @@
+ #include "styles/style_chat.h"
+ #include "styles/style_iv.h"
+ 
++#include <QtCore/QRegularExpression>
++
+ #include <map>
+ #include <unordered_map>
+ 
+@@ -135,6 +138,26 @@ void Compact(State &state) {
+ 	return style::ConvertScale(8);
+ }
+ 
++[[nodiscard]] QMargins CodeLinesPadding(
++		const QString &code,
++		int total,
++		const style::TextStyle &st) {
++	if (!CodeLineNumbers()
++		|| (total <= 0 && CountLines(code) < kMinLines)) {
++		return QMargins();
++	}
++	const auto lines = (total > 0)
++		? total
++		: (int(ranges::count_if(code, Ui::Text::IsNewline)) + 1);
++	const auto digits = int(QString::number(lines).size());
++	const auto font = st.font->monospace();
++	return QMargins(
++		font->width(QString(digits, QChar('0'))) + GutterGap(),
++		0,
++		0,
++		0);
++}
++
+ [[nodiscard]] const style::TextStyle &StyleFor(int digits) {
+ 	auto &styles = Get().styles;
+ 	const auto [i, inserted] = styles.try_emplace(
+@@ -329,20 +352,36 @@ void PaintCodeLineNumbers(
+ 	p.restore();
+ }
+ 
++QString CodeLinesInfo(int start, int total) {
++	return u"tele-lines=%1/%2"_q.arg(start).arg(total);
++}
++
++QString TakeCodeLines(QString info, int *start, int *total) {
++	static const auto token = QRegularExpression(
++		u"(?:^|\\s)tele-lines=(\\d{1,9})/(\\d{1,9})(?=\\s|$)"_q);
++	const auto match = token.match(info);
++	if (!match.hasMatch()) {
++		return info;
++	}
++	const auto first = match.captured(1).toInt();
++	const auto last = match.captured(2).toInt();
++	if (first > 0 && first <= last) {
++		*start = first;
++		*total = last;
++	}
++	return info.remove(match.capturedStart(), match.capturedLength());
++}
++
+ QMargins RichCodeLinesPadding(
+-		const QString &code,
++		const Iv::Markdown::PreparedBlock &block,
+ 		const style::TextStyle &st) {
+-	if (!CodeLineNumbers() || CountLines(code) < kMinLines) {
+-		return QMargins();
+-	}
+-	const auto lines = int(ranges::count_if(code, Ui::Text::IsNewline)) + 1;
+-	const auto digits = int(QString::number(lines).size());
+-	const auto font = st.font->monospace();
+-	return QMargins(
+-		font->width(QString(digits, QChar('0'))) + GutterGap(),
+-		0,
+-		0,
+-		0);
++	return CodeLinesPadding(block.text.text, block.codeLineTotal, st);
++}
++
++QMargins RichCodeLinesPadding(
++		const Iv::Markdown::LaidOutBlock &block,
++		const style::TextStyle &st) {
++	return CodeLinesPadding(block.codeText.text, block.codeLineTotal, st);
+ }
+ 
+ void TrackRichCodeLines(not_null<HistoryView::Element*> view) {
+@@ -389,6 +428,7 @@ void PaintRichCodeLineNumbers(
+ 		+ block.horizontalScrollLeft
+ 		- GutterGap();
+ 	const auto top = block.textRect.y();
++	const auto shift = std::max(block.codeLineStart, 1) - 1;
+ 	p.save();
+ 	p.setClipRect(clip);
+ 	p.setFont(font);
+@@ -401,7 +441,7 @@ void PaintRichCodeLineNumbers(
+ 		} else if (baseline - font->ascent >= clip.y() + clip.height()) {
+ 			break;
+ 		}
+-		const auto label = QString::number(number.value);
++		const auto label = QString::number(number.value + shift);
+ 		p.drawText(right - font->width(label), baseline, label);
+ 	}
+ 	p.restore();
+diff --git a/Telegram/SourceFiles/tele/tele_code_lines.h b/Telegram/SourceFiles/tele/tele_code_lines.h
+index 0e4ac6c90fc08dc519c23cb7cfc457b3b206a71e..51abd1a977bdc2192a40c62d3747a4fa11c35c27 100644
+--- a/Telegram/SourceFiles/tele/tele_code_lines.h
++++ b/Telegram/SourceFiles/tele/tele_code_lines.h
+@@ -8,6 +8,7 @@ class Element;
+ 
+ namespace Iv::Markdown {
+ struct LaidOutBlock;
++struct PreparedBlock;
+ } // namespace Iv::Markdown
+ 
+ namespace style {
+@@ -32,8 +33,13 @@ void PaintCodeLineNumbers(
+ 	int width,
+ 	const QColor &color);
+ 
++[[nodiscard]] QString CodeLinesInfo(int start, int total);
++[[nodiscard]] QString TakeCodeLines(QString info, int *start, int *total);
+ [[nodiscard]] QMargins RichCodeLinesPadding(
+-	const QString &code,
++	const Iv::Markdown::PreparedBlock &block,
++	const style::TextStyle &st);
++[[nodiscard]] QMargins RichCodeLinesPadding(
++	const Iv::Markdown::LaidOutBlock &block,
+ 	const style::TextStyle &st);
+ void TrackRichCodeLines(not_null<HistoryView::Element*> view);
+ void PaintRichCodeLineNumbers(
+diff --git a/Telegram/SourceFiles/tele/tele_options.cpp b/Telegram/SourceFiles/tele/tele_options.cpp
+index cbca82411200f626225226fbf6be352bc5a29932..b4b8b4fc6d89c6f0a85fd7e318b5ad6dfee7c6e0 100644
+--- a/Telegram/SourceFiles/tele/tele_options.cpp
++++ b/Telegram/SourceFiles/tele/tele_options.cpp
+@@ -204,6 +204,7 @@ const char kOptionUsernameAliases[] = "tele-username-aliases";
+ const char kOptionAliasMenu[] = "tele-alias-menu";
+ const char kOptionPinnedBarMenu[] = "tele-pinned-bar-menu";
+ const char kOptionSelectMany[] = "tele-select-many";
++const char kOptionQuickView[] = "tele-quick-view";
+ const char kOptionNoPhoneInHeader[] = "tele-no-phone-in-header";
+ const char kOptionNftPurchasePrice[] = "tele-nft-purchase-price";
+ const char kOptionLinkRewrites[] = "tele-link-rewrites";
+@@ -1495,6 +1496,13 @@ base::options::toggle SelectManyOption({
+ 		"of 100.",
+ });
+ 
++base::options::toggle QuickViewOption({
++	.id = kOptionQuickView,
++	.name = "Open text files in tele",
++	.description = "JSON, code, text and CSV files open formatted, like .md files.",
++	.defaultValue = true,
++});
++
+ base::options::toggle NoPhoneInHeaderOption({
+ 	.id = kOptionNoPhoneInHeader,
+ 	.name = "Names instead of phone numbers in chats",
+@@ -3347,6 +3355,10 @@ bool SelectMany() {
+ 	return SelectManyOption.value();
+ }
+ 
++bool QuickView() {
++	return QuickViewOption.value();
++}
++
+ bool NoPhoneInHeader() {
+ 	return NoPhoneInHeaderOption.value();
+ }
+diff --git a/Telegram/SourceFiles/tele/tele_options.h b/Telegram/SourceFiles/tele/tele_options.h
+index cae067ce23f15dd58b8370efb2a412d1f11747a1..606f99fe8fa9b42b203e5bfabc76be1602601c8d 100644
+--- a/Telegram/SourceFiles/tele/tele_options.h
++++ b/Telegram/SourceFiles/tele/tele_options.h
+@@ -199,6 +199,7 @@ extern const char kOptionUsernameAliases[];
+ extern const char kOptionAliasMenu[];
+ extern const char kOptionPinnedBarMenu[];
+ extern const char kOptionSelectMany[];
++extern const char kOptionQuickView[];
+ extern const char kOptionNoPhoneInHeader[];
+ extern const char kOptionNftPurchasePrice[];
+ extern const char kOptionLinkRewrites[];
+@@ -553,6 +554,7 @@ void SetUsernameAliases(const QString &value);
+ [[nodiscard]] bool AliasMenu();
+ [[nodiscard]] bool PinnedBarMenu();
+ [[nodiscard]] bool SelectMany();
++[[nodiscard]] bool QuickView();
+ [[nodiscard]] bool NoPhoneInHeader();
+ [[nodiscard]] rpl::producer<bool> NoPhoneInHeaderValue();
+ [[nodiscard]] bool NftPurchasePrice();
+diff --git a/Telegram/SourceFiles/tele/tele_quick_view.cpp b/Telegram/SourceFiles/tele/tele_quick_view.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..c19c57c0fa42470dfd089747de9d19ac99288e7a
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_quick_view.cpp
+@@ -0,0 +1,512 @@
++#include "tele/tele_quick_view.h"
++
++#include "tele/tele_code_lines.h"
++#include "tele/tele_lowercase.h"
++#include "tele/tele_options.h"
++
++#include <QtCore/QJsonDocument>
++#include <QtCore/QJsonParseError>
++
++namespace Tele {
++namespace {
++
++constexpr auto kMaxBytes = 1024 * 1024;
++constexpr auto kMaxRows = 1000;
++constexpr auto kMaxColumns = 50;
++constexpr auto kMaxCells = 50'000;
++constexpr auto kPartLength = 30'000;
++constexpr auto kPartLines = 2'000;
++constexpr auto kTabWidth = 4;
++
++enum class Kind {
++	Json,
++	Code,
++	Text,
++	Table,
++};
++
++struct Format {
++	Kind kind = Kind::Text;
++	QString language;
++	QChar delimiter;
++};
++
++[[nodiscard]] const base::flat_map<QString, QString> &CodeLanguages() {
++	static const auto result = base::flat_map<QString, QString>{
++		{ u"js"_q, u"javascript"_q },
++		{ u"mjs"_q, u"javascript"_q },
++		{ u"cjs"_q, u"javascript"_q },
++		{ u"jsx"_q, u"javascript"_q },
++		{ u"ts"_q, u"typescript"_q },
++		{ u"mts"_q, u"typescript"_q },
++		{ u"cts"_q, u"typescript"_q },
++		{ u"tsx"_q, u"typescript"_q },
++		{ u"py"_q, u"python"_q },
++		{ u"pyw"_q, u"python"_q },
++		{ u"c"_q, u"c"_q },
++		{ u"h"_q, u"cpp"_q },
++		{ u"cpp"_q, u"cpp"_q },
++		{ u"cc"_q, u"cpp"_q },
++		{ u"cxx"_q, u"cpp"_q },
++		{ u"hpp"_q, u"cpp"_q },
++		{ u"hh"_q, u"cpp"_q },
++		{ u"hxx"_q, u"cpp"_q },
++		{ u"inl"_q, u"cpp"_q },
++		{ u"ipp"_q, u"cpp"_q },
++		{ u"cs"_q, u"csharp"_q },
++		{ u"java"_q, u"java"_q },
++		{ u"kt"_q, u"kotlin"_q },
++		{ u"kts"_q, u"kotlin"_q },
++		{ u"go"_q, u"go"_q },
++		{ u"rs"_q, u"rust"_q },
++		{ u"swift"_q, u"swift"_q },
++		{ u"m"_q, u"objectivec"_q },
++		{ u"mm"_q, u"objectivec"_q },
++		{ u"scala"_q, u"scala"_q },
++		{ u"dart"_q, u"dart"_q },
++		{ u"php"_q, u"php"_q },
++		{ u"rb"_q, u"ruby"_q },
++		{ u"lua"_q, u"lua"_q },
++		{ u"pl"_q, u"perl"_q },
++		{ u"pm"_q, u"perl"_q },
++		{ u"r"_q, u"r"_q },
++		{ u"hs"_q, u"haskell"_q },
++		{ u"ex"_q, u"elixir"_q },
++		{ u"exs"_q, u"elixir"_q },
++		{ u"erl"_q, u"erlang"_q },
++		{ u"clj"_q, u"clojure"_q },
++		{ u"fs"_q, u"fsharp"_q },
++		{ u"vb"_q, u"vbnet"_q },
++		{ u"sh"_q, u"bash"_q },
++		{ u"bash"_q, u"bash"_q },
++		{ u"zsh"_q, u"bash"_q },
++		{ u"bat"_q, u"batch"_q },
++		{ u"cmd"_q, u"batch"_q },
++		{ u"ps1"_q, u"powershell"_q },
++		{ u"psm1"_q, u"powershell"_q },
++		{ u"sql"_q, u"sql"_q },
++		{ u"graphql"_q, u"graphql"_q },
++		{ u"gql"_q, u"graphql"_q },
++		{ u"html"_q, u"html"_q },
++		{ u"htm"_q, u"html"_q },
++		{ u"xhtml"_q, u"html"_q },
++		{ u"xml"_q, u"xml"_q },
++		{ u"xsd"_q, u"xml"_q },
++		{ u"xsl"_q, u"xml"_q },
++		{ u"plist"_q, u"xml"_q },
++		{ u"css"_q, u"css"_q },
++		{ u"scss"_q, u"scss"_q },
++		{ u"sass"_q, u"sass"_q },
++		{ u"less"_q, u"less"_q },
++		{ u"yaml"_q, u"yaml"_q },
++		{ u"yml"_q, u"yaml"_q },
++		{ u"toml"_q, u"toml"_q },
++		{ u"ini"_q, u"ini"_q },
++		{ u"cfg"_q, u"ini"_q },
++		{ u"conf"_q, u"ini"_q },
++		{ u"properties"_q, u"properties"_q },
++		{ u"diff"_q, u"diff"_q },
++		{ u"patch"_q, u"diff"_q },
++		{ u"gradle"_q, u"groovy"_q },
++		{ u"groovy"_q, u"groovy"_q },
++		{ u"cmake"_q, u"cmake"_q },
++		{ u"tex"_q, u"latex"_q },
++		{ u"proto"_q, u"protobuf"_q },
++		{ u"tf"_q, u"hcl"_q },
++		{ u"jsonc"_q, u"json"_q },
++		{ u"json5"_q, u"json"_q },
++		{ u"jsonl"_q, u"json"_q },
++		{ u"ndjson"_q, u"json"_q },
++		{ u"geojson"_q, u"json"_q },
++		{ u"webmanifest"_q, u"json"_q },
++	};
++	return result;
++}
++
++[[nodiscard]] std::optional<Format> Lookup(const QString &fileName) {
++	const auto lower = fileName.toLower();
++	if (lower == u"dockerfile"_q) {
++		return Format{ .kind = Kind::Code, .language = u"docker"_q };
++	} else if (lower == u"makefile"_q || lower == u"gnumakefile"_q) {
++		return Format{ .kind = Kind::Code, .language = u"makefile"_q };
++	} else if (lower == u"cmakelists.txt"_q) {
++		return Format{ .kind = Kind::Code, .language = u"cmake"_q };
++	}
++	const auto dot = lower.lastIndexOf(QChar('.'));
++	if (dot < 0) {
++		return std::nullopt;
++	}
++	const auto suffix = lower.mid(dot + 1);
++	if (suffix == u"json"_q) {
++		return Format{ .kind = Kind::Json, .language = u"json"_q };
++	} else if (suffix == u"txt"_q
++		|| suffix == u"text"_q
++		|| suffix == u"log"_q
++		|| suffix == u"out"_q
++		|| suffix == u"err"_q
++		|| suffix == u"nfo"_q) {
++		return Format{ .kind = Kind::Text };
++	} else if (suffix == u"csv"_q) {
++		return Format{ .kind = Kind::Table };
++	} else if (suffix == u"tsv"_q || suffix == u"tab"_q) {
++		return Format{ .kind = Kind::Table, .delimiter = QChar('\t') };
++	}
++	const auto &languages = CodeLanguages();
++	const auto i = languages.find(suffix);
++	if (i != end(languages)) {
++		return Format{ .kind = Kind::Code, .language = i->second };
++	}
++	return std::nullopt;
++}
++
++[[nodiscard]] QString FromUtf16(const QByteArray &bytes, bool big) {
++	auto result = QString();
++	result.reserve(bytes.size() / 2);
++	for (auto i = 2; i + 1 < bytes.size(); i += 2) {
++		const auto first = uchar(bytes[i]);
++		const auto second = uchar(bytes[i + 1]);
++		result.append(QChar(big
++			? ushort((first << 8) | second)
++			: ushort((second << 8) | first)));
++	}
++	return result;
++}
++
++[[nodiscard]] std::optional<QString> DecodeText(const QByteArray &bytes) {
++	if (bytes.startsWith("\xFF\xFE")) {
++		return FromUtf16(bytes, false);
++	} else if (bytes.startsWith("\xFE\xFF")) {
++		return FromUtf16(bytes, true);
++	} else if (bytes.contains('\0')) {
++		return std::nullopt;
++	}
++	return QString::fromUtf8(bytes.startsWith("\xEF\xBB\xBF")
++		? bytes.mid(3)
++		: bytes);
++}
++
++[[nodiscard]] QString NormalizeLines(QString text) {
++	text.replace(u"\r\n"_q, u"\n"_q);
++	text.replace(QChar('\r'), QChar('\n'));
++	return text;
++}
++
++[[nodiscard]] QString Fence(QStringView text, const QString &info) {
++	auto longest = 0;
++	auto run = 0;
++	for (const auto ch : text) {
++		if (ch == QChar('`')) {
++			longest = std::max(longest, ++run);
++		} else {
++			run = 0;
++		}
++	}
++	const auto fence = QString(std::max(3, longest + 1), QChar('`'));
++	auto result = fence + info + QChar('\n');
++	result.append(text.data(), int(text.size()));
++	if (!text.endsWith(QChar('\n'))) {
++		result += QChar('\n');
++	}
++	return result + fence + QChar('\n');
++}
++
++[[nodiscard]] int PartLength(QStringView text) {
++	const auto count = int(text.size());
++	auto width = 0;
++	auto lines = 0;
++	auto cut = 0;
++	auto blank = 0;
++	auto i = 0;
++	for (; i != count; ++i) {
++		const auto ch = text[i];
++		width += (ch == QChar::Tabulation) ? kTabWidth : 1;
++		if (width > kPartLength) {
++			break;
++		} else if (ch == QChar('\n')) {
++			if (i > 0 && text[i - 1] == QChar('\n')) {
++				blank = i + 1;
++			}
++			cut = i + 1;
++			if (++lines == kPartLines) {
++				break;
++			}
++		}
++	}
++	if (i == count) {
++		return count;
++	} else if (!cut) {
++		return text[i - 1].isHighSurrogate() ? (i - 1) : i;
++	}
++	return (blank > cut - cut / 4) ? blank : cut;
++}
++
++[[nodiscard]] QString CodeBlock(const QString &text, const QString &language) {
++	auto parts = std::vector<QStringView>();
++	for (auto rest = QStringView(text); !rest.isEmpty();) {
++		const auto length = PartLength(rest);
++		parts.push_back(rest.left(length));
++		rest = rest.mid(length);
++	}
++	if (parts.size() < 2) {
++		return Fence(text, language);
++	}
++	const auto total = int(text.count(QChar('\n')))
++		+ (text.endsWith(QChar('\n')) ? 0 : 1);
++	auto result = QString();
++	auto start = 1;
++	for (const auto part : parts) {
++		const auto lines = CodeLinesInfo(start, total);
++		if (!result.isEmpty()) {
++			result += QChar('\n');
++		}
++		result += Fence(
++			part,
++			language.isEmpty() ? lines : (language + QChar(' ') + lines));
++		start += int(ranges::count(part, QChar('\n')));
++	}
++	return result;
++}
++
++[[nodiscard]] bool IsJsonSpace(QChar ch) {
++	return (ch == QChar(' '))
++		|| (ch == QChar('\t'))
++		|| (ch == QChar('\n'))
++		|| (ch == QChar('\r'));
++}
++
++[[nodiscard]] QString PrettyJson(const QString &text) {
++	auto result = QString();
++	result.reserve(text.size() + text.size() / 2);
++	auto indent = 0;
++	auto string = false;
++	auto escape = false;
++	const auto newline = [&] {
++		result += QChar('\n');
++		result += QString(indent * 2, QChar(' '));
++	};
++	for (auto i = 0; i != text.size(); ++i) {
++		const auto ch = text[i];
++		if (string) {
++			result += ch;
++			if (escape) {
++				escape = false;
++			} else if (ch == QChar('\\')) {
++				escape = true;
++			} else if (ch == QChar('"')) {
++				string = false;
++			}
++			continue;
++		} else if (IsJsonSpace(ch)) {
++			continue;
++		}
++		switch (ch.unicode()) {
++		case '"':
++			string = true;
++			result += ch;
++			break;
++		case '{':
++		case '[': {
++			const auto close = QChar((ch == QChar('{')) ? '}' : ']');
++			auto next = i + 1;
++			while (next < text.size() && IsJsonSpace(text[next])) {
++				++next;
++			}
++			result += ch;
++			if (next < text.size() && text[next] == close) {
++				result += close;
++				i = next;
++			} else {
++				++indent;
++				newline();
++			}
++		} break;
++		case '}':
++		case ']':
++			indent = std::max(indent - 1, 0);
++			newline();
++			result += ch;
++			break;
++		case ',':
++			result += ch;
++			newline();
++			break;
++		case ':':
++			result += u": "_q;
++			break;
++		default:
++			result += ch;
++			break;
++		}
++	}
++	return result;
++}
++
++[[nodiscard]] QString Json(const QString &text) {
++	auto error = QJsonParseError();
++	const auto valid = !QJsonDocument::fromJson(text.toUtf8(), &error).isNull()
++		&& (error.error == QJsonParseError::NoError);
++	return CodeBlock(valid ? PrettyJson(text) : text, u"json"_q);
++}
++
++[[nodiscard]] QChar GuessDelimiter(const QString &text) {
++	const auto end = text.indexOf(QChar('\n'));
++	const auto line = text.left((end < 0) ? text.size() : end);
++	auto best = QChar(',');
++	auto most = line.count(best);
++	for (const auto candidate : { QChar(';'), QChar('\t'), QChar('|') }) {
++		const auto count = line.count(candidate);
++		if (count > most) {
++			most = count;
++			best = candidate;
++		}
++	}
++	return best;
++}
++
++[[nodiscard]] std::vector<std::vector<QString>> ParseTable(
++		const QString &text,
++		QChar delimiter) {
++	auto rows = std::vector<std::vector<QString>>();
++	auto row = std::vector<QString>();
++	auto field = QString();
++	auto quoted = false;
++	auto started = false;
++	const auto finishField = [&] {
++		row.push_back(std::move(field));
++		field = QString();
++		started = false;
++	};
++	const auto finishRow = [&] {
++		finishField();
++		if (row.size() > 1 || !row.front().isEmpty()) {
++			rows.push_back(std::move(row));
++		}
++		row = std::vector<QString>();
++	};
++	for (auto i = 0; i != text.size(); ++i) {
++		const auto ch = text[i];
++		if (quoted) {
++			if (ch != QChar('"')) {
++				field += ch;
++			} else if (i + 1 < text.size() && text[i + 1] == QChar('"')) {
++				field += ch;
++				++i;
++			} else {
++				quoted = false;
++			}
++		} else if (ch == QChar('"') && !started) {
++			quoted = true;
++			started = true;
++		} else if (ch == delimiter) {
++			finishField();
++		} else if (ch == QChar('\n')) {
++			finishRow();
++		} else {
++			field += ch;
++			started = true;
++		}
++	}
++	if (started || !field.isEmpty() || !row.empty()) {
++		finishRow();
++	}
++	return rows;
++}
++
++[[nodiscard]] QString EscapeCell(const QString &text) {
++	auto result = QString();
++	result.reserve(text.size() + 8);
++	for (const auto ch : text) {
++		const auto code = ch.unicode();
++		if (ch == QChar('\n')) {
++			result += QChar(' ');
++		} else if (code < 128 && QChar(code).isPunct()) {
++			result += QChar('\\');
++			result += ch;
++		} else if (code < 128 && QChar(code).isSymbol()) {
++			result += QChar('\\');
++			result += ch;
++		} else {
++			result += ch;
++		}
++	}
++	return result;
++}
++
++[[nodiscard]] QString Table(const QString &text, QChar delimiter) {
++	auto rows = ParseTable(text, delimiter.isNull()
++		? GuessDelimiter(text)
++		: delimiter);
++	if (rows.empty()) {
++		return CodeBlock(text, QString());
++	}
++	auto columns = 0;
++	for (const auto &row : rows) {
++		columns = std::max(columns, int(row.size()));
++	}
++	const auto total = int(rows.size());
++	const auto shownColumns = std::min(columns, kMaxColumns);
++	const auto rowLimit = std::max(
++		std::min(kMaxRows, kMaxCells / std::max(shownColumns, 1)),
++		1);
++	const auto shownRows = std::min(total, rowLimit);
++	auto result = QString();
++	const auto line = [&](const std::vector<QString> &row) {
++		result += QChar('|');
++		for (auto column = 0; column != shownColumns; ++column) {
++			result += QChar(' ');
++			if (column < int(row.size())) {
++				result += EscapeCell(row[column]);
++			}
++			result += u" |"_q;
++		}
++		result += QChar('\n');
++	};
++	line(rows.front());
++	result += QChar('|');
++	for (auto column = 0; column != shownColumns; ++column) {
++		result += u" --- |"_q;
++	}
++	result += QChar('\n');
++	for (auto i = 1; i < shownRows; ++i) {
++		line(rows[i]);
++	}
++	if (shownRows < total || shownColumns < columns) {
++		result += QChar('\n');
++		result += Lower(u"Showing %1 of %2 rows and %3 of %4 columns."_q
++			.arg(shownRows)
++			.arg(total)
++			.arg(shownColumns)
++			.arg(columns));
++		result += QChar('\n');
++	}
++	return result;
++}
++
++} // namespace
++
++bool QuickViewSupports(const QString &fileName) {
++	return QuickView() && Lookup(fileName).has_value();
++}
++
++std::optional<QByteArray> QuickViewMarkdown(
++		const QString &fileName,
++		const QByteArray &bytes) {
++	const auto format = Lookup(fileName);
++	if (!format || bytes.size() > kMaxBytes) {
++		return std::nullopt;
++	}
++	const auto decoded = DecodeText(bytes);
++	if (!decoded) {
++		return std::nullopt;
++	}
++	const auto text = NormalizeLines(*decoded);
++	switch (format->kind) {
++	case Kind::Json: return Json(text).toUtf8();
++	case Kind::Code: return CodeBlock(text, format->language).toUtf8();
++	case Kind::Text: return CodeBlock(text, QString()).toUtf8();
++	case Kind::Table: return Table(text, format->delimiter).toUtf8();
++	}
++	return std::nullopt;
++}
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_quick_view.h b/Telegram/SourceFiles/tele/tele_quick_view.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..30b3a6b12fe9e705c09f42cc483e3a0725571501
+--- /dev/null
++++ b/Telegram/SourceFiles/tele/tele_quick_view.h
+@@ -0,0 +1,10 @@
++#pragma once
++
++namespace Tele {
++
++[[nodiscard]] bool QuickViewSupports(const QString &fileName);
++[[nodiscard]] std::optional<QByteArray> QuickViewMarkdown(
++	const QString &fileName,
++	const QByteArray &bytes);
++
++} // namespace Tele
+diff --git a/Telegram/SourceFiles/tele/tele_settings_io.cpp b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+index 46135419b94540453ee62c1eb36d93a343420d47..72b3093bbf12f75daef6fdf5d6ce2f307734cf0b 100644
+--- a/Telegram/SourceFiles/tele/tele_settings_io.cpp
++++ b/Telegram/SourceFiles/tele/tele_settings_io.cpp
+@@ -291,6 +291,7 @@ struct Spec {
+ 		Toggle(kOptionAliasMenu),
+ 		Toggle(kOptionPinnedBarMenu),
+ 		Toggle(kOptionSelectMany),
++		Toggle(kOptionQuickView),
+ 		Toggle(kOptionLocalNameMenu),
+ 		Toggle(kOptionInvisibleNames),
+ 		Choice(kOptionInvisibleNamesFallback, { QString(), u"id"_q }),

@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Mon, 19 Oct 2026 05:56:26 +0300
+Subject: [PATCH] fix: line numbers no longer freeze long code blocks
+
+---
+ Telegram/SourceFiles/tele/tele_code_lines.cpp | 22 +++++++++++++++----
+ 1 file changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/Telegram/SourceFiles/tele/tele_code_lines.cpp b/Telegram/SourceFiles/tele/tele_code_lines.cpp
+index b7592d3f030cd4702e8c09b24c8978898c161dda..8d6ab7f488b8a47727b8346d13d6e665d77a3596 100644
+--- a/Telegram/SourceFiles/tele/tele_code_lines.cpp
++++ b/Telegram/SourceFiles/tele/tele_code_lines.cpp
+@@ -21,6 +21,7 @@ namespace {
+ 
+ constexpr auto kMinLines = 5;
+ constexpr auto kCompactThreshold = 256;
++constexpr auto kMaxWrappedLines = 400;
+ constexpr auto kOpacity = 0.4;
+ 
+ struct Number {
+@@ -231,12 +232,25 @@ void Compact(State &state) {
+ 		const Ui::Text::String &leaf,
+ 		int width) {
+ 	const auto text = leaf.toString();
+-	auto request = Ui::Text::StateRequest();
+-	request.flags = Ui::Text::StateRequest::Flag::LookupSymbol;
+-
++	const auto lines = leaf.countLinesGeometry(width);
++	const auto count = int(lines.size());
+ 	auto result = std::vector<RichNumber>();
+ 	auto counter = 0;
+-	for (const auto &line : leaf.countLinesGeometry(width)) {
++	if (count == int(ranges::count_if(text, Ui::Text::IsNewline)) + 1) {
++		result.reserve(count);
++		for (const auto &line : lines) {
++			result.push_back({
++				.baseline = line.baseline,
++				.value = ++counter,
++			});
++		}
++		return result;
++	} else if (count > kMaxWrappedLines) {
++		return result;
++	}
++	auto request = Ui::Text::StateRequest();
++	request.flags = Ui::Text::StateRequest::Flag::LookupSymbol;
++	for (const auto &line : lines) {
+ 		const auto symbol = leaf.getState(
+ 			QPoint(0, line.baseline),
+ 			width,

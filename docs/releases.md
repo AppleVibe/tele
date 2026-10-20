@@ -20,6 +20,9 @@ all 334 patches, newest release first.
 | [332](../patches/tdesktop/0332-feat-show-skipped-messages-in-shots.patch) | a shot of messages that aren't next to each other can show how many were skipped between them, as a "2 messages skipped" badge | with 87 |
 | [333](../patches/tdesktop/0333-feat-restrict-members-from-message-menus-and-find-th.patch) | group admins can restrict someone from their message or userpic menu without deleting the message, and the add exception, add admin and remove user pickers find people tele already knows by their numeric id, members or not | tele → menus, on |
 | [334](../patches/tdesktop/0334-feat-let-scripts-give-their-menu-items-icons.patch) | scripts can give their menu items, drawer items and settings entries an icon: one of tele's own, an emoji, a custom emoji, an svg or an image, see [scripting](scripting.md) | with 302 |
+| [335](../patches/tdesktop/0335-fix-line-numbers-no-longer-freeze-long-code-blocks.patch) | long code blocks no longer freeze tele for seconds while their line numbers are counted, in rich messages and the markdown viewer | with 142 |
+| [336](../patches/tdesktop/0336-fix-code-blocks-keep-the-indent-of-their-first-line.patch) | code blocks in rich messages and the markdown viewer keep the indent of their first line, and copying part of such a block copies exactly what you selected | always on |
+| [337](../patches/tdesktop/0337-feat-open-json-code-text-and-csv-files-in-tele.patch) | json, code, text, log and csv files up to 1 mb open in tele's markdown viewer instead of another app: json is pretty-printed, code is highlighted, csv and tsv show as tables. long files come in parts of about 2,000 lines with continuing line numbers | tele → chats, on |
 
 ### [tele 21](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.21)
 

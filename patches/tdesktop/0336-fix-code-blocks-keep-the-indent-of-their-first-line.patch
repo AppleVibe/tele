@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: nitreojs <hello@starkow.dev>
+Date: Mon, 19 Oct 2026 05:56:49 +0300
+Subject: [PATCH] fix: code blocks keep the indent of their first line
+
+---
+ .../iv/markdown/iv_markdown_article_layout_blocks.cpp       | 6 ++++++
+ .../iv/markdown/iv_markdown_article_selection.cpp           | 3 +++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.cpp b/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.cpp
+index 75569eb9b80c32fbfe21abcf590bfafe4c889ac2..2ea1a79b0bcb91623a3bc05bb6546cdc417644c7 100644
+--- a/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.cpp
++++ b/Telegram/SourceFiles/iv/markdown/iv_markdown_article_layout_blocks.cpp
+@@ -1669,6 +1669,9 @@ bool LayoutMediaCaptionGeometry(
+ QString CodeBlockDisplayText(const QString &text) {
+ 	auto result = QString();
+ 	result.reserve(text.size());
++	if (!text.isEmpty() && Ui::Text::IsTrimmed(text.front())) {
++		result.append(QChar(kCodeTrailingGuard));
++	}
+ 
+ 	auto column = 0;
+ 	for (const auto ch : text) {
+@@ -1698,6 +1701,9 @@ TextWithEntities CodeBlockDisplayText(TextWithEntities text) {
+ 	const auto sourceLength = int(text.text.size());
+ 	result.text.reserve(sourceLength);
+ 	result.entities.reserve(text.entities.size());
++	if (sourceLength && Ui::Text::IsTrimmed(text.text.front())) {
++		result.text.append(QChar(kCodeTrailingGuard));
++	}
+ 
+ 	auto offsets = std::vector<int>();
+ 	offsets.reserve(sourceLength + 1);
+diff --git a/Telegram/SourceFiles/iv/markdown/iv_markdown_article_selection.cpp b/Telegram/SourceFiles/iv/markdown/iv_markdown_article_selection.cpp
+index da2e1e5be9b0fa1faa4b8c663280afd542d315ad..aca3994b00cab00d6f578fbfab6de6b3a09bc153 100644
+--- a/Telegram/SourceFiles/iv/markdown/iv_markdown_article_selection.cpp
++++ b/Telegram/SourceFiles/iv/markdown/iv_markdown_article_selection.cpp
+@@ -176,6 +176,9 @@ void RefreshBlockSegmentRect(
+ 	auto column = 0;
+ 	auto found = false;
+ 	const auto &text = block.codeText.text;
++	if (!text.isEmpty() && Ui::Text::IsTrimmed(text.front())) {
++		displayPosition = 1;
++	}
+ 	for (auto i = 0, count = int(text.size()); i != count; ++i) {
+ 		const auto ch = text[i];
+ 		const auto width = (ch == QChar::Tabulation)
