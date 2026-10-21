@@ -160,11 +160,21 @@ if [ -n "$PREVIOUS_TAG" ]; then
   done
 fi
 
+# even the first release must have every real or previous signed feed before becoming latest
+complete=true
+list=$(assets)
+for other in "${platforms[@]}"; do
+  if ! grep -qxF "tele-update-$other.json" <<< "$list"; then
+    complete=false
+  fi
+done
 latest=$(gh release view --json tagName --jq .tagName 2> /dev/null || true)
-if [ -z "$latest" ] || [ "$latest" = "$PREVIOUS_TAG" ]; then
+if [ "$complete" != true ]; then
+  echo "::warning::$TAG waits for every platform feed before becoming latest"
+elif [ -z "$latest" ] || { [ "$latest" = "$PREVIOUS_TAG" ] && [[ "$latest" =~ ^v[0-9.]*-tele\.([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -lt "$COUNTER" ]; }; then
   gh release edit "$TAG" --latest > /dev/null
 elif [ "$latest" != "$TAG" ]; then
-  echo "::warning::$latest came out after $TAG and stays the latest release"
+  echo "::warning::$latest stays the latest release; $TAG cannot supersede it"
 fi
 
 # two platforms can update the text at the same time with what each of them saw, so check it again after writing

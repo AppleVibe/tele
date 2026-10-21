@@ -19,7 +19,7 @@ on:
         type: boolean
         default: true
       from_run:
-        description: publish the builds of this finished run instead of building again (its patches must match)
+        description: publish the builds of this finished run instead of building again (its build inputs must match)
         default: ''
       number:
         description: release number to build as (must be above every existing one), empty for the next free one
@@ -137,8 +137,8 @@ jobs:
             echo "::error::run $RUN finished with '$conclusion'"
             exit 1
           fi
-          if ! git diff --quiet "$sha" HEAD -- UPSTREAM patches tele.py; then
-            echo "::error::run $RUN built other patches than $GITHUB_SHA"
+          if ! git diff --quiet "$sha" HEAD -- UPSTREAM patches tele.py ci .github/workflows/build.yml; then
+            echo "::error::run $RUN built other inputs than $GITHUB_SHA"
             exit 1
           fi
           artifacts=$(gh api "repos/$GH_REPO/actions/runs/$RUN/artifacts?per_page=100" --jq '.artifacts[] | select(.expired | not) | .name')
@@ -161,7 +161,22 @@ jobs:
       - name: Read the release number
         id: finished
         if: inputs.from_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
+          tag=$(sed -n 's/^tag=//p' number.env)
+          counter=$(sed -n 's/^counter=//p' number.env)
+          # resuming this tag is fine, but no different release or reserved tag may be as new or newer
+          pattern="^v[0-9.]*-tele\.\([0-9][0-9]*\)$"
+          last=$( {
+            gh release list --limit 1000 --json tagName --jq '.[].tagName'
+            git ls-remote --tags "$GITHUB_SERVER_URL/$GH_REPO.git" | sed -n 's|^[0-9a-f]*\trefs/tags/||p'
+          } | awk -v tag="$tag" '$0 != tag' | sed -n "s/$pattern/\1/p" | sort -n | tail -n1)
+          if ! [[ "$counter" =~ ^[1-9][0-9]*$ ]] || [ "$counter" -le "${last:-0}" ]; then
+            echo "::error::cannot publish $tag: another release or tag has number ${last:-0}"
+            exit 1
+          fi
           cat number.env >> "$GITHUB_OUTPUT"
           echo "publishing $(sed -n 's/^tag=//p' number.env) from run ${{ inputs.from_run }}"
 
@@ -238,6 +253,12 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python tele\tele.py --tdesktop %TBUILD%\tdesktop apply
 
+      - name: Check localization
+        shell: bash
+        run: |
+          python tele/ci/test_localization.py
+          python tele/ci/check_localization.py --tdesktop "$TBUILD/tdesktop" --repository "$GITHUB_REPOSITORY" --expected-upstream "$UPSTREAM_TAG"
+
       - name: Read toolchain versions
         shell: bash
         run: |
@@ -310,6 +331,8 @@ jobs:
           rem source stages without their sources, so all three build again
           set "keys=%TBUILD%\Libraries\win64\cache_keys"
           if exist "%keys%\tdesktop_rust" if not exist "%TBUILD%\Libraries\win64\tdesktop_rust\out\src\wallet_engine\wallet_engine.cpp" del "%keys%\tdesktop_rust" "%keys%\tlottie" "%keys%\wallet-engine"
+          rem the trim keeps rust headers but drops manifests; restore source stages before a rust rebuild
+          for %%s in (tlottie wallet-engine) do if exist "%keys%\%%s" if not exist "%TBUILD%\Libraries\win64\%%s\Cargo.toml" del "%keys%\%%s"
           %TBUILD%\tdesktop\Telegram\build\prepare\win.bat silent
 
       - name: Trim libraries
@@ -605,6 +628,11 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python3 tele/tele.py --tdesktop "$GITHUB_WORKSPACE/tdesktop" apply
 
+      - name: Check localization
+        run: |
+          python3 tele/ci/test_localization.py
+          python3 tele/ci/check_localization.py --tdesktop "$GITHUB_WORKSPACE/tdesktop" --repository "$GITHUB_REPOSITORY" --expected-upstream "$UPSTREAM_TAG"
+
       - name: Free disk space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
@@ -853,6 +881,11 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python3 tele/tele.py --tdesktop "$GITHUB_WORKSPACE/tdesktop" apply
+
+      - name: Check localization
+        run: |
+          python3 tele/ci/test_localization.py
+          python3 tele/ci/check_localization.py --tdesktop "$GITHUB_WORKSPACE/tdesktop" --repository "$GITHUB_REPOSITORY" --expected-upstream "$UPSTREAM_TAG"
 
       - name: Restore libraries
         run: |
