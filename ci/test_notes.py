@@ -17,7 +17,7 @@ def main():
         tag="v7.3.1-tele.1",
         previous="",
         upstream="v7.3.1",
-        url="https://github.com/AppleVibe/tele-ru",
+        url="https://github.com/AppleVibe/tele",
     )
     body = notes.notes(options)
     assert len(body) <= 125000, len(body)

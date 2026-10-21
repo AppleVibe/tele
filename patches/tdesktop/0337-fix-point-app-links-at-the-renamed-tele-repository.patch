@@ -1,0 +1,133 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: applevibe <applevibe@apple.vibe>
+Date: Wed, 21 Oct 2026 20:48:19 +0300
+Subject: [PATCH] fix: point app links at the renamed tele repository
+
+---
+ Telegram/SourceFiles/core/crash_report_window.cpp    | 2 +-
+ Telegram/SourceFiles/tele/tele_changelog.cpp         | 4 ++--
+ Telegram/SourceFiles/tele/tele_changelog_chat.cpp    | 2 +-
+ Telegram/SourceFiles/tele/tele_changelog_history.cpp | 8 ++++----
+ Telegram/SourceFiles/tele/tele_html_samples.cpp      | 2 +-
+ Telegram/SourceFiles/tele/tele_notices.cpp           | 2 +-
+ Telegram/SourceFiles/tele/tele_updater.cpp           | 4 ++--
+ Telegram/SourceFiles/window/window_main_menu.cpp     | 2 +-
+ 8 files changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/Telegram/SourceFiles/core/crash_report_window.cpp b/Telegram/SourceFiles/core/crash_report_window.cpp
+index 6f390188c12808d93c6aa0c42258f4257093d7e2..c3c20531ee6567b199341535c9762a2370a91446 100644
+--- a/Telegram/SourceFiles/core/crash_report_window.cpp
++++ b/Telegram/SourceFiles/core/crash_report_window.cpp
+@@ -499,7 +499,7 @@ LastCrashedWindow::LastCrashedWindow(
+ 	connect(&_saveReport, &QPushButton::clicked, [=] { saveReport(); });
+ 	_getApp.setText(Tele::Lower(u"GET THE LATEST VERSION OF TELE"_q));
+ 	connect(&_getApp, &QPushButton::clicked, [=] {
+-		QDesktopServices::openUrl(u"https://github.com/AppleVibe/tele-ru/releases/latest"_q);
++		QDesktopServices::openUrl(u"https://github.com/AppleVibe/tele/releases/latest"_q);
+ 	});
+ 
+ 	_send.setText(u"SEND CRASH REPORT"_q);
+diff --git a/Telegram/SourceFiles/tele/tele_changelog.cpp b/Telegram/SourceFiles/tele/tele_changelog.cpp
+index fa9f2db0287cf7efb26d53f46e9fd71ac896fd5f..0e122c4883c5def5ba0e3f94329414a0e3e53685 100644
+--- a/Telegram/SourceFiles/tele/tele_changelog.cpp
++++ b/Telegram/SourceFiles/tele/tele_changelog.cpp
+@@ -47,8 +47,8 @@ constexpr auto kMaxItemLength = 1024;
+ constexpr auto kMaxMessageLength = 4096;
+ constexpr auto kMaxSplitLength = 4000;
+ constexpr auto kTestBit = BareId(1) << 63;
+-constexpr auto kReleasesUrl = "https://github.com/AppleVibe/tele-ru/releases";
+-constexpr auto kReleasesPrefix = "https://github.com/AppleVibe/tele-ru/releases/";
++constexpr auto kReleasesUrl = "https://github.com/AppleVibe/tele/releases";
++constexpr auto kReleasesPrefix = "https://github.com/AppleVibe/tele/releases/";
+ 
+ struct Entry {
+ 	QString text;
+diff --git a/Telegram/SourceFiles/tele/tele_changelog_chat.cpp b/Telegram/SourceFiles/tele/tele_changelog_chat.cpp
+index c9b773d26cb555ddaf1f49726ff4c6d45e37c26f..bb68c63459155054875e809abe73eddf9daa049a 100644
+--- a/Telegram/SourceFiles/tele/tele_changelog_chat.cpp
++++ b/Telegram/SourceFiles/tele/tele_changelog_chat.cpp
+@@ -177,7 +177,7 @@ void ProfileBox(not_null<Ui::GenericBox*> box, not_null<UserData*> user) {
+ 	link(
+ 		u"tele on GitHub"_q,
+ 		st::menuIconLink,
+-		u"https://github.com/AppleVibe/tele-ru"_q);
++		u"https://github.com/AppleVibe/tele"_q);
+ 	link(
+ 		u"Updates channel"_q,
+ 		st::menuIconChannel,
+diff --git a/Telegram/SourceFiles/tele/tele_changelog_history.cpp b/Telegram/SourceFiles/tele/tele_changelog_history.cpp
+index 7add3b90e81eb429d10027e1a172142b139b8dae..9d818bd982d79373cbfb83ac997625d22c45d9da 100644
+--- a/Telegram/SourceFiles/tele/tele_changelog_history.cpp
++++ b/Telegram/SourceFiles/tele/tele_changelog_history.cpp
+@@ -28,12 +28,12 @@ constexpr auto kMaxItems = 256;
+ constexpr auto kMaxOptions = 16;
+ constexpr auto kMaxTitleLength = 64;
+ constexpr auto kMaxItemLength = 1024;
+-constexpr auto kListUrl = "https://api.github.com/repos/AppleVibe/tele-ru/"
++constexpr auto kListUrl = "https://api.github.com/repos/AppleVibe/tele/"
+ 	"releases?per_page=30";
+-constexpr auto kDownloadPrefix = "https://github.com/AppleVibe/tele-ru/"
++constexpr auto kDownloadPrefix = "https://github.com/AppleVibe/tele/"
+ 	"releases/download/";
+-constexpr auto kReleasesPrefix = "https://github.com/AppleVibe/tele-ru/releases/";
+-constexpr auto kRepoPrefix = "https://github.com/AppleVibe/tele-ru/";
++constexpr auto kReleasesPrefix = "https://github.com/AppleVibe/tele/releases/";
++constexpr auto kRepoPrefix = "https://github.com/AppleVibe/tele/";
+ constexpr auto kAssetName = "tele-changelog.json";
+ constexpr auto kBundledPath = ":/tele/changelog_history.json";
+ 
+diff --git a/Telegram/SourceFiles/tele/tele_html_samples.cpp b/Telegram/SourceFiles/tele/tele_html_samples.cpp
+index 998da59d121921ce8fff5bd363b51c7f07a05e53..a96de08742a6bae8bcfb3eaf5b97f59658daafae 100644
+--- a/Telegram/SourceFiles/tele/tele_html_samples.cpp
++++ b/Telegram/SourceFiles/tele/tele_html_samples.cpp
+@@ -262,7 +262,7 @@ const char kStatic[] = R"html(<style>
+       <tr><td class="k">Seat</td><td>42 <span class="badge green">window</span></td></tr>
+     </table>
+     <div class="sep" style="margin: 8px 0"></div>
+-    <p class="small muted" style="margin: 0">No script in this one, just HTML and CSS. <a href="https://github.com/AppleVibe/tele-ru">tele on GitHub</a></p>
++    <p class="small muted" style="margin: 0">No script in this one, just HTML and CSS. <a href="https://github.com/AppleVibe/tele">tele on GitHub</a></p>
+   </div>
+ </div>)html";
+ 
+diff --git a/Telegram/SourceFiles/tele/tele_notices.cpp b/Telegram/SourceFiles/tele/tele_notices.cpp
+index 4907fed5aaccba42d1c7578327d7cdec0245ca86..96ced6a96d999b8ca31c4b52dc0a8510d95edd10 100644
+--- a/Telegram/SourceFiles/tele/tele_notices.cpp
++++ b/Telegram/SourceFiles/tele/tele_notices.cpp
+@@ -35,7 +35,7 @@ constexpr auto kMaxJsonSize = 32 * 1024 * 1024;
+ constexpr auto kWriteDelay = crl::time(1000);
+ constexpr auto kMergeTeleToasts = crl::time(10 * 1000);
+ constexpr auto kMaxServerNotices = 500;
+-constexpr auto kReleasesPrefix = "https://github.com/AppleVibe/tele-ru/releases/";
++constexpr auto kReleasesPrefix = "https://github.com/AppleVibe/tele/releases/";
+ 
+ struct ServerSeen {
+ 	QString id;
+diff --git a/Telegram/SourceFiles/tele/tele_updater.cpp b/Telegram/SourceFiles/tele/tele_updater.cpp
+index 979bc83a1ae1bb1cb797977c3f9b99c4968bb07d..cb07921cb58593ddc6e0ccc3ad1ef2673e080867 100644
+--- a/Telegram/SourceFiles/tele/tele_updater.cpp
++++ b/Telegram/SourceFiles/tele/tele_updater.cpp
+@@ -57,9 +57,9 @@ constexpr auto kMaxZipSize = qint64(512 * 1024 * 1024);
+ constexpr auto kMaxExeSize = 1024 * 1024 * 1024;
+ constexpr auto kPublicKeyHex = "5e71a82eeda70a4ea172b594b201038d"
+ 	"45bfac7d46fc70ba3c448b7636633532";
+-constexpr auto kFeedUrlPrefix = "https://github.com/AppleVibe/tele-ru/"
++constexpr auto kFeedUrlPrefix = "https://github.com/AppleVibe/tele/"
+ 	"releases/latest/download/tele-update-";
+-constexpr auto kDownloadPrefix = "https://github.com/AppleVibe/tele-ru/"
++constexpr auto kDownloadPrefix = "https://github.com/AppleVibe/tele/"
+ 	"releases/download/";
+ 
+ #if defined Q_OS_MAC
+diff --git a/Telegram/SourceFiles/window/window_main_menu.cpp b/Telegram/SourceFiles/window/window_main_menu.cpp
+index c5143ec306c1b12af9e97f7a5d110425b4a6d62c..12be3a4ae3df798f7f20e8175862866b989d8d21 100644
+--- a/Telegram/SourceFiles/window/window_main_menu.cpp
++++ b/Telegram/SourceFiles/window/window_main_menu.cpp
+@@ -401,7 +401,7 @@ MainMenu::MainMenu(
+ 
+ 	_telegram->setMarkedText(tr::link(
+ 		u"tele"_q,
+-		u"https://github.com/AppleVibe/tele-ru"_q));
++		u"https://github.com/AppleVibe/tele"_q));
+ 	_telegram->setLinksTrusted();
+ 	// The canary version is too long for the "Version {version}" form.
+ 	_version->setMarkedText(

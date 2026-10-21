@@ -10,7 +10,7 @@
 
 ## Скачать
 
-Последнюю сборку скачивайте из [релизов](https://github.com/AppleVibe/tele-ru/releases/latest). Сборки не затрагивают установленный Telegram и его данные.
+Последнюю сборку скачивайте из [релизов](https://github.com/AppleVibe/tele/releases/latest). Сборки не затрагивают установленный Telegram и его данные.
 
 | Платформа | Файл | Установка |
 | --- | --- | --- |
@@ -24,10 +24,10 @@ xattr -dr com.apple.quarantine /Applications/tele.app
 
 tele проверяет эти релизы каждые 3 часа, скачивает обновления в фоне и предлагает перезапуск. Фид подписан, поэтому приложение не установит сборку с неподходящей подписью. Автообновления отключаются в «Настройки → tele → Обновления».
 
-Для каждого ZIP и DMG сборка создаёт [аттестацию происхождения](https://github.com/AppleVibe/tele-ru/attestations). Проверить скачанный файл можно через [GitHub CLI](https://cli.github.com):
+Для каждого ZIP и DMG сборка создаёт [аттестацию происхождения](https://github.com/AppleVibe/tele/attestations). Проверить скачанный файл можно через [GitHub CLI](https://cli.github.com):
 
 ```
-gh attestation verify tele-<version>-win64.zip --repo AppleVibe/tele-ru
+gh attestation verify tele-<version>-win64.zip --repo AppleVibe/tele
 ```
 
 ## Основные возможности

@@ -2,9 +2,9 @@
 
 every tele patch, grouped by the release that brought it, newest first. [features](features.md) has the same rows grouped by settings page. release notes and the in-app what's new are made from these rows, so their format is strict: see [the patch row](development.md#the-patch-row).
 
-all 344 patches, newest release first.
+all 345 patches, newest release first.
 
-### tele-ru
+### Tele 22 · RU 1
 
 | # | what it does | where to toggle |
 | --- | --- | --- |
@@ -12,6 +12,7 @@ all 344 patches, newest release first.
 | [334](../patches/tdesktop/0334-feat-point-updates-and-links-at-this-fork.patch) | updates, the changelog and the links in the app point at this fork's releases, and the tele server starts empty so nothing is sent anywhere by default | always on |
 | [335](../patches/tdesktop/0335-feat-call-the-windows-app-id-tele.patch) | the windows app id is tele instead of the original fork's id | always on |
 | [336](../patches/tdesktop/0336-fix-localize-tele-ui-explicitly-with-safe-templates-.patch) | russian menus translate complete templates before inserting names, preserve user text and links, use russian count forms and refresh settings search when the language changes | with 333 |
+| [337](../patches/tdesktop/0337-fix-point-app-links-at-the-renamed-tele-repository.patch) | app links and updates use the renamed tele repository | always on |
 
 ### [tele 22](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.22)
 

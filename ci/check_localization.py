@@ -420,7 +420,7 @@ def publication_findings(tdesktop, repo, repository, upstream):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tdesktop", required=True, type=Path)
-    parser.add_argument("--repository", default="AppleVibe/tele-ru", help="expected GitHub owner/repo")
+    parser.add_argument("--repository", default="AppleVibe/tele", help="expected GitHub owner/repo")
     parser.add_argument("--expected-upstream", help="optionally assert exact UPSTREAM pin (e.g. v7.3.1)")
     args = parser.parse_args(argv)
     root = args.tdesktop.resolve()

@@ -10,7 +10,7 @@ based on [tele build 22](https://github.com/nitreojs/tele/releases/tag/v7.3.1-te
 
 ## download
 
-grab the latest build from [releases](https://github.com/AppleVibe/tele-ru/releases/latest). none of them touch an installed telegram or its data.
+grab the latest build from [releases](https://github.com/AppleVibe/tele/releases/latest). none of them touch an installed telegram or its data.
 
 | platform | file | |
 |---|---|---|
@@ -24,10 +24,10 @@ xattr -dr com.apple.quarantine /Applications/tele.app
 
 tele updates itself: it checks these releases every 3 hours, downloads new builds in the background and asks you to restart. the feed is signed, so a build that isn't from here won't be installed. turn it off in settings → tele → updates.
 
-every zip and dmg has a [build provenance attestation](https://github.com/AppleVibe/tele-ru/attestations). check a download with the [github cli](https://cli.github.com):
+every zip and dmg has a [build provenance attestation](https://github.com/AppleVibe/tele/attestations). check a download with the [github cli](https://cli.github.com):
 
 ```
-gh attestation verify tele-<version>-win64.zip --repo AppleVibe/tele-ru
+gh attestation verify tele-<version>-win64.zip --repo AppleVibe/tele
 ```
 
 ## highlights
