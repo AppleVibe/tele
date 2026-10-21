@@ -4,7 +4,7 @@
 
 Форк Telegram Desktop: очередь патчей поверх каждого стабильного релиза [tdesktop](https://github.com/telegramdesktop/tdesktop), с автоматической сборкой здесь.
 
-Добавлен русский перевод меню и подменю tele.
+Основано на [tele build 22](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.22). Добавлен русский перевод меню и подменю tele.
 
 ![tele](docs/screenshot.png)
 
@@ -62,6 +62,7 @@ gh attestation verify tele-<version>-win64.zip --repo AppleVibe/tele-ru
 ## Благодарности
 
 - [tdesktop](https://github.com/telegramdesktop/tdesktop), из которого собирается каждый выпуск tele.
+- [tele](https://github.com/nitreojs/tele) от nitreojs, оригинальный форк и его возможности.
 - [@acaff](https://t.me/acaff), за русский перевод меню и подменю tele.
 - [materialgram](https://github.com/kukuruzka165/materialgram) от kukuruzka165, ещё один форк tdesktop. Его идеи легли в основу скрытия хвостиков пузырей, классических отступов, отключения обводки больших эмодзи, выбора более 100 сообщений, отображения онлайн-участников больших групп, даты загрузки медиа, копирования ID владельца набора стикеров, улучшенного качества голоса и сохранения начала записи, меньшего сжатия фото, тонкой кисти, меньшего минимального окна, расширенного экспорта чата и последовательных упоминаний нескольких людей.
 - [freshGram](https://github.com/Snowy-Fluffy/freshGram) от Snowy-Fluffy, объединяющий [AyuGram Desktop](https://github.com/AyuGram/AyuGramDesktop) и materialgram. Из него перенесён прототип секретных чатов. Его идеи использованы для фильтра по типу сообщений, сохранения удалённых чатов и тем, просмотра скрытого времени последнего посещения и отключения баннеров дней рождения.
