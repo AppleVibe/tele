@@ -27,14 +27,14 @@ index 97aa2d25f57f2dd33b24f4c637bc6f6ab4fd7c4f..35e0729f70070fa5ed305769ed091037
      tele/tele_maps.cpp
 diff --git a/Telegram/SourceFiles/tele/tele_i18n.cpp b/Telegram/SourceFiles/tele/tele_i18n.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..e9b2ee3693d85ec6611ef7abc2f5c763063ee5cf
+index 0000000000000000000000000000000000000000..13cd87cd7d1fbdc51751103567ffd839e377220d
 --- /dev/null
 +++ b/Telegram/SourceFiles/tele/tele_i18n.cpp
 @@ -0,0 +1,1779 @@
 +// generated: english ui strings of tele and their russian text
 +#include "tele/tele_i18n.h"
 +
-+#include "lang/lang_instance.h"
++#include "lang/lang_keys.h"
 +
 +#include <QtCore/QHash>
 +#include <QtCore/QStringView>
