@@ -2,9 +2,9 @@
 
 [English](README.md) · [Русский](README.ru.md)
 
-Форк Telegram Desktop: очередь патчей поверх стабильных релизов [tdesktop](https://github.com/telegramdesktop/tdesktop), которую GitHub Actions собирает в этом репозитории.
+Форк Telegram Desktop: очередь патчей поверх каждого стабильного релиза [tdesktop](https://github.com/telegramdesktop/tdesktop), с автоматической сборкой здесь.
 
-За основу взят [nitreojs/tele](https://github.com/nitreojs/tele). [@acaff](https://t.me/acaff) добавил русский перевод меню и подменю tele, названий и описаний настроек. Для перевода выберите русский язык в настройках Telegram. Обновления используют ключ подписи и релизы этого форка; адрес сервера tele по умолчанию пустой.
+Добавлен русский перевод меню и подменю tele.
 
 ![tele](docs/screenshot.png)
 
@@ -62,7 +62,7 @@ gh attestation verify tele-<version>-win64.zip --repo AppleVibe/tele-ru
 ## Благодарности
 
 - [tdesktop](https://github.com/telegramdesktop/tdesktop), из которого собирается каждый выпуск tele.
-- [nitreojs/tele](https://github.com/nitreojs/tele): исходный форк и его функциональность. Русский перевод меню и подменю: [@acaff](https://t.me/acaff).
+- [@acaff](https://t.me/acaff), за русский перевод меню и подменю tele.
 - [materialgram](https://github.com/kukuruzka165/materialgram) от kukuruzka165, ещё один форк tdesktop. Его идеи легли в основу скрытия хвостиков пузырей, классических отступов, отключения обводки больших эмодзи, выбора более 100 сообщений, отображения онлайн-участников больших групп, даты загрузки медиа, копирования ID владельца набора стикеров, улучшенного качества голоса и сохранения начала записи, меньшего сжатия фото, тонкой кисти, меньшего минимального окна, расширенного экспорта чата и последовательных упоминаний нескольких людей.
 - [freshGram](https://github.com/Snowy-Fluffy/freshGram) от Snowy-Fluffy, объединяющий [AyuGram Desktop](https://github.com/AyuGram/AyuGramDesktop) и materialgram. Из него перенесён прототип секретных чатов. Его идеи использованы для фильтра по типу сообщений, сохранения удалённых чатов и тем, просмотра скрытого времени последнего посещения и отключения баннеров дней рождения.
 - [SPOwnerBot](https://github.com/arynyklas/SPOwnerBot) от arynyklas и [его форк](https://github.com/madrik1337/SPOwnerBot) от madrik1337: способ определения владельца по ID набора стикеров, включая владельцев с ID больше 8 миллиардов.

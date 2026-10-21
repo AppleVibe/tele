@@ -4,7 +4,7 @@
 
 a telegram desktop fork: a queue of patches applied on top of every stable [tdesktop](https://github.com/telegramdesktop/tdesktop) release and built here automatically.
 
-This fork is based on [nitreojs/tele](https://github.com/nitreojs/tele). [@acaff](https://t.me/acaff) added Russian translations of tele’s menus, submenus, setting names and descriptions. Select Russian in Telegram’s language settings to use them. Updates use this fork’s signing key and releases; the tele server address is empty by default.
+added russian translation of tele's menus and submenus.
 
 ![tele](docs/screenshot.png)
 
@@ -62,6 +62,7 @@ everything tele adds lives in settings → tele, right below the language row.
 ## credits
 
 - [tdesktop](https://github.com/telegramdesktop/tdesktop), which every tele build is made from.
+- [@acaff](https://t.me/acaff), for the russian translation of tele's menus and submenus.
 - [materialgram](https://github.com/kukuruzka165/materialgram) by kukuruzka165, another tdesktop fork. these tele features come from its ideas: hiding bubble tails and the classic bubble padding, no outline on large emoji, selecting more than 100 messages, showing online members in big groups, the upload date in the media viewer, copying a sticker set's owner id, better voice quality and keeping the start of voice messages, less photo compression, a thinner photo editor brush, a smaller minimum window, a bigger, faster chat export and mentioning several people in a row.
 - [freshGram](https://github.com/Snowy-Fluffy/freshGram) by Snowy-Fluffy, which combines [AyuGram Desktop](https://github.com/AyuGram/AyuGramDesktop) and materialgram. tele's secret chats prototype is ported from its secret chats, and these tele features come from its ideas: the message type filter in chat search, keeping deleted chats and topics, peeking at a hidden last seen and hiding birthday banners.
 - [SPOwnerBot](https://github.com/arynyklas/SPOwnerBot) by arynyklas and [its fork](https://github.com/madrik1337/SPOwnerBot) by madrik1337, for how a sticker set's id holds its owner, including owners past 8 billion.
