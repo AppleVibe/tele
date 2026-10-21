@@ -2,12 +2,19 @@
 
 every tele patch, grouped by the release that brought it, newest first. [features](features.md) has the same rows grouped by settings page. release notes and the in-app what's new are made from these rows, so their format is strict: see [the patch row](development.md#the-patch-row).
 
-all 329 patches, newest release first.
+all 334 patches, newest release first.
+
+### tele-ru
+
+| # | what it does | where to toggle |
+| --- | --- | --- |
+| [333](../patches/tdesktop/0333-feat-russian-interface-for-tele.patch) | the tele settings, menus, options and dialogs are in russian when telegram's language is russian, and in english otherwise | always on |
+| [334](../patches/tdesktop/0334-feat-point-updates-and-links-at-this-fork.patch) | updates, the changelog and the links in the app point at this fork's releases, and the tele server starts empty so nothing is sent anywhere by default | always on |
 
 ### [tele 22](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.22)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [318](../patches/tdesktop/0318-fix-glides-in-boxes-no-longer-blank-the-chats-under-.patch) | gliding in a box, settings or another panel no longer turns the chat list and the chat behind it black | with 306 |
 | [319](../patches/tdesktop/0319-fix-updates-on-macos-keep-the-dock-icon.patch) | on macos, an update replaces what's inside tele.app instead of the whole app, so tele stays on its dock icon instead of showing up as a second one. the update to this version still makes one duplicate | with 6 |
 | [320](../patches/tdesktop/0320-fix-listing-accounts-from-a-script-no-longer-crashes.patch) | tele no longer crashes at startup with two or more accounts when a script lists your accounts as soon as it starts | with 302 |
@@ -27,7 +34,7 @@ all 329 patches, newest release first.
 ### [tele 21](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.21)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [303](../patches/tdesktop/0303-feat-fill-the-whole-profile-with-the-blurred-photo-s.patch) | with the blurred photo background on, the whole profile takes the colour of the photo's lower edge, not only its header, with the text kept readable | with 299 |
 | [304](../patches/tdesktop/0304-feat-scroll-to-zoom-in-the-media-viewer.patch) | scroll to zoom in the media viewer. hold ctrl or cmd while scrolling to switch photos | tele → interface, off |
 | [305](../patches/tdesktop/0305-feat-design-the-money-card-with-a-gift.patch) | money's card takes the colours, pattern and model of one of your collectible gifts, picked in money's ⋮ menu → card design or synced with your gift status. transfers you send in chats use its colours too | tele → chats, on |
@@ -48,7 +55,7 @@ all 329 patches, newest release first.
 ### [tele 20](https://github.com/nitreojs/tele/releases/tag/v7.3.1-tele.20)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [285](../patches/tdesktop/0285-feat-update-the-secret-phrase-of-wallets-without-a-b.patch) | a wallet without a backup gets an update secret phrase button in keys & backup: you write down new words, the old ones stop working and the network takes a small fee | tele → debug, off |
 | [286](../patches/tdesktop/0286-feat-copy-links-to-wallet-transactions.patch) | right-click a transaction in the money window to copy its link or open it in the explorer. transaction and address links open on tonscan.org | always on |
 | [287](../patches/tdesktop/0287-feat-send-while-an-old-wallet-stays-on-this-device.patch) | keep using your wallet while the keys of a wallet you used before stay on this device, instead of having to remove them first. only when this device also holds your current wallet's key | tele → debug, off |
@@ -73,7 +80,7 @@ all 329 patches, newest release first.
 ### [tele 19](https://github.com/nitreojs/tele/releases/tag/v7.3.0-tele.19)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [276](../patches/tdesktop/0276-feat-badges-on-forwarded-and-reply-headers.patch) | with badges next to sender names on, forwarded from headers and the names above replies show the custom verification icon and the checkmark too | with 12 |
 | [277](../patches/tdesktop/0277-feat-select-table-cells-as-a-range.patch) | drag from one table cell to another to select whole cells as a rectangle, like in a spreadsheet. copying them pastes into excel or sheets as a grid | always on |
 | [278](../patches/tdesktop/0278-feat-turn-on-the-wallet-before-telegram-does.patch) | the wallet from telegram desktop 7.3 can be turned on before telegram enables it for your account. the server may still refuse it | tele → debug, off, needs a restart |
@@ -87,7 +94,7 @@ all 329 patches, newest release first.
 ### [tele 18](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.18)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [250](../patches/tdesktop/0250-fix-unbreakable-characters-no-longer-push-message-te.patch) | a long run of characters that can't wrap, like hangul fillers, no longer pushes the message text or its selection past the bubble | always on |
 | [251](../patches/tdesktop/0251-fix-the-failed-send-badge-is-clock-sized-and-no-long.patch) | the red mark on a message that failed to send is the size of the sending clock and no longer covers the time, in the chat list and in the bubble | always on |
 | [252](../patches/tdesktop/0252-fix-messages-with-relative-dates-no-longer-freeze-te.patch) | a message with a countdown or relative date, like "resets in 5 minutes", no longer makes tele freeze after a while | always on |
@@ -127,7 +134,7 @@ all 329 patches, newest release first.
 ### [tele 16](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.16)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [208](../patches/tdesktop/0208-feat-show-usernames-for-invisible-names.patch) | people whose name is empty or invisible show their @username instead, or a phrase you choose when they have none | tele → profiles and ids, off |
 | [209](../patches/tdesktop/0209-feat-show-hidden-characters.patch) | names, bios and other profile texts made only of invisible characters show those characters, so you can see something is there | tele → profiles and ids, off |
 | [210](../patches/tdesktop/0210-feat-multiple-quotes-in-one-reply.patch) | quote several parts of a message in one reply: quoting again while replying with a quote adds the new part | tele → messages, on |
@@ -175,7 +182,7 @@ all 329 patches, newest release first.
 ### [tele 14](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.14)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [194](../patches/tdesktop/0194-fix-show-oversized-stickers-as-files-like-the-server.patch) | a .tgs sticker telegram would turn into a file (over 64 kb, not 512×512, wrong fps or too long) shows as a file to you too, like everyone else sees it | always on |
 | [195](../patches/tdesktop/0195-feat-mtproto-console.patch) | an mtproto console: call any api method with your own session in text, json or json5, with autocomplete, schema hints, validation, a result tree and history. destructive methods ask first, star methods ask for the local password | tele → debug, ctrl+alt+m |
 | [196](../patches/tdesktop/0196-feat-show-the-media-s-data-center-in-the-media-viewe.patch) | the media viewer shows which data center the open photo, video or file is stored on | with 23 |
@@ -194,7 +201,7 @@ all 329 patches, newest release first.
 ### [tele 13](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.13)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [175](../patches/tdesktop/0175-feat-sticker-captions.patch) | show the text attached to stickers in a bubble under them, and send or edit stickers with a caption. select part of a sticker's caption and quote it in a reply | tele → chats, off |
 | [176](../patches/tdesktop/0176-feat-inline-calcmula-results-after.patch) | type an expression and = to see the calcmula result greyed out after it, → or tab inserts it | with 45 |
 | [177](../patches/tdesktop/0177-fix-stop-the-chat-list-repainting-while-idle.patch) | the chat list no longer repaints all the time while idle, which froze tele after a few hours | always on |
@@ -218,7 +225,7 @@ all 329 patches, newest release first.
 ### [tele 12](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.12)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [125](../patches/tdesktop/0125-feat-hide-the-gift-button-in-the-message-field.patch) | hide the gift button in the message field | tele → sending, off |
 | [126](../patches/tdesktop/0126-feat-bookmark-messages-and-return-to-where-you-were-.patch) | bookmark messages from the message menu and jump back to them from the chat menu. after you send a message while scrolled up, a button returns you to where you were reading | tele → messages, off |
 | [127](../patches/tdesktop/0127-feat-pin-sticker-and-emoji-sets.patch) | pin sticker and emoji sets to the front of the panel | tele → chats, off |
@@ -273,7 +280,7 @@ all 329 patches, newest release first.
 ### [tele 11](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.11)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [107](../patches/tdesktop/0107-feat-attach-media-above-the-field-beta.patch) | attach media above the input field instead of in a full-window box: reorder, remove, group or send as files right there, edit photos, see the album as a grid, and the unsent media stays in the chat. attached media above the field get a caption each and everything the send box has: self-destruct timer, caption above, hd, price, effects and the send menu. they can be saved as drafts, which keep video edits and price, and an edited draft video says its edits apply when sent. | tele → sending, off |
 | [108](../patches/tdesktop/0108-fix-show-server-badges-on-the-personal-channel-in-pr.patch) | checkmarks and custom verification from the tele server show on a profile's personal channel too | always on |
 | [109](../patches/tdesktop/0109-fix-explain-a-missing-changelog-instead-of-doing-not.patch) | when a version's changelog can't be found, the tele chat says so instead of doing nothing | always on |
@@ -296,7 +303,7 @@ all 329 patches, newest release first.
 ### [tele 10](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.10)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [82](../patches/tdesktop/0082-feat-move-chats-instantly-in-the-chat-list.patch) | chats move to their new place in the chat list right away, without the pause while the mouse moves over the list | tele → interface, off |
 | [83](../patches/tdesktop/0083-feat-show-collectible-prices-at-the-purchase-date.patch) | collectible usernames and numbers show their dollar price at the purchase date, not today's | tele → profiles and ids, off |
 | [84](../patches/tdesktop/0084-feat-set-your-own-app-and-tray-icons.patch) | your own app and tray icons from any image, and the tray icon can follow the app icon | tele → interface → app icon |
@@ -326,7 +333,7 @@ all 329 patches, newest release first.
 ### [tele 9](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.9)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [58](../patches/tdesktop/0058-feat-keep-messages-you-delete-yourself.patch) | messages you delete yourself are kept too, not only ones deleted by others | with 19 |
 | [59](../patches/tdesktop/0059-feat-show-server-and-updates-on-the-tele-settings-pa.patch) | the server and updates rows sit right on the tele settings page | always on |
 | [60](../patches/tdesktop/0060-feat-pick-brush-colors-from-the-image.patch) | an eyedropper in the photo editor picks the brush color from the image | always on |
@@ -355,15 +362,15 @@ all 329 patches, newest release first.
 ### [tele 8](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.8)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [38](../patches/tdesktop/0038-feat-turn-off-animated-userpics.patch) | animated userpics can stay still: separately in the chat list and in chats and profiles | tele → interface, off, in chats and profiles: tele → chats, off |
 | [39](../patches/tdesktop/0039-feat-show-what-s-new-in-tele-after-an-update.patch) | after an update, you get a message with what's new in that tele version, visible only to you. fresh installs skip it | tele → updates, on |
 | [40](../patches/tdesktop/0040-feat-call-the-app-tele-everywhere.patch) | the app calls itself tele everywhere: tray menu, crash window, system menus and more | always on |
-| [41](../patches/tdesktop/0041-feat-customize-the-window-title-and-format-template-.patch) | the window title (taskbar, alt+tab, system window frame) can be a template too, or follow the title bar label. every [template](title-template.md) variable takes modifiers like `{weekday|short|lower}` or `{chat|max:20}` | tele → interface |
+| [41](../patches/tdesktop/0041-feat-customize-the-window-title-and-format-template-.patch) | the window title (taskbar, alt+tab, system window frame) can be a template too, or follow the title bar label. every [template](title-template.md) variable takes modifiers like `{weekday | short | lower}` or `{chat | max:20}` | tele → interface |
 | [42](../patches/tdesktop/0042-feat-group-and-search-tele-settings.patch) | tele settings are grouped into pages like the main settings, with short descriptions and their own search field, and the main settings search finds them too. old links to tele settings open the right page | always on |
 | [43](../patches/tdesktop/0043-feat-upload-media-in-several-chats-at-once.patch) | media uploads in several chats at once instead of waiting for each other. files in one chat still go one after another | tele → sending, off |
 | [44](../patches/tdesktop/0044-feat-reply-timestamps-for-media-in-rich-messages.patch) | time codes like 1:23 in a reply to a rich message link to its video or audio, the first one if there are several | always on |
-| [45](../patches/tdesktop/0045-feat-compute-messages-starting-with-via-calcmula.patch) | messages and captions starting with `= ` are computed with [calcmula](https://calcmula.app) and sent as the quoted query with `= result` below it. if it fails, nothing is sent and the text goes back into the field | tele → sending, off |
+| [45](../patches/tdesktop/0045-feat-compute-messages-starting-with-via-calcmula.patch) | messages and captions starting with `=` are computed with [calcmula](https://calcmula.app) and sent as the quoted query with `= result` below it. if it fails, nothing is sent and the text goes back into the field | tele → sending, off |
 | [46](../patches/tdesktop/0046-feat-move-show-peer-ids-into-tele-settings.patch) | show peer ids moved from experimental settings into tele | tele → profiles and ids |
 | [47](../patches/tdesktop/0047-feat-show-the-tele-build-in-the-main-menu.patch) | the main menu shows the tele build next to the version | always on |
 | [48](../patches/tdesktop/0048-feat-open-collectible-gifts-in-see.tg.patch) | an open in see.tg link on collectible gift cards | tele → profiles and ids, off |
@@ -380,7 +387,7 @@ all 329 patches, newest release first.
 ### [tele 7](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.7)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [17](../patches/tdesktop/0017-feat-show-seconds-in-message-times.patch) | message times show seconds, like 14:03:21. service messages like joins and pins show their time too, with seconds | tele → messages, off |
 | [18](../patches/tdesktop/0018-feat-keep-the-edit-history-of-messages.patch) | remembers what edited messages looked like while tele runs: right-click an edited message → edit history | tele → messages, off |
 | [19](../patches/tdesktop/0019-feat-keep-deleted-messages.patch) | messages deleted by others or from your other devices stay in the chat until tele restarts, service messages too, faded as a whole or with a trash icon by the time. each chat gets a page with its kept deleted messages and a clear all button: chat menu → deleted messages | tele → messages, off |
@@ -406,7 +413,7 @@ all 329 patches, newest release first.
 ### [tele 5](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.5)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [13](../patches/tdesktop/0013-feat-show-gift-ids.patch) | a copyable gift id at the top of the collectible gift card, which only says a gift is on the ton blockchain while it really is there | tele → profiles and ids, off |
 | [14](../patches/tdesktop/0014-feat-show-the-peer-id-as-its-own-profile-row.patch) | the peer id gets its own profile row instead of trailing the bio, optionally without spaces or in bot api style (-100… for channels) | tele → profiles and ids, off (see 46) |
 | [15](../patches/tdesktop/0015-feat-copy-links-to-tele-settings.patch) | right-click any tele setting to copy a link that opens it | always on |
@@ -415,7 +422,7 @@ all 329 patches, newest release first.
 ### [tele 4](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.4)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [8](../patches/tdesktop/0008-feat-send-quick-replies-in-groups-and-channels.patch) | business quick replies in groups and channels too. telegram only sends them in private chats, so tele posts the messages as ordinary ones (no bot keyboards, via-bot labels or effects) | tele → chats, off |
 | [9](../patches/tdesktop/0009-feat-apply-verification-and-marks-from-the-tele-serv.patch) | checkmarks, custom verification, scam, fake and support marks from the [tele server](server.md), shown exactly like telegram's own. custom verification icons animate, member lists update as soon as the data arrives, and refresh now fetches it right away | tele → server, on |
 | [10](../patches/tdesktop/0010-feat-make-the-title-bar-label-a-live-template.patch) | the title bar label is a template with live variables, see [title bar template](title-template.md) | tele → interface |
@@ -425,7 +432,7 @@ all 329 patches, newest release first.
 ### [tele 3](https://github.com/nitreojs/tele/releases/tag/v7.2.9-tele.3)
 
 | # | what it does | where to toggle |
-|---|---|---|
+| --- | --- | --- |
 | [1](../patches/tdesktop/0001-feat-show-the-tele-build-number-in-the-title-bar.patch) | the title bar shows which tele build you're on | always on, see 10 |
 | [2](../patches/tdesktop/0002-feat-add-a-tele-section-to-the-settings.patch) | the tele section in settings | always on |
 | [3](../patches/tdesktop/0003-feat-add-an-option-to-hide-stories-everywhere.patch) | hides stories everywhere: no stories bar, no rings around userpics, no stories in profiles | tele → privacy, off, needs a restart |

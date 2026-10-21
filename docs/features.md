@@ -15,13 +15,13 @@ more about some of them: [title bar template](title-template.md), [link cleaner]
 settings → tele → interface.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [10](../patches/tdesktop/0010-feat-make-the-title-bar-label-a-live-template.patch) | the title bar label is a template with live variables, see [title bar template](title-template.md) | tele → interface |
 | [22](../patches/tdesktop/0022-feat-lowercase-every-interface-text.patch) | lowercases the whole interface. messages and names stay as they are | tele → interface, off, needs a restart |
 | [30](../patches/tdesktop/0030-feat-hide-the-all-chats-folder.patch) | hides the all chats folder when you have other folders, the list opens on your first one | tele → interface, off |
 | [35](../patches/tdesktop/0035-feat-lowercase-tele-s-own-texts-too.patch) | lowercase covers tele's own texts and the crash window too | with 22 |
 | [38](../patches/tdesktop/0038-feat-turn-off-animated-userpics.patch) | animated userpics can stay still: separately in the chat list and in chats and profiles | tele → interface, off, in chats and profiles: tele → chats, off |
-| [41](../patches/tdesktop/0041-feat-customize-the-window-title-and-format-template-.patch) | the window title (taskbar, alt+tab, system window frame) can be a template too, or follow the title bar label. every [template](title-template.md) variable takes modifiers like `{weekday|short|lower}` or `{chat|max:20}` | tele → interface |
+| [41](../patches/tdesktop/0041-feat-customize-the-window-title-and-format-template-.patch) | the window title (taskbar, alt+tab, system window frame) can be a template too, or follow the title bar label. every [template](title-template.md) variable takes modifiers like `{weekday | short | lower}` or `{chat | max:20}` | tele → interface |
 | [82](../patches/tdesktop/0082-feat-move-chats-instantly-in-the-chat-list.patch) | chats move to their new place in the chat list right away, without the pause while the mouse moves over the list | tele → interface, off |
 | [84](../patches/tdesktop/0084-feat-set-your-own-app-and-tray-icons.patch) | your own app and tray icons from any image, and the tray icon can follow the app icon | tele → interface → app icon |
 | [97](../patches/tdesktop/0097-feat-redesign-the-title-template-editor.patch) | a new title template editor: variables as chips, a palette with modifiers and presets | with 10 |
@@ -54,7 +54,7 @@ settings → tele → interface.
 settings → tele → chats.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [8](../patches/tdesktop/0008-feat-send-quick-replies-in-groups-and-channels.patch) | business quick replies in groups and channels too. telegram only sends them in private chats, so tele posts the messages as ordinary ones (no bot keyboards, via-bot labels or effects) | tele → chats, off |
 | [21](../patches/tdesktop/0021-feat-hide-call-buttons.patch) | no call button in private chats and profiles | tele → chats |
 | [24](../patches/tdesktop/0024-feat-hide-sponsored-messages.patch) | no ads: no sponsored messages in channels and bots, no video ads, no sponsored search results | tele → chats, off |
@@ -94,7 +94,7 @@ settings → tele → chats.
 settings → tele → messages.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [17](../patches/tdesktop/0017-feat-show-seconds-in-message-times.patch) | message times show seconds, like 14:03:21. service messages like joins and pins show their time too, with seconds | tele → messages, off |
 | [18](../patches/tdesktop/0018-feat-keep-the-edit-history-of-messages.patch) | remembers what edited messages looked like while tele runs: right-click an edited message → edit history | tele → messages, off |
 | [19](../patches/tdesktop/0019-feat-keep-deleted-messages.patch) | messages deleted by others or from your other devices stay in the chat until tele restarts, service messages too, faded as a whole or with a trash icon by the time. each chat gets a page with its kept deleted messages and a clear all button: chat menu → deleted messages | tele → messages, off |
@@ -134,9 +134,9 @@ settings → tele → messages.
 settings → tele → sending.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [43](../patches/tdesktop/0043-feat-upload-media-in-several-chats-at-once.patch) | media uploads in several chats at once instead of waiting for each other. files in one chat still go one after another | tele → sending, off |
-| [45](../patches/tdesktop/0045-feat-compute-messages-starting-with-via-calcmula.patch) | messages and captions starting with `= ` are computed with [calcmula](https://calcmula.app) and sent as the quoted query with `= result` below it. if it fails, nothing is sent and the text goes back into the field | tele → sending, off |
+| [45](../patches/tdesktop/0045-feat-compute-messages-starting-with-via-calcmula.patch) | messages and captions starting with `=` are computed with [calcmula](https://calcmula.app) and sent as the quoted query with `= result` below it. if it fails, nothing is sent and the text goes back into the field | tele → sending, off |
 | [49](../patches/tdesktop/0049-feat-move-late-sent-messages-to-the-bottom.patch) | a message that took long to send moves to the bottom of the chat once it's sent, so it's clear when it went out | tele → sending, off |
 | [50](../patches/tdesktop/0050-feat-queue-messages-behind-an-uploading-media.patch) | messages sent while a media is uploading wait for it and go out after it, in order | tele → sending, off |
 | [67](../patches/tdesktop/0067-feat-skip-the-rich-message-prompt-on-paste.patch) | no rich message prompt when you paste formatted text | tele → sending, off |
@@ -173,7 +173,7 @@ settings → tele → sending.
 settings → tele → notifications.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [128](../patches/tdesktop/0128-feat-send-silently-by-default.patch) | send silently by default, everywhere or per chat from the chat menu. the send menu offers sending with sound instead | tele → notifications, off |
 | [133](../patches/tdesktop/0133-feat-hide-unread-counters.patch) | hide unread counters on folder tabs and the taskbar or tray, leave out the archive, and leave out accounts from their right-click menu | tele → notifications, off |
 | [155](../patches/tdesktop/0155-feat-notify-when-people-come-online.patch) | get a notification when chosen people come online, from their profile or chat menu | tele → notifications, off |
@@ -190,7 +190,7 @@ settings → tele → notifications.
 settings → tele → menus.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [29](../patches/tdesktop/0029-feat-show-the-message-id-in-the-message-menu.patch) | the message menu ends with the message id, click it to copy | tele → menus, off |
 | [31](../patches/tdesktop/0031-feat-jump-to-the-first-message-of-a-chat.patch) | jump to the first message, in the chat menu | tele → menus, off |
 | [33](../patches/tdesktop/0033-feat-view-messages-and-telegram-objects-as-tl.patch) | view as tl in the message menu, and for chats, profiles, members, topics, stickers and sets, custom emoji, gifts, stories and folders: fetches the object from the server and opens it on [schema.jppgr.am](https://schema.jppgr.am) | tele → menus, off |
@@ -215,7 +215,7 @@ settings → tele → menus.
 settings → tele → privacy.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [3](../patches/tdesktop/0003-feat-add-an-option-to-hide-stories-everywhere.patch) | hides stories everywhere: no stories bar, no rings around userpics, no stories in profiles | tele → privacy, off, needs a restart |
 | [4](../patches/tdesktop/0004-feat-add-an-option-to-watch-stories-invisibly.patch) | watch stories without showing up among the viewers. reactions and replies still reveal you | tele → privacy, off |
 | [16](../patches/tdesktop/0016-feat-ignore-users-by-hiding-or-fading-their-messages.patch) | ignore users from their userpic menu: their messages fade or disappear, the list lives in settings | tele → privacy |
@@ -239,7 +239,7 @@ settings → tele → privacy.
 settings → tele → profiles and ids.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [13](../patches/tdesktop/0013-feat-show-gift-ids.patch) | a copyable gift id at the top of the collectible gift card, which only says a gift is on the ton blockchain while it really is there | tele → profiles and ids, off |
 | [14](../patches/tdesktop/0014-feat-show-the-peer-id-as-its-own-profile-row.patch) | the peer id gets its own profile row instead of trailing the bio, optionally without spaces or in bot api style (-100… for channels) | tele → profiles and ids, off (see 46) |
 | [23](../patches/tdesktop/0023-feat-show-the-data-center-in-profiles.patch) | a dc row in profiles: the data center the account or chat lives in | tele → profiles and ids, off |
@@ -285,7 +285,7 @@ tgs files exported from the gift studio carry an invisible mark that says they w
 settings → tele → bots.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [5](../patches/tdesktop/0005-feat-show-bot-button-payloads-in-tooltips.patch) | hovering a bot button shows what it carries: callback data, links, inline queries, web apps and more | tele → bots, off |
 | [66](../patches/tdesktop/0066-feat-send-inline-results-without-via.patch) | inline bot results go out as your own messages, without via @bot | tele → bots, off |
 | [231](../patches/tdesktop/0231-feat-show-the-start-parameter-on-the-start-button.patch) | a bot opened by a link shows the start parameter on its start button | tele → bots, off |
@@ -298,7 +298,7 @@ settings → tele → bots.
 settings → tele → debug.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [88](../patches/tdesktop/0088-feat-debug-logs-and-an-mtproto-inspector.patch) | a debug page: debug logs on or off, open the logs or tele folder, clear logs, and an mtproto inspector for the logs that filters requests, expands objects, opens entries on [schema.jppgr.am](https://schema.jppgr.am) and opens things from message and chat menus | tele → debug |
 | [195](../patches/tdesktop/0195-feat-mtproto-console.patch) | an mtproto console: call any api method with your own session in text, json or json5, with autocomplete, schema hints, validation, a result tree and history. destructive methods ask first, star methods ask for the local password | tele → debug, ctrl+alt+m |
 | [218](../patches/tdesktop/0218-fix-confirm-more-irreversible-methods-in-the-mtproto.patch) | the mtproto console asks before more methods that can't be undone | with 195 |
@@ -322,7 +322,7 @@ settings → tele → debug.
 settings → tele → server.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [9](../patches/tdesktop/0009-feat-apply-verification-and-marks-from-the-tele-serv.patch) | checkmarks, custom verification, scam, fake and support marks from the [tele server](server.md), shown exactly like telegram's own. custom verification icons animate, member lists update as soon as the data arrives, and refresh now fetches it right away | tele → server, on |
 | [37](../patches/tdesktop/0037-feat-send-crash-reports-to-the-tele-server.patch) | when tele crashed, the next start offers to send the crash report to the tele server instead of telegram. nothing leaves without your click | tele → server, on with the server |
 | [81](../patches/tdesktop/0081-feat-clear-server-data-and-explain-custom-verificati.patch) | clear the tele server's saved data, badges included. click a custom verification icon to see what it means: its description, with the icon next to it | tele → server → clear cached data |
@@ -334,7 +334,7 @@ settings → tele → server.
 settings → tele → backup.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [106](../patches/tdesktop/0106-feat-export-and-import-tele-settings.patch) | export tele settings to a file or as text and import them on any account, system or tele version, with a preview first. people and device settings are optional | tele → backup |
 | [263](../patches/tdesktop/0263-feat-bigger-faster-chat-export.patch) | chat export puts 10000 messages in each html file instead of 1000 and downloads files in 1 MB parts instead of 128 KB | tele → backup, off |
 
@@ -343,7 +343,7 @@ settings → tele → backup.
 settings → tele → updates.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [6](../patches/tdesktop/0006-feat-update-from-the-tele-github-releases.patch) | self-updates from these releases on windows, linux and macos, signed with ed25519. a failed update is retried sooner and a broken download continues where it stopped | tele → updates, on |
 | [39](../patches/tdesktop/0039-feat-show-what-s-new-in-tele-after-an-update.patch) | after an update, you get a message with what's new in that tele version, visible only to you. fresh installs skip it | tele → updates, on |
 | [74](../patches/tdesktop/0074-feat-show-what-s-new-in-a-local-tele-chat.patch) | what's new comes from a local tele chat with its own profile, grouped by settings page, once per account the first time you open it after an update. a button opens the full changelog | with 39 |
@@ -354,7 +354,7 @@ settings → tele → updates.
 always on, or without a switch of their own.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [1](../patches/tdesktop/0001-feat-show-the-tele-build-number-in-the-title-bar.patch) | the title bar shows which tele build you're on | always on, see 10 |
 | [2](../patches/tdesktop/0002-feat-add-a-tele-section-to-the-settings.patch) | the tele section in settings | always on |
 | [7](../patches/tdesktop/0007-feat-rename-the-app-to-tele.patch) | the app is called tele: `tele.exe`, its own taskbar entry, links point here. linux and macos builds are their own app, so they don't clash with an installed telegram | always on |
@@ -446,6 +446,8 @@ always on, or without a switch of their own.
 | [322](../patches/tdesktop/0322-fix-gifts-in-money-look-like-gift-cards-instead-of-a.patch) | telegram gifts in money are drawn sharp at their real size, with the full backdrop pattern around the model. the model plays in the transaction and collectible windows | always on |
 | [323](../patches/tdesktop/0323-fix-passkey-prompts-no-longer-count-as-freezes.patch) | waiting in the windows passkey prompt, when logging in or adding a passkey, no longer produces a freeze report | with 203 |
 | [331](../patches/tdesktop/0331-fix-code-blocks-keep-the-indent-of-their-first-line.patch) | code blocks in rich messages and the markdown viewer keep the indent of their first line, and copying part of such a block copies exactly what you selected | always on |
+| [333](../patches/tdesktop/0333-feat-russian-interface-for-tele.patch) | the tele settings, menus, options and dialogs are in russian when telegram's language is russian, and in english otherwise | always on |
+| [334](../patches/tdesktop/0334-feat-point-updates-and-links-at-this-fork.patch) | updates, the changelog and the links in the app point at this fork's releases, and the tele server starts empty so nothing is sent anywhere by default | always on |
 | [1001](../patches/Telegram/lib_ui/0001-fix-fullscreen-mini-apps-cover-the-screen-with-their.patch) | a mini app that opens in fullscreen covers the screen from its corner, with its ⋮ and ✕ buttons, instead of hanging off the screen (windows) | always on |
 | [1002](../patches/Telegram/lib_ui/0002-fix-unbreakable-characters-no-longer-scroll-text-fie.patch) | a text field with a long run of characters that can't wrap no longer scrolls sideways and hides everything else | always on |
 | [1006](../patches/Telegram/lib_ui/0006-fix-the-maximize-button-follows-the-real-window-stat.patch) | the maximize button of a window shows and does the right thing after resizing or moving the window drops its maximized or full screen state | always on |
@@ -455,7 +457,7 @@ always on, or without a switch of their own.
 everything else.
 
 | # | what it does | toggle |
-|---|---|---|
+| --- | --- | --- |
 | [302](../patches/tdesktop/0302-feat-scripting-prototype.patch) | tele runs scripts: typescript or javascript files in a scripts folder that can call any telegram method, watch every update and change requests on their way. each script is off until you turn it on, and tele asks you, in plain words, before it gets any grant. everything a script can do is in the [scripting reference](scripting.md). tele writes typings for every telegram method and type next to your scripts, so editors complete and check them, and a script only gets the grants it declares. scripts can keep their own data on this device and look up the chats and users tele already knows. the mtproto console gets a scripts tab with your scripts and their logs, and an editor that runs code against your account right away. results in the console's script editor unfold like in a browser's devtools, and the editor and its output sit side by side. scripts declare grants like inugram plugins and can hold a request or an update while they decide what to do with it. no script can log in or out, touch your sessions or password, or read login codes. scripts get simple ways to read chats and history, send, edit, delete, forward and react to messages, and to hear about new, edited and deleted ones. scripts can download and upload files, check or rewrite your messages before they go out, and ask you things in tele's own boxes. scripts can add items to the message, chat and profile menus and get a settings page of their own. scripts can add /commands, which show up among the suggestions when you type a slash. scripts can show messages that exist only on this device and never reach telegram. scripts can change how users and chats look on this device: name, color, emoji status, premium star and verification marks. scripts have no limit on menu items, commands, boxes and toasts, and can watch every request with one grant. scripts can put badges and highlights on messages, read messages tele has already loaded, and see the messages you send yourself. scripts can open chats and profiles, read and change the text you're typing, add keyboard shortcuts, and check links and notifications before tele opens or shows them. scripts can add buttons to the chat header and next to the message field, rows to profiles, text fields to their settings pages and buttons to their toasts, and open or save files when you pick them. scripts can post to the notification centre, which gets a scripts tab and a switch for them in its settings. scripts can put badges next to names, add a line under messages, and change a chat's label, preview and badge in the chat list or hide it there. tele → scripts β opens a scripts manager: search, filters, and a page per script with its switch, settings, grants, storage and log. scripts can also read tele's local data and settings, talk to each other, react to the connection and to sleep, and send big files. scripts can recolor the theme, set the window title and badge, control the music player and calls, switch accounts, add items to the main and tray menus, settings sections and quick buttons next to messages, and, if you allow it, run programs. scripts can read and change anything in tele's windows, like adding rows to the gift box, and check inline bot results before they're sent. scripts need a display grant, which tele asks you about, before they change how messages, people and chats look or show messages that were never sent, so a script can't quietly make a message say something it doesn't. scripts get the web platform (urls, abort signals, structured clone, intl, websockets, workers, full webcrypto, compression and images), a file area of their own, sounds, webview panels, npm packages, stories, gifts and stars, tele's own data, video chats, the media viewer, banners, selection, compose state, search providers, sticker and gif panels, mini apps, inline answers and buttons under messages. scripts installed from a link check for updates, gettele.app has a catalog of scripts, and new scripts show up in the scripts manager without a restart | tele → scripts β, off |
 | [320](../patches/tdesktop/0320-fix-listing-accounts-from-a-script-no-longer-crashes.patch) | tele no longer crashes at startup with two or more accounts when a script lists your accounts as soon as it starts | with 302 |
 | [329](../patches/tdesktop/0329-feat-let-scripts-give-their-menu-items-icons.patch) | scripts can give their menu items, drawer items and settings entries an icon: one of tele's own, an emoji, a custom emoji, an svg or an image, see [scripting](scripting.md) | with 302 |
