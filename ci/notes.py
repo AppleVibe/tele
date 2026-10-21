@@ -177,6 +177,7 @@ def notes(args):
         f'| [{number}]({args.url}/blob/{rev}/{path}) | {absolute(what, args.url, rev)} | {where} |'
         for path, (number, what, where) in sorted(rows.items(), key=lambda item: item[1][0])
     ]
+    summary = '\n'.join(lines) + '\n'
     if table:
         lines += [
             '',
@@ -189,7 +190,10 @@ def notes(args):
             '',
             '</details>',
         ]
-    return '\n'.join(lines) + '\n'
+    result = '\n'.join(lines) + '\n'
+    if len(result) > 120000:
+        return summary + f'\n[All {len(now)} patches]({args.url}/blob/{rev}/docs/releases.md)\n'
+    return result
 
 
 def main():
