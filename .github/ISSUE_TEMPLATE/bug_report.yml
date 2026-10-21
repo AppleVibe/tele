@@ -1,0 +1,38 @@
+name: Ошибка или неточный перевод
+description: Сообщить об ошибке tele или русского перевода.
+title: "[Ошибка]: "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Версия tele
+      description: Номер сборки из окна «О программе» или имя скачанного архива.
+      placeholder: "tele build 4, Telegram Desktop 7.3.1"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: ОС и архитектура
+      placeholder: "Windows 11 x64 / Ubuntu 24.04 x64 / macOS 15 arm64"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Ошибка
+      description: Что произошло и какой результат вы ожидали. Для перевода укажите текст и раздел меню.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как повторить
+      placeholder: "1. Открыть настройки\n2. Выбрать раздел\n3. Нажать кнопку"
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Скриншот или лог
+      description: Прикрепите файл, если он помогает показать ошибку. Скройте номера телефонов, переписку, ключи и другие личные данные.
