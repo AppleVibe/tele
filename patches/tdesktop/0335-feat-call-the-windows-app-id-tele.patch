@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Flare Dev <flare-vpn@dev.local>
+Date: Wed, 21 Oct 2026 03:31:52 +0300
+Subject: [PATCH] feat: call the windows app id tele
+
+---
+ Telegram/SourceFiles/platform/win/windows_app_user_model_id.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Telegram/SourceFiles/platform/win/windows_app_user_model_id.cpp b/Telegram/SourceFiles/platform/win/windows_app_user_model_id.cpp
+index 086b2e6c5a8b447c622d06b71eaedcdf73ccf13f..a32295e07c6f6c67bca30792240079a6a92b7dcd 100644
+--- a/Telegram/SourceFiles/platform/win/windows_app_user_model_id.cpp
++++ b/Telegram/SourceFiles/platform/win/windows_app_user_model_id.cpp
+@@ -29,7 +29,7 @@ const PROPERTYKEY pkey_AppUserModel_ToastActivator = { { 0x9F4C2855, 0x9F79, 0x4
+ #ifdef OS_WIN_STORE
+ const WCHAR AppUserModelIdBase[] = L"Telegram.TelegramDesktop.Store";
+ #else // OS_WIN_STORE
+-const WCHAR AppUserModelIdBase[] = L"nitreojs.tele";
++const WCHAR AppUserModelIdBase[] = L"tele";
+ #endif // OS_WIN_STORE
+ 
+ [[nodiscard]] QString PinnedIconsPath() {
