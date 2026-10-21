@@ -105,8 +105,14 @@ ci/                           сборка, релизы, подписи, зам
 
 - [telegramdesktop/tdesktop](https://github.com/telegramdesktop/tdesktop) — основа, из которой собирается каждая сборка.
 - [nitreojs/tele](https://github.com/nitreojs/tele) — форк, взятый за основу. Вся функциональность tele — его работа; здесь добавлен русский интерфейс и переключены ссылки обновлений.
+- **Перевод на русский язык** — [@acaff](https://t.me/acaff): меню и подменю tele, названия и описания всех настроек.
 - [materialgram](https://github.com/kukuruzka165/materialgram), [freshGram](https://github.com/Snowy-Fluffy/freshGram) — идеи, которые tele вобрал в себя.
 
 ## Лицензия
 
 Как и у tdesktop и tele — GPL-3.0 с дополнительными исключениями. См. `LEGAL` в исходниках tdesktop.
+
+---
+
+Русская сборка и перевод: [@acaff](https://t.me/acaff) · [AppleVibe](https://github.com/AppleVibe).
+Если строка осталась английской или переведена криво — пишите в [issues](../../issues) или в телеграм.
